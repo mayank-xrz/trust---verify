@@ -39,7 +39,10 @@ def unb64(value, size=None):
 
 
 def kem_keypair():
-    return ml_kem_768.generate_keypair()
+    try:
+        return ml_kem_768.generate_keypair()
+    except Exception as exc:
+        raise CryptoError("ML-KEM key generation failed") from exc
 
 
 def encapsulate(public_key):
@@ -47,7 +50,7 @@ def encapsulate(public_key):
         raise CryptoError("invalid ML-KEM public key length")
     try:
         return ml_kem_768.encrypt(public_key)
-    except (ValueError, TypeError) as exc:
+    except Exception as exc:
         raise CryptoError("ML-KEM encapsulation failed") from exc
 
 
@@ -58,12 +61,15 @@ def decapsulate(secret_key, ciphertext):
         raise CryptoError("invalid ML-KEM ciphertext length")
     try:
         return ml_kem_768.decrypt(secret_key, ciphertext)
-    except (ValueError, TypeError) as exc:
+    except Exception as exc:
         raise CryptoError("ML-KEM decapsulation failed") from exc
 
 
 def signing_keypair():
-    return ml_dsa_65.generate_keypair()
+    try:
+        return ml_dsa_65.generate_keypair()
+    except Exception as exc:
+        raise CryptoError("ML-DSA key generation failed") from exc
 
 
 def sign(secret_key, domain, transcript):
@@ -71,7 +77,10 @@ def sign(secret_key, domain, transcript):
         raise CryptoError("invalid ML-DSA secret key length")
     if not isinstance(domain, str) or not domain.startswith("track4/v1/"):
         raise CryptoError("invalid signature domain")
-    return ml_dsa_65.sign(secret_key, domain.encode("ascii") + b"\x00" + canonical(transcript))
+    try:
+        return ml_dsa_65.sign(secret_key, domain.encode("ascii") + b"\x00" + canonical(transcript))
+    except Exception as exc:
+        raise CryptoError("ML-DSA signing failed") from exc
 
 
 def verify(public_key, domain, transcript, signature):
@@ -83,7 +92,7 @@ def verify(public_key, domain, transcript, signature):
         raise CryptoError("invalid signature domain")
     try:
         valid = ml_dsa_65.verify(public_key, domain.encode("ascii") + b"\x00" + canonical(transcript), signature)
-    except (ValueError, TypeError) as exc:
+    except Exception as exc:
         raise CryptoError("signature verification failed") from exc
     if not valid:
         raise CryptoError("signature verification failed")

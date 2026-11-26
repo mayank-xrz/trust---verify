@@ -238,6 +238,9 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError):
             finish(bad_ack, initiation, self.registry, alice)
         self.assertFalse(alice.ready)
+        alice.root = b"\x00" * 32
+        with self.assertRaisesRegex(CryptoError, "key confirmation"):
+            finish(ack, initiation, self.registry, alice)
 
     def test_session_persistence_restart_and_refuse_unwritable(self):
         alice_state = Path(self.temp.name) / "alice_session.json"
@@ -274,14 +277,27 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(oct(reg_path.stat().st_mode & 0o777), "0o600")
 
         pks1 = PrekeyStore(pk_path)
-        expired_offer = pks1.offer("bob", "laptop", self.bob_sk, lifetime=-10)
+        expired_offer = pks1.offer("bob", "laptop", self.bob_sk, lifetime=1)
+        pks1._private[expired_offer["prekey_id"]]["expires_at"] = 0
+        pks1._save()
         valid_offer = pks1.offer("bob", "laptop", self.bob_sk, lifetime=300)
 
         pks2 = PrekeyStore(pk_path)
         with self.assertRaises(CryptoError):
             pks2.take(expired_offer["prekey_id"])
+        self.assertNotIn(expired_offer["prekey_id"], pks2._private)
+        pks2.revoke(valid_offer["prekey_id"])
+        with self.assertRaises(CryptoError):
+            PrekeyStore(pk_path).take(valid_offer["prekey_id"])
+        with self.assertRaises(CryptoError):
+            PrekeyStore(pk_path).bundle(valid_offer["prekey_id"])
 
         reg2 = TrustRegistry(reg_path)
+        linked = PrekeyStore(pk_path, registry=reg2)
+        another_offer = linked.offer("bob", "laptop", self.bob_sk)
+        reg2.revoke("bob", "laptop")
+        with self.assertRaises(CryptoError):
+            PrekeyStore(pk_path, registry=TrustRegistry(reg_path)).bundle(another_offer["prekey_id"])
         reg2.revoke("alice", "phone")
         reg3 = TrustRegistry(reg_path)
         with self.assertRaises(CryptoError):
@@ -326,13 +342,15 @@ class CryptoTests(unittest.TestCase):
             aead.decrypt(key, nonce, b"aad", ct, bad_tag)
         self.assertIn("AEAD authentication failed", str(ctx_auth.exception))
 
-        with patch("src.crypto.node_bridge.subprocess.run", side_effect=sp.TimeoutExpired("node", 10)):
+        node_bridge._stop_worker()
+        with patch("src.crypto.node_bridge.select.select", return_value=([], [], [])):
             with self.assertRaises(CryptoError) as ctx_to:
-                aead.decrypt(key, nonce, b"aad", ct, tag)
+                node_bridge.call_node({"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}, CryptoError, timeout=0.01)
             self.assertIn("timed out", str(ctx_to.exception))
 
         orig_bin = node_bridge._NODE_BIN
         try:
+            node_bridge._stop_worker()
             node_bridge._NODE_BIN = None
             with patch("src.crypto.node_bridge.shutil.which", return_value=None):
                 with self.assertRaises(CryptoError) as ctx_missing:
@@ -362,6 +380,58 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(bob.decrypt(p1, session_ledger), b"m1")
         self.assertEqual(bob.decrypt(p2, session_ledger), b"m2")
         self.assertEqual(bob.epoch, 1)
+
+    def test_concurrent_session_loads_reserve_distinct_counters(self):
+        state = Path(self.temp.name) / "session.json"
+        alice, bob, _, _, _ = self.sessions()
+        alice.state_path = state
+        alice._persist()
+        first = Session.load(state)
+        second = Session.load(state)
+        p0 = first.encrypt(b"first")
+        p1 = second.encrypt(b"second")
+        self.assertEqual((p0["header"]["counter"], p1["header"]["counter"]), (0, 1))
+        ledger = ReplayLedger(Path(self.temp.name) / "concurrent.db")
+        self.assertEqual(bob.decrypt(p0, ledger), b"first")
+        self.assertEqual(bob.decrypt(p1, ledger), b"second")
+
+    def test_session_counter_rollback_rejected_on_load(self):
+        state = Path(self.temp.name) / "rollback.json"
+        alice, _, _, _, _ = self.sessions()
+        alice.state_path = state
+        alice._persist()
+        old_state = state.read_bytes()
+        alice.encrypt(b"advance")
+        state.write_bytes(old_state)
+        with self.assertRaisesRegex(CryptoError, "rollback"):
+            Session.load(state)
+
+    def test_counter_cap_rekeys_persistently(self):
+        state = Path(self.temp.name) / "capped.json"
+        alice, bob, _, _, _ = self.sessions()
+        alice.max_messages_per_epoch = 2
+        alice.auto_rekey_at = 2
+        alice.state_path = state
+        alice._persist()
+        p0 = alice.encrypt(b"zero")
+        p1 = alice.encrypt(b"one")
+        p2 = Session.load(state).encrypt(b"two")
+        self.assertEqual((p0["header"]["epoch"], p0["header"]["counter"]), (0, 0))
+        self.assertEqual((p2["header"]["epoch"], p2["header"]["counter"]), (1, 0))
+        ledger = ReplayLedger(Path(self.temp.name) / "cap.db")
+        for packet, plain in ((p0, b"zero"), (p1, b"one"), (p2, b"two")):
+            self.assertEqual(bob.decrypt(packet, ledger), plain)
+        with self.assertRaises(CryptoError):
+            bob.decrypt(p0, ledger)
+
+    def test_worker_reused_for_multiple_calls(self):
+        from src.crypto import node_bridge
+        from src.crypto.primitives import hkdf
+        node_bridge._stop_worker()
+        hkdf(b"secret", b"salt", b"one")
+        pid = node_bridge._worker.pid
+        hkdf(b"secret", b"salt", b"two")
+        self.assertEqual(node_bridge._worker.pid, pid)
 
     def test_adapter_at_rest_encryption_audit_chain_and_challenge_bounds(self):
         import track4_service
@@ -406,16 +476,19 @@ class CryptoTests(unittest.TestCase):
         # Challenge validation & reuse rejection
         public, _ = kem_keypair()
         pk_b64 = b64(public)
-        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "", "public_key": pk_b64}, expect_ok=False)
-        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "x" * 513, "public_key": pk_b64}, expect_ok=False)
+        self.assertEqual(call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "", "public_key": pk_b64}), {"decision": "deny"})
+        self.assertEqual(call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "x" * 513, "public_key": pk_b64}), {"decision": "deny"})
         call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "once", "public_key": pk_b64}, expect_ok=True)
-        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "once", "public_key": pk_b64}, expect_ok=False)
+        self.assertEqual(call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "once", "public_key": pk_b64}), {"decision": "deny"})
 
         # Audit hash chain verification & 1-byte tamper detection
         state_obj = json.loads((state_root / "track4-local" / "state.json").read_text(encoding="utf-8"))
         audit_log = state_obj["audit_log"]
         self.assertGreaterEqual(len(audit_log), 3)
         self.assertTrue(track4_service.verify_chain(audit_log))
+        protected = [entry for entry in audit_log if entry["op"] == "protected_read"]
+        self.assertTrue(any(entry["decision"] == "allow" for entry in protected))
+        self.assertTrue(any(entry["decision"] == "deny" for entry in protected))
         tampered_log = copy.deepcopy(audit_log)
         tampered_log[0]["decision"] = "deny"
         self.assertFalse(track4_service.verify_chain(tampered_log))
