@@ -1,10 +1,12 @@
-"""Demo PQC Crypto Facade backed by pqcrypto (ML-KEM-768, ML-DSA-65) with demo fallback.
+"""Demo PQC crypto facade backed by pqcrypto (ML-KEM-768, ML-DSA-65).
 
-Uses real NIST-standardized pqcrypto algorithms whenever pqcrypto==0.4.0 is installed,
-and keeps pure-Python demo fallback isolated inside demo/node/ so src/crypto/ remains pure.
+Uses the real NIST-standardized pqcrypto algorithms and fails closed when
+pqcrypto is unavailable; classical fallbacks are deliberately disabled so
+``src/crypto/`` remains the single canonical crypto stack.
 """
 
 from __future__ import annotations
+
 import base64
 import collections
 import hashlib
@@ -18,6 +20,7 @@ from typing import Any, Dict, Optional, Set, Tuple
 try:
     from pqcrypto.kem import ml_kem_768
     from pqcrypto.sign import ml_dsa_65
+
     from src.crypto._pqcrypto_compat import (
         kem_decaps,
         kem_encaps,

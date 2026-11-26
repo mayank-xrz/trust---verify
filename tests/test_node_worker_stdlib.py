@@ -1,6 +1,7 @@
 """Worker protocol tests runnable without the optional crypto package on the host."""
 import unittest
 from unittest.mock import patch
+
 from src.crypto import node_bridge
 
 

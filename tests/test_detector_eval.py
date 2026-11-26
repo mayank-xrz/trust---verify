@@ -8,10 +8,11 @@
 
 import time
 import unittest
+
 from src.detector.clock_sync import ClockSyncBuffer, SkewStatus
-from src.detector.rules import ContextRuleEngine
 from src.detector.graph_lateral import LateralMovementGraph
 from src.detector.metrics import compute_f1_mtta
+from src.detector.rules import ContextRuleEngine
 
 
 class TestDetectorEval(unittest.TestCase):
@@ -78,7 +79,7 @@ class TestDetectorEval(unittest.TestCase):
         # Event 1: Normal timing
         e1 = buffer.ingest({"event_id": "e1", "timestamp_ns": now_ns + 10_000_000})
         # Event 2: Older event arriving later (out of order)
-        e2 = buffer.ingest({"event_id": "e2", "timestamp_ns": now_ns - 50_000_000})
+        _e2 = buffer.ingest({"event_id": "e2", "timestamp_ns": now_ns - 50_000_000})
         # Event 3: Skewed event (+1500 ms)
         e3 = buffer.ingest({"event_id": "e3", "timestamp_ns": now_ns + 1_500_000_000})
 

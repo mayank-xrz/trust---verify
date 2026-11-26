@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import unittest
+
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier
 
@@ -40,7 +41,7 @@ class TestLogInjection(unittest.TestCase):
 
             # Check raw file: should contain exactly 1 header line + 1 json line
             with open(log_path, "r", encoding="utf-8") as f:
-                lines = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
             self.assertEqual(len(lines), 1)
             record = json.loads(lines[0])
             self.assertNotIn("\n", record["subject"])

@@ -1,11 +1,12 @@
 """Out-of-Order Buffering, Clock Skew Tolerance & Uncertainty Flags."""
 
 from __future__ import annotations
+
 import dataclasses
 import enum
 import heapq
 import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List
 
 
 class SkewStatus(str, enum.Enum):

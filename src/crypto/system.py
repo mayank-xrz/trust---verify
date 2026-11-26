@@ -12,7 +12,7 @@ Merges the full Track 4 crypto lifecycle into one cohesive endpoint interface:
 """
 
 from __future__ import annotations
-import hashlib
+
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -23,15 +23,16 @@ from pqcrypto.sign import ml_dsa_65
 
 from src.audit.authority_monitor import AuthorityMonitor
 from src.audit.logger import AuditLogger
+
 from ._pqcrypto_compat import sig_keygen
-from .delivery import ChunkReceiver, DEFAULT_DELIVERY_TIMEOUT_SECONDS, chunk_and_seal
+from .delivery import DEFAULT_DELIVERY_TIMEOUT_SECONDS, ChunkReceiver, chunk_and_seal
 from .envelope import EnvelopeError, open_envelope, seal_envelope
 from .events import emit_crypto_event
 from .handshake import EphemeralHandshakeSession, SessionKeys
 from .policy import (
+    MAX_FILE_SIZE_BYTES,
     DevicePolicyError,
     FilePolicyError,
-    MAX_FILE_SIZE_BYTES,
     SingleDeviceRegistry,
     TimezoneMismatchError,
     validate_shared_file,

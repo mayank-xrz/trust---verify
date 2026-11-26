@@ -10,4 +10,4 @@
 - **Sandbox-only crash endpoints:** `POST /internal/test/arm-crash` fails closed unless `SANDBOX_MODE=1`.
 
 ## 2. Dependency Pinning
-- All dependencies are pinned in `requirements.txt` (including `pqcrypto==0.4.0`, `cryptography==42.0.8`, `sqlalchemy==2.0.58`, `alembic==1.14.0`, `fastapi==0.111.0`).
+- All dependencies are pinned in `requirements.txt` (including `pqcrypto==1.0.0`, `cryptography==42.0.8`, `sqlalchemy==2.0.58`, `alembic==1.14.0`, `fastapi==0.111.0`).

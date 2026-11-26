@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 

@@ -1,18 +1,18 @@
 """Track 4 cryptographic building blocks. Protocol version 1 & v2-paranoid agility."""
 from .agility import (
-    DualIdentityKeypair,
-    ParanoidHandshakeSession,
     SUITE_V1,
     SUITE_V2_PARANOID,
+    DualIdentityKeypair,
+    ParanoidHandshakeSession,
 )
 from .policy import (
     DEFAULT_MEDIA_FORMATS,
+    MAX_DEVICES_PER_USER,
+    MAX_FILE_SIZE_BYTES,
     DeviceLimitExceededError,
     DevicePolicyError,
     FilePolicyError,
     FileSizeLimitError,
-    MAX_DEVICES_PER_USER,
-    MAX_FILE_SIZE_BYTES,
     MediaFormatError,
     SingleDeviceRegistry,
     TimezoneMismatchError,

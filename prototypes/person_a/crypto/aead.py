@@ -1,7 +1,7 @@
 """AES-256-GCM through the guaranteed Node.js runtime; no custom cipher code."""
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from .primitives import CryptoError, b64, unb64
 

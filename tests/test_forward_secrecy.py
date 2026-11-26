@@ -1,6 +1,7 @@
 """Acceptance tests for Objective 2: Forward Secrecy."""
 
 from __future__ import annotations
+
 import pytest
 
 from src.crypto.envelope import AEADFailedError, open_envelope, seal_envelope

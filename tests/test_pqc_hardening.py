@@ -1,6 +1,7 @@
 """Acceptance & adversarial tests for Track 4 vulnerability fixes & Phase 2 defense-in-depth."""
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -16,17 +17,15 @@ from pqcrypto.kem import ml_kem_768
 import track4_service
 from demo.node.crypto_provider import MLDSASignature, MLKEMKeyExchange
 from src.crypto import (
+    SUITE_V2_PARANOID,
     DualIdentityKeypair,
     ParanoidHandshakeSession,
-    SUITE_V2_PARANOID,
     SecureCryptoSystem,
 )
-from src.crypto import aead, classical
 from src.crypto._pqcrypto_compat import kem_decaps, kem_keygen
 from src.crypto.delivery import ChunkReceiver, chunk_and_seal
 from src.crypto.envelope import AEADFailedError, EnvelopeError, open_envelope, seal_envelope
 from src.crypto.handshake import HandshakeError
-from src.crypto.primitives import hkdf
 from tests.conftest import read_audit_events
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -1,12 +1,12 @@
 """Cross-Node Revocation Broadcast & Propagation Latency Tracker."""
 
 from __future__ import annotations
+
 import collections
 import dataclasses
-import json
 import secrets
 import time
-from typing import Dict, Any, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 
 @dataclasses.dataclass
@@ -105,7 +105,6 @@ class RevocationCoordinator:
             if nid != event.revoked_by
         ]
 
-        total_peers = len(self.cluster_nodes - {event.revoked_by}) if self.cluster_nodes else len(acks)
         ack_count = len(acks)
 
         return {

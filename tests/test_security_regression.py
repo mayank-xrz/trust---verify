@@ -6,26 +6,24 @@
 - Static secret and ground-rule audit: zero private keys and zero banned AI/ML packages
 """
 
-import base64
-import json
 import os
 import re
 import shutil
 import tempfile
 import unittest
+
 from starlette.testclient import TestClient
 
-from demo.node.server import create_app
 from demo.node.crypto_provider import (
-    MLKEMKeyExchange,
+    MessageTamperedError,
     MLDSASignature,
-    SecureMessaging,
     RecipientMismatchError,
     ReplayAttackError,
-    MessageTamperedError,
-    SessionManager,
     ResumptionHijackError,
+    SecureMessaging,
+    SessionManager,
 )
+from demo.node.server import create_app
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier
 
@@ -154,7 +152,7 @@ class TestSecurityRegression(unittest.TestCase):
             self.assertEqual(result.total_records, 1)
 
             with open(log_path, "r", encoding="utf-8") as f:
-                lines = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
             self.assertEqual(len(lines), 1)
 
             # 2. Tamper detection via /logs/verify endpoint

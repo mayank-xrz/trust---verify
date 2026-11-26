@@ -11,27 +11,26 @@ Forward-secrecy scope:
   a fresh asymmetric handshake (`initiate`/`accept`/`finish`).
 """
 
+import fcntl
 import hashlib
 import hmac
-import fcntl
 import json
 import os
-from pathlib import Path
 import secrets
 import tempfile
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
-from . import aead
-from . import classical
+from . import aead, classical
 from .node_bridge import call_node
 from .primitives import (
-    CryptoError,
     SUITE,
+    CryptoError,
     b64,
     canonical,
     decapsulate,

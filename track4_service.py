@@ -4,11 +4,11 @@ import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import secrets
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -16,9 +16,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from src.crypto.policy import TimezoneMismatchError, normalize_timezone
 from src.crypto.primitives import CryptoError, b64, canonical, unb64
-from src.crypto.protected_read import protected_read
-from src.crypto.session import TrustRegistry, PrekeyStore
-from src.crypto.protected_read import MAX_CHALLENGE_LENGTH
+from src.crypto.protected_read import MAX_CHALLENGE_LENGTH, protected_read
+from src.crypto.session import PrekeyStore, TrustRegistry
 
 GENESIS_HASH = "0" * 64
 

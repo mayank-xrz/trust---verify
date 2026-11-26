@@ -1,9 +1,9 @@
 """Detection Engine Evaluation Metrics: F1, MTTA, and False Positives per 1k Events."""
 
 from __future__ import annotations
+
 import dataclasses
-import time
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 
 @dataclasses.dataclass

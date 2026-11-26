@@ -12,10 +12,10 @@ import time
 from pathlib import Path
 from typing import Any
 
+from alembic.config import Config
 from fastapi.testclient import TestClient
 
 from alembic import command
-from alembic.config import Config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:

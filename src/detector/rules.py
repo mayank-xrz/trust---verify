@@ -4,10 +4,11 @@
 """
 
 from __future__ import annotations
+
 import collections
 import dataclasses
 import time
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclasses.dataclass

@@ -1,5 +1,4 @@
 """Authenticated bounded transfer framing and reassembly."""
-import base64
 import hashlib
 import json
 import math

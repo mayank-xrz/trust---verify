@@ -10,16 +10,16 @@ adapters with ephemeral runtime keys (zero hard-coded secrets) are used automati
 """
 
 from __future__ import annotations
+
 import base64
 import collections
-import dataclasses
 import hashlib
 import json
 import os
 import secrets
 import time
 import uuid
-from typing import Dict, Any, List, Optional, Tuple, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
 
 # ==============================================================================
 # 1. PERSON A: CRYPTO ADAPTER INTERFACES & IMPLEMENTATION
@@ -45,12 +45,12 @@ class PersonACryptoAdapter:
     def _init_crypto(self):
         try:
             from demo.node.crypto_provider import (
-                MLKEMKeyExchange,
+                MessageTamperedError,
                 MLDSASignature,
-                SecureMessaging,
+                MLKEMKeyExchange,
                 RecipientMismatchError,
                 ReplayAttackError,
-                MessageTamperedError,
+                SecureMessaging,
             )
             self.kem = MLKEMKeyExchange()
             self.sig = MLDSASignature()
@@ -179,8 +179,8 @@ class PersonBIdentityAdapter:
     def _init_identity(self):
         try:
             from src.identity.key_manager import KeyManager, KeyStateEnum
-            from src.identity.revocation import RevocationCoordinator
             from src.identity.recovery import WALManager
+            from src.identity.revocation import RevocationCoordinator
             wal_path = os.path.join(self.data_dir, f"{self.node_id}_wal.log")
             self.wal = WALManager(wal_path)
             self.key_manager = KeyManager(
@@ -351,8 +351,8 @@ class PersonCAuditDetectorAdapter:
         try:
             from src.audit.logger import AuditLogger
             from src.audit.verifier import AuditLogVerifier
-            from src.detector.rules import ContextRuleEngine
             from src.detector.graph_lateral import LateralMovementGraph
+            from src.detector.rules import ContextRuleEngine
             log_path = os.path.join(self.data_dir, f"{self.node_id}_audit.log")
             self.logger = AuditLogger(node_id=self.node_id, log_file_path=log_path, signer=self.signer)
             self.verifier = AuditLogVerifier()
@@ -412,10 +412,25 @@ class _InMemoryAuditVerifierStub:
             return type("VerifRes", (), {"is_valid": True, "total_records": 0, "first_error": None, "tampered_index": None, "to_dict": lambda: {"is_valid": True, "total_records": 0}})()
         try:
             with open(path, "r", encoding="utf-8") as f:
-                lines = [l.strip() for l in f if l.strip()]
+                lines = [line.strip() for line in f if line.strip()]
             return type("VerifRes", (), {"is_valid": True, "total_records": len(lines), "first_error": None, "tampered_index": None, "to_dict": lambda: {"is_valid": True, "total_records": len(lines)}})()
-        except Exception as e:
-            return type("VerifRes", (), {"is_valid": False, "total_records": 0, "first_error": str(e), "tampered_index": 0, "to_dict": lambda: {"is_valid": False, "total_records": 0, "first_error": str(e)}})()
+        except Exception as exc:
+            message = str(exc)
+            return type(
+                "VerifRes",
+                (),
+                {
+                    "is_valid": False,
+                    "total_records": 0,
+                    "first_error": message,
+                    "tampered_index": 0,
+                    "to_dict": lambda: {
+                        "is_valid": False,
+                        "total_records": 0,
+                        "first_error": message,
+                    },
+                },
+            )()
 
 
 class _InMemoryRuleEngineStub:

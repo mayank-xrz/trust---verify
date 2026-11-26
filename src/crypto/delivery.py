@@ -11,6 +11,7 @@ Design choices:
 """
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import math
@@ -22,11 +23,11 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from src.audit.logger import AuditLogger
-from .envelope import AEADFailedError, EnvelopeError, open_envelope, seal_envelope
+
+from .envelope import EnvelopeError, open_envelope, seal_envelope
 from .events import emit_crypto_event
 from .policy import MAX_FILE_SIZE_BYTES
 from .replay_cache import PersistentReplayCache
-
 
 DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_ACTIVE_MESSAGES = 64

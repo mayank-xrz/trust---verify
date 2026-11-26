@@ -11,12 +11,12 @@ Commands:
 """
 
 from __future__ import annotations
+
 import argparse
 import json
-import sys
-import urllib.request
 import urllib.error
-from typing import Dict, Any, List, Optional, Tuple
+import urllib.request
+from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_NODES = {
     "node-a": "http://localhost:8001",
@@ -72,7 +72,7 @@ class OperatorCLI:
         return results
 
     def rotate(self, identity: str = "node-a", role: str = "admin") -> Dict[str, Any]:
-        base_url = self.nodes.get(identity, f"http://localhost:8001")
+        base_url = self.nodes.get(identity, "http://localhost:8001")
         print(f"🔄 Triggering atomic key rotation on '{identity}' ({base_url})...")
 
         code, data = http_request(
@@ -84,7 +84,7 @@ class OperatorCLI:
         if code == 200:
             active = data.get("active_key", {})
             grace = data.get("grace_key", {})
-            print(f"✅ Key Rotated Successfully!")
+            print("✅ Key Rotated Successfully!")
             print(f"   Active Key ID: {active.get('key_id')} (v{active.get('version', 'N/A')})")
             if grace:
                 print(f"   Grace Key ID:  {grace.get('key_id')} | Cutoff: {grace.get('grace_cutoff', 'N/A')}")

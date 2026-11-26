@@ -2,9 +2,9 @@
 import fcntl
 import json
 import os
-from pathlib import Path
 import sys
 import tempfile
+from pathlib import Path
 
 from crypto.protected_read import protected_read
 

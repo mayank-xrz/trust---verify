@@ -13,9 +13,9 @@ import tempfile
 import time
 import unittest
 
+from src.identity.backup import BackupIntegrityError, BackupManager
 from src.identity.key_manager import KeyManager, KeyRecord, KeyStateEnum
 from src.identity.recovery import WALManager
-from src.identity.backup import BackupManager, BackupIntegrityError
 
 
 def replay_wal_to_key_manager(node_id: str, wal_manager: WALManager, grace_period_seconds: float = 10.0) -> KeyManager:

@@ -4,6 +4,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+# E501 is enforced by `ruff format` for code; long string/docstring literals are
+# intentionally left intact. Lint therefore does not duplicate the line-length check.
+ignore = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

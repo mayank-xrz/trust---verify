@@ -1,14 +1,14 @@
 """Crash Recovery with Write-Ahead Log (WAL) & Device Re-enrollment."""
 
 from __future__ import annotations
-import base64
+
 import hashlib
 import hmac
 import json
 import os
 import secrets
 import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 class WALManager:

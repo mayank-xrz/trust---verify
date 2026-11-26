@@ -1,8 +1,8 @@
 """Identity & Key Lifecycle Layer."""
-from .key_manager import KeyManager, KeyStateEnum, KeyRecord
+from .backup import BackupIntegrityError, BackupManager
+from .key_manager import KeyManager, KeyRecord, KeyStateEnum
+from .recovery import DeviceReEnrollment, WALManager
 from .revocation import RevocationCoordinator, RevocationEvent
-from .recovery import WALManager, DeviceReEnrollment
-from .backup import BackupManager, BackupIntegrityError
 
 __all__ = [
     "KeyManager",

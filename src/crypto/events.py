@@ -7,6 +7,7 @@ Never logs plaintext, session keys, ephemeral private keys, or shared secrets.
 """
 
 from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 

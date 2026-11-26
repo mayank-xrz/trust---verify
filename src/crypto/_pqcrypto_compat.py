@@ -1,6 +1,7 @@
 """Compatibility layer supporting both pqcrypto==0.4.0 and pqcrypto==1.0.0."""
 
 from __future__ import annotations
+
 from typing import Tuple
 
 

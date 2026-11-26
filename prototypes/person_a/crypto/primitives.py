@@ -3,8 +3,8 @@ import base64
 import binascii
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65

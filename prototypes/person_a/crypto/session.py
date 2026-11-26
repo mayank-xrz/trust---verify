@@ -7,9 +7,20 @@ import time
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
-from . import aead
-from . import classical
-from .primitives import CryptoError, SUITE, b64, canonical, decapsulate, digest, encapsulate, hkdf, sign, unb64, verify
+from . import aead, classical
+from .primitives import (
+    SUITE,
+    CryptoError,
+    b64,
+    canonical,
+    decapsulate,
+    digest,
+    encapsulate,
+    hkdf,
+    sign,
+    unb64,
+    verify,
+)
 
 VERSION = 1
 

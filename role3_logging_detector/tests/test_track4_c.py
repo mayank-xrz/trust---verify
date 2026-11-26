@@ -4,8 +4,9 @@ import unittest
 from pathlib import Path
 
 from src.audit_logger import TamperEvidentLogger, verify_log_file
-from src.detector import SecurityDetector
 from src.metrics import evaluate_detector
+
+from src.detector import SecurityDetector
 
 
 class TestTrack4Role3(unittest.TestCase):

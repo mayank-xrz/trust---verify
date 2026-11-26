@@ -1,7 +1,7 @@
 """Ephemeral X25519 using the guaranteed Node.js standard crypto library."""
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from .primitives import CryptoError, b64, unb64
 

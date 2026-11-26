@@ -1,6 +1,7 @@
 """Acceptance tests for Objective 3: Delivery Under Loss / Reordering."""
 
 from __future__ import annotations
+
 import base64
 from pathlib import Path
 

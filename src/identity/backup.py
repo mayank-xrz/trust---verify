@@ -1,6 +1,7 @@
 """Encrypted, Signed & MACed Backup Creation and Integrity Verification."""
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -8,7 +9,7 @@ import json
 import os
 import secrets
 import time
-from typing import Dict, Any, Tuple
+from typing import Any, Dict
 
 
 class BackupIntegrityError(Exception):

@@ -1,6 +1,7 @@
 """Reproducible Demo & Verification CLI (`python -m src.cli <subcommand>`)."""
 
 from __future__ import annotations
+
 import argparse
 import json
 import re
@@ -13,7 +14,7 @@ from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier
-from src.crypto.delivery import ChunkReceiver, DeliveryInvalidError, chunk_and_seal
+from src.crypto.delivery import ChunkReceiver, chunk_and_seal
 from src.crypto.envelope import (
     AEADFailedError,
     RecipientMismatchError,

@@ -11,22 +11,23 @@ Validates all inbound and outbound envelope/key/audit payloads against schemas/.
 """
 
 from __future__ import annotations
+
 import base64
 import json
 import os
 import sys
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 import uuid
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, Field
-import uvicorn
 import jsonschema
+import uvicorn
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from demo.node.adapters import NodeAdapters
 from demo.node.sandbox_api import SandboxController, create_sandbox_router
@@ -81,7 +82,6 @@ def create_app(
     node_id = node_id or os.environ.get("NODE_ID", "node-a")
     data_dir = data_dir or os.environ.get("DATA_DIR", f"/tmp/tbv_data_{node_id}")
     grace_period_sec = float(grace_period_seconds or os.environ.get("GRACE_PERIOD_SECONDS", "5.0"))
-    key_authority_url = os.environ.get("KEY_AUTHORITY_URL", "http://localhost:8000")
 
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
@@ -505,7 +505,7 @@ def create_app(
                     data=json.dumps({"key_id": req.key_id, "reason": req.reason, "role": "admin"}).encode("utf-8"),
                     headers={"Content-Type": "application/json"},
                 )
-                with urllib.request.urlopen(p_req, timeout=1.0) as resp:
+                with urllib.request.urlopen(p_req, timeout=1.0):
                     pass
             except Exception:
                 pass

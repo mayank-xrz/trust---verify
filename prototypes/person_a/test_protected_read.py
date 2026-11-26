@@ -4,14 +4,13 @@ import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import secrets
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 from pqcrypto.kem import ml_kem_768
-
 
 ADAPTER = Path(__file__).with_name("track4_service.py").resolve()
 COMMAND = [sys.executable, "-B", str(ADAPTER)]

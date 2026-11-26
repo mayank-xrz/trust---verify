@@ -11,6 +11,7 @@ Ticket fields:
 """
 
 from __future__ import annotations
+
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from src.audit.logger import AuditLogger
+
 from .events import emit_crypto_event
 from .handshake import SessionKeys
 

@@ -1,6 +1,7 @@
 """Acceptance tests for Objective 1: Replay & Recipient Binding."""
 
 from __future__ import annotations
+
 import base64
 import json
 from pathlib import Path
@@ -16,7 +17,11 @@ from src.crypto.envelope import (
     seal_envelope,
 )
 from src.crypto.handshake import EphemeralHandshakeSession
-from src.crypto.replay_cache import CounterOutOfWindowError, PersistentReplayCache, ReplayRejectedError
+from src.crypto.replay_cache import (
+    CounterOutOfWindowError,
+    PersistentReplayCache,
+    ReplayRejectedError,
+)
 from src.crypto.resumption import PersistentResumptionStore
 from tests.conftest import extract_crypto_event, read_audit_events
 

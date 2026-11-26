@@ -2,12 +2,12 @@
 import atexit
 import json
 import os
-from pathlib import Path
 import select
 import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 HELPER = Path(__file__).with_name("node_aead.cjs")
 _NODE_BIN = None

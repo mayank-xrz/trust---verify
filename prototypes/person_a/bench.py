@@ -1,11 +1,11 @@
 """Run local synthetic crypto benchmarks and print measured JSON."""
 import json
 import os
-from pathlib import Path
 import platform
 import statistics
 import tempfile
 import time
+from pathlib import Path
 
 from crypto import aead
 from crypto.chunks import Reassembler, make_transfer

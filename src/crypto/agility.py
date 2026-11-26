@@ -12,6 +12,7 @@ And dual post-quantum signatures from two independent mathematical families:
 """
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import json

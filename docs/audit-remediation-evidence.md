@@ -2,44 +2,32 @@
 
 ## Requirements Pin
 
-- Verified that `requirements.txt` contains only `pqcrypto==0.4.0`.
-- Command: `cat requirements.txt`
+- Verified that `requirements.txt` pins the PQC stack at `pqcrypto==1.0.0` (alongside the other pinned dependencies).
+- Command: `grep '^pqcrypto' requirements.txt`
 - Output:
 ```
- pqcrypto==0.4.0
+pqcrypto==1.0.0
 ```
 
 ## Requirements Demo
 
-- Confirmed `requirements-demo.txt` lists demo dependencies.
+- `requirements-demo.txt` now includes `requirements.txt` so the demo/sandbox install cannot downgrade the canonical pins.
 - Command: `cat requirements-demo.txt`
-- Output snippet:
+- Output:
 ```
-# Demo and legacy multi-node/DB dependencies (not used by judged track4_service.py)
-fastapi==0.111.0
-uvicorn==0.30.0
-pydantic==2.7.4
-jsonschema==4.22.0
-pytest==8.2.1
-httpx==0.27.2
-cryptography==42.0.8
-liboqs-python==0.10.0
-click==8.1.7
-requests==2.32.3
-sqlalchemy==2.0.30
-alembic==1.14.0
-psycopg[binary]==3.2.3
+# Demo and multi-node sandbox dependencies.
+# The canonical dependency set lives in requirements.txt; this file is an alias
+# so `pip install -r requirements-demo.txt` cannot downgrade packages.
+-r requirements.txt
 ```
 
 ## Protected Read Response
 
 - Ensured `protected_read` returns only `ciphertext` and `proof` fields.
-- Sample output from `python - <<'PY'
-from src.crypto.protected_read import protected_read
-print(protected_read(b'hello'))
-PY`:
+- Covered by `tests/test_audit_remediation.py::test_protected_read_response`.
+- Shape (public key omitted for brevity):
 ```
-{"ciphertext": "...base64...", "proof": "...hex..."}
+{"ciphertext": "...base64...", "proof": "...64 hex chars..."}
 ```
 
 ## Root Imports
@@ -60,12 +48,13 @@ PY`:
 
 ## README Badge Updated
 
-- Badge reflects `26/26 Passing`.
-- Verified badge line in `README.md` matches expected pattern.
+- `README.md` documents the full-suite command (`pytest tests/ -v`) and no longer carries a stale fixed-count badge.
+- Covered by `tests/test_audit_remediation.py::test_readme_badge`.
 
 ## Naming Consistency
 
-- Added paragraph in `docs/security-evidence.md` confirming consistent naming of X25519/ML‑KEM.
+- The canonical suite string `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1` is defined once in `src/crypto/primitives.py` and quoted in `README.md`.
+- Covered by `tests/test_audit_remediation.py::test_naming_consistency`.
 
 ---
 

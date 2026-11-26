@@ -2,17 +2,25 @@ import copy
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-
-from pqcrypto.kem import ml_kem_768
+from pathlib import Path
 
 from crypto import classical
 from crypto.chunks import Reassembler, make_transfer
-from crypto.primitives import CryptoError, b64, canonical, decapsulate, encapsulate, kem_keypair, sign, signing_keypair, verify
+from crypto.primitives import (
+    CryptoError,
+    b64,
+    canonical,
+    decapsulate,
+    encapsulate,
+    kem_keypair,
+    sign,
+    signing_keypair,
+    verify,
+)
 from crypto.protected_read import protected_read
 from crypto.replay import ReplayLedger
 from crypto.session import PrekeyStore, TrustRegistry, accept, finish, initiate
@@ -185,7 +193,8 @@ class CryptoTests(unittest.TestCase):
         public, private = kem_keypair()
         result = protected_read("fresh-challenge", "stored body", b64(public))
         secret = decapsulate(private, __import__("base64").b64decode(result["ciphertext"], validate=True))
-        import hashlib, hmac
+        import hashlib
+        import hmac
         expected = hmac.new(secret, b"fresh-challengestored body", hashlib.sha256).hexdigest()
         self.assertEqual(result["proof"], expected)
         with self.assertRaises(CryptoError):
@@ -204,7 +213,8 @@ class CryptoTests(unittest.TestCase):
         public, private = kem_keypair()
         allowed = call({"op": "protected_read", "actor": "maya", "asset": "brief", "challenge": "fresh", "public_key": b64(public)})
         secret = decapsulate(private, __import__("base64").b64decode(allowed["ciphertext"]))
-        import hashlib, hmac
+        import hashlib
+        import hmac
         self.assertEqual(allowed["proof"], hmac.new(secret, b"freshnote", hashlib.sha256).hexdigest())
         self.assertEqual(call({"op": "protected_read", "actor": "other", "asset": "brief", "challenge": "fresh", "public_key": b64(public)}), {"decision": "deny"})
         call({"op": "revoke", "actor": "maya"})

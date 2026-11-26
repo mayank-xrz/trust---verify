@@ -91,15 +91,15 @@ flowchart TD
 
 ### 3. Pinned Post-Quantum Cryptographic Algorithms
 * **Canonical Suite String:** `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1` (`src/crypto/primitives.py`)
-* **Key Encapsulation Mechanism (KEM):** NIST FIPS 203 **ML-KEM-768** via `pqcrypto==0.4.0`, hybridized with ephemeral **X25519** (`node:crypto`) in session handshakes.
-* **Digital Signatures (DSA):** NIST FIPS 204 **ML-DSA-65** via `pqcrypto==0.4.0` with domain-separated canonical transcripts.
+* **Key Encapsulation Mechanism (KEM):** NIST FIPS 203 **ML-KEM-768** via `pqcrypto==1.0.0`, hybridized with ephemeral **X25519** (`node:crypto`) in session handshakes.
+* **Digital Signatures (DSA):** NIST FIPS 204 **ML-DSA-65** via `pqcrypto==1.0.0` with domain-separated canonical transcripts.
 * **Key Derivation:** **HKDF-SHA256** (`node:crypto`) for session root, chain keys, and message keys.
 * **Symmetric AEAD Cipher:** **AES-256-GCM** (`node:crypto`) with 96-bit counter nonces and explicit Authenticated Associated Data (AAD).
-* **Judging Adapter (`track4_service.py`):** Uses stdlib + `pqcrypto==0.4.0` and Node.js built-ins. Its `protected_read` operation uses ML-KEM-768 and HMAC-SHA256.
+* **Judging Adapter (`track4_service.py`):** Uses stdlib + `pqcrypto==1.0.0` and Node.js built-ins. Its `protected_read` operation uses ML-KEM-768 and HMAC-SHA256.
 
 ### Offline Track 4 verification
 
-Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.12, `pqcrypto==0.4.0`, and Node.js 24.11.1 already available. No package installation is needed. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
+Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.9+ (verified on 3.15.2), `pqcrypto==1.0.0`, and Node.js 24.11.1 on `PATH` after `pip install -r requirements.txt`. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
 
 Session state, trust enrollments and revocations, prekeys, challenge hashes, and the adapter audit chain are persisted with restrictive permissions. Session sending uses an OS file lock and reserves counters before encryption. Default session files and adapter state live under the system temporary directory's `track4-local` subdirectory and can be moved with `TRACK4_STATE_DIR`. Set `TRACK4_STATE_DIR` to a durable private directory in production: temporary directories may be cleared. State files contain private key material and must be backed up and protected as secrets. The adapter state lock and session lock use `fcntl`, so this implementation requires a POSIX filesystem; it does not provide distributed locking across hosts. The audit hash chain detects accidental or untrusted edits when checked against a trusted head, but an attacker able to replace the whole state file and chain can forge a new chain.
 
@@ -107,7 +107,7 @@ Session state, trust enrollments and revocations, prekeys, challenge hashes, and
 
 ## 🚀 Clean-Machine Quickstart Guide
 
-The Track 4 crypto path requires Python, `pqcrypto==0.4.0`, and Node.js on PATH.
+The Track 4 crypto path requires Python 3.9+, `pqcrypto==1.0.0`, and Node.js on PATH.
 
 ### Prerequisites
 * Python 3.9+ (`python3 --version`)
@@ -118,7 +118,7 @@ The Track 4 crypto path requires Python, `pqcrypto==0.4.0`, and Node.js on PATH.
 # 1. Install pinned requirements & pre-push hooks
 make setup
 
-# 2. Run the 26-test core crypto, audit, detector, and lifecycle suite
+# 2. Run the full test suite (crypto, audit, detector, lifecycle, identity/key management)
 make test
 
 # 3. Run performance & cryptographic overhead benchmarks
@@ -136,10 +136,9 @@ make clean
 
 ### Manual Execution (No Make Required)
 
-#### Run All Core Security Tests
+#### Run the Full Test Suite
 ```bash
-python3 -m pytest tests/test_crypto.py tests/test_detector_eval.py \
-    tests/test_log_injection.py tests/test_lifecycle_chaos.py -v
+python3 -m pytest tests/ -v
 ```
 
 #### Run Benchmarks
@@ -243,8 +242,8 @@ The educational and protocol-risk documentation in `docs/` is derived from **Pro
 
 ## 💻 Clean-Machine Setup
 
-* **OS & Python:** macOS or Linux, Python 3.11+ (verified on macOS arm64 with Python 3.15.2).
-* **System dependencies:** None required beyond Python 3.11+ and `pip` (`pqcrypto==1.0.0` ships prebuilt wheels for ML-KEM-768 and ML-DSA-65).
+* **OS & Python:** macOS or Linux, Python 3.9+ (verified on macOS arm64 with Python 3.15.2).
+* **System dependencies:** None required beyond Python 3.9+ and `pip` (`pqcrypto==1.0.0` ships prebuilt wheels for ML-KEM-768 and ML-DSA-65).
 
 ```bash
 python3 -m venv .venv
@@ -252,7 +251,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # Run full pytest suite (including the 4 crypto acceptance test files)
-pytest -v tests/
+pytest tests/ -v
 
 # Run all 6 reproducible demo & verification CLI commands
 python -m src.cli demo-replay

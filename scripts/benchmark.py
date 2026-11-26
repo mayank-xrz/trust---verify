@@ -9,21 +9,21 @@ Runs reproducible benchmarks against the cryptographic, identity, and detection 
 """
 
 from __future__ import annotations
+
 import json
 import os
 import sys
 import time
 import tracemalloc
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from demo.node.crypto_provider import MLKEMKeyExchange, MLDSASignature, SecureMessaging
-from src.identity.revocation import RevocationCoordinator
-from src.detector.rules import ContextRuleEngine
-from src.audit.logger import AuditLogger
+from demo.node.crypto_provider import MLDSASignature, MLKEMKeyExchange, SecureMessaging  # noqa: E402
+from src.detector.rules import ContextRuleEngine  # noqa: E402
+from src.identity.revocation import RevocationCoordinator  # noqa: E402
 
 
 def percentile(data: List[float], p: float) -> float:
@@ -62,7 +62,7 @@ def benchmark_envelope_operations(iterations: int = 500) -> Dict[str, Any]:
 
         # Verify + Decrypt
         t1 = time.perf_counter()
-        decrypted = bob.unpack_envelope(envelope, shared_key, signer, pub)
+        _decrypted = bob.unpack_envelope(envelope, shared_key, signer, pub)
         t_unpack = (time.perf_counter() - t1) * 1000.0
         unpack_latencies.append(t_unpack)
 
@@ -106,7 +106,7 @@ def benchmark_kem_operations(iterations: int = 100) -> Dict[str, Any]:
         t0 = time.perf_counter()
         pub, priv = kem.generate_keypair()
         ct, secret = kem.encapsulate(pub)
-        dec_secret = kem.decapsulate(ct, priv)
+        _dec_secret = kem.decapsulate(ct, priv)
         latencies.append((time.perf_counter() - t0) * 1000.0)
 
     total_time_s = sum(latencies) / 1000.0
@@ -134,7 +134,7 @@ def benchmark_sig_operations(iterations: int = 100) -> Dict[str, Any]:
     for _ in range(iterations):
         t0 = time.perf_counter()
         signature = sig.sign(msg, priv)
-        valid = sig.verify(msg, signature, pub)
+        _valid = sig.verify(msg, signature, pub)
         latencies.append((time.perf_counter() - t0) * 1000.0)
 
     total_time_s = sum(latencies) / 1000.0
@@ -233,8 +233,6 @@ def measure_peak_memory_mb() -> Dict[str, float]:
 
     alice = SecureMessaging("node-a")
     bob = SecureMessaging("node-b")
-    engine = ContextRuleEngine()
-    coords = [RevocationCoordinator(nid) for nid in ["node-a", "node-b", "node-c"]]
 
     # Run multi-node envelope operations
     for _ in range(200):

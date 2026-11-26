@@ -8,6 +8,7 @@ Uses vetted primitives only:
 """
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
@@ -22,6 +23,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
+
 from ._pqcrypto_compat import sig_sign, sig_verify
 from .events import emit_crypto_event
 from .replay_cache import (

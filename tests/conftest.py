@@ -4,6 +4,7 @@ All keys are generated at runtime; no secrets are committed.
 """
 
 from __future__ import annotations
+
 import json
 from pathlib import Path
 from typing import Dict, List

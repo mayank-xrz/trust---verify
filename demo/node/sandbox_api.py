@@ -6,6 +6,7 @@ detector implementations so the live web console executes genuine verification.
 """
 
 from __future__ import annotations
+
 import base64
 import hashlib
 import json
@@ -21,25 +22,25 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from demo.node.crypto_provider import (
-    MLKEMKeyExchange,
+    MessageTamperedError,
     MLDSASignature,
-    SecureMessaging,
+    MLKEMKeyExchange,
     RecipientMismatchError,
     ReplayAttackError,
-    MessageTamperedError,
-    SessionManager,
     ResumptionHijackError,
+    SecureMessaging,
+    SessionManager,
 )
-from src.identity.key_manager import KeyManager, KeyRecord, KeyStateEnum
-from src.identity.revocation import RevocationCoordinator
-from src.identity.recovery import WALManager, DeviceReEnrollment
-from src.identity.backup import BackupManager, BackupIntegrityError
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier
-from src.detector.rules import ContextRuleEngine
-from src.detector.graph_lateral import LateralMovementGraph
 from src.detector.clock_sync import ClockSyncBuffer
+from src.detector.graph_lateral import LateralMovementGraph
 from src.detector.metrics import compute_f1_mtta
+from src.detector.rules import ContextRuleEngine
+from src.identity.backup import BackupIntegrityError, BackupManager
+from src.identity.key_manager import KeyManager, KeyRecord, KeyStateEnum
+from src.identity.recovery import DeviceReEnrollment, WALManager
+from src.identity.revocation import RevocationCoordinator
 
 
 class TransferPayload(BaseModel):
@@ -165,7 +166,7 @@ class SandboxController:
         log_path = getattr(self.audit_logger, "log_file_path", "")
         if log_path and os.path.exists(log_path):
             with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                data_lines = [l for l in f if l.strip() and not l.startswith("#")]
+                data_lines = [line for line in f if line.strip() and not line.startswith("#")]
             if data_lines:
                 return
         self._record_event("key-authority", "CLUSTER_BOOT", "system", "/cluster/init", "SUCCESS", {"pqc": self.kem.algorithm_name})

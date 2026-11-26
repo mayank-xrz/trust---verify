@@ -1,9 +1,10 @@
 """Service-to-Service Access Graph for Lateral Movement Detection."""
 
 from __future__ import annotations
+
 import dataclasses
 import time
-from typing import Dict, Any, Set, List, Optional, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 
 @dataclasses.dataclass

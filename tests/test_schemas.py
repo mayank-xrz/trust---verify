@@ -13,10 +13,11 @@ Asserts:
 """
 
 from __future__ import annotations
-import copy
+
 import json
 import os
 import unittest
+
 import jsonschema
 
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "schemas"))

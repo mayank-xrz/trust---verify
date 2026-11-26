@@ -4,6 +4,7 @@ import hashlib
 import hmac
 
 from pqcrypto.kem import ml_kem_768
+
 from .primitives import CryptoError, b64, encapsulate, unb64
 
 MAX_CHALLENGE_LENGTH = 512

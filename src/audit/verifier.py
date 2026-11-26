@@ -8,15 +8,16 @@ Detects:
 """
 
 from __future__ import annotations
+
 import base64
 import dataclasses
 import hashlib
 import json
 import os
 import sys
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from .logger import AuditLogger, GENESIS_HASH
+from .logger import GENESIS_HASH, AuditLogger
 
 
 @dataclasses.dataclass
