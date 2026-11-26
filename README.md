@@ -99,7 +99,7 @@ flowchart TD
 
 ### Offline Track 4 verification
 
-Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.9+ (verified on 3.15.2), `pqcrypto==1.0.0`, and Node.js 24.11.1 on `PATH` after `pip install -r requirements.txt`. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
+Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.11 (CI), `pqcrypto==1.0.0`, and Node.js 24.11.1 on `PATH` after `pip install -r requirements.txt`. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
 
 Session state, trust enrollments and revocations, prekeys, challenge hashes, and the adapter audit chain are persisted with restrictive permissions. Session sending uses an OS file lock and reserves counters before encryption. Default session files and adapter state live under the system temporary directory's `track4-local` subdirectory and can be moved with `TRACK4_STATE_DIR`. Set `TRACK4_STATE_DIR` to a durable private directory in production: temporary directories may be cleared. State files contain private key material and must be backed up and protected as secrets. The adapter state lock and session lock use `fcntl`, so this implementation requires a POSIX filesystem; it does not provide distributed locking across hosts. The audit hash chain detects accidental or untrusted edits when checked against a trusted head, but an attacker able to replace the whole state file and chain can forge a new chain.
 
@@ -107,10 +107,10 @@ Session state, trust enrollments and revocations, prekeys, challenge hashes, and
 
 ## 🚀 Clean-Machine Quickstart Guide
 
-The Track 4 crypto path requires Python 3.9+, `pqcrypto==1.0.0`, and Node.js on PATH.
+The Track 4 crypto path requires Python 3.11, `pqcrypto==1.0.0`, and Node.js on PATH.
 
 ### Prerequisites
-* Python 3.9+ (`python3 --version`)
+* Python 3.11 (`python3 --version`)
 * Optional: Docker & Docker Compose (`docker compose version`)
 
 ### One-Command Make Targets
@@ -127,7 +127,8 @@ make bench
 # 4. Run the 5-minute deterministic walkthrough demo for judges
 make demo
 
-# 5. Boot the multi-node container sandbox (Docker)
+# 5. Boot the optional multi-node Docker sandbox
+export POSTGRES_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
 make up
 
 # 6. Shut down containers and clean temporary artifacts
@@ -172,44 +173,43 @@ Measured on a standard developer workstation (Apple Silicon / Linux x86_64) usin
 
 ### Explainable Detector Accuracy Metrics
 
-| Metric | Target | Measured Result | Evaluation Condition |
-| :--- | :--- | :--- | :--- |
-| **F1 Score** | $\ge 0.90$ | **0.96** | Tested against 500 ground-truth attack/benign scenarios |
-| **Precision** | $\ge 0.90$ | **0.95** | Replay, privilege escalation, lateral movement, swap attacks |
-| **Recall** | $\ge 0.90$ | **0.97** | Zero missed high-severity policy violations |
-| **Median Time to Alert** | $< 50\text{ ms}$ | Run the detector evaluation | Time from rule evaluation to alert for correctly detected suspicious events |
-| **False Alerts per 1,000 Benign Events** | $< 1 / 1,000$ | Run the detector evaluation | Routine worker activity with legitimate privileges |
+Run the detector evaluation with `python -m pytest -q tests/test_detector_eval.py`.
+The unit test checks precision, recall, and F1 against a 0.90 threshold using
+100 benign and 25 suspicious synthetic events. It expects zero false alerts in
+that fixture. The sandbox detector demo separately evaluates 500 benign and
+50 suspicious synthetic events and reports median rule-evaluation time to alert
+for detected suspicious events and false alerts per 1,000 benign events.
 
 ---
 
 ## 🖥️ Operator CLI Reference
 
-The CLI (`src/node/operator_cli.py`) provides operators and judges direct visibility into running nodes:
+The CLI (`demo/node/operator_cli.py`) provides operators and judges direct visibility into running nodes:
 
 ```bash
 # Check multi-node health, active key versions, and uptime
-python3 -m src.node.operator_cli status
+python3 -m demo.node.operator_cli status
 
 # Trigger atomic key rotation on node-a
-python3 -m src.node.operator_cli rotate --identity node-a --role admin
+python3 -m demo.node.operator_cli rotate --identity node-a --role admin
 
 # Revoke a compromised key and measure propagation latency across nodes
-python3 -m src.node.operator_cli revoke --key-id <KEY_ID> --reason "Suspicious activity detected"
+python3 -m demo.node.operator_cli revoke --key-id <KEY_ID> --reason "Suspicious activity detected"
 
 # Verify cryptographic audit log hash chains across all nodes
-python3 -m src.node.operator_cli verify-logs
+python3 -m demo.node.operator_cli verify-logs
 
 # Display explainable security alerts and evidence
-python3 -m src.node.operator_cli alerts
+python3 -m demo.node.operator_cli alerts
 ```
 
 ---
 
 ## 📑 Frozen Shared JSON Schemas (`schemas/`)
 
-* [`schemas/envelope.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/envelope.schema.json): Cryptographically bound envelope (`version`, `sender_id`, `recipient_id`, `seq_num`, `session_id`, `kem_ciphertext`, `nonce`, `ciphertext`, `associated_data`, `signature`, `sig_alg`, `kem_alg`) with `"additionalProperties": false`.
-* [`schemas/key_state.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/key_state.schema.json): Key lifecycle schema tracking rotation state, grace periods, cutoffs, and authority signatures.
-* [`schemas/audit_event.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/audit_event.schema.json): Injection-safe audit record schema with continuous hash chain pointers (`entry_hash`, `previous_hash`).
+* [`schemas/envelope.schema.json`](schemas/envelope.schema.json): Cryptographically bound envelope (`version`, `sender_id`, `recipient_id`, `seq_num`, `session_id`, `kem_ciphertext`, `nonce`, `ciphertext`, `associated_data`, `signature`, `sig_alg`, `kem_alg`) with `"additionalProperties": false`.
+* [`schemas/key_state.schema.json`](schemas/key_state.schema.json): Key lifecycle schema tracking rotation state, grace periods, cutoffs, and authority signatures.
+* [`schemas/audit_event.schema.json`](schemas/audit_event.schema.json): Injection-safe audit record schema with continuous hash chain pointers (`entry_hash`, `previous_hash`).
 
 ---
 
@@ -242,8 +242,8 @@ The educational and protocol-risk documentation in `docs/` is derived from **Pro
 
 ## 💻 Clean-Machine Setup
 
-* **OS & Python:** macOS or Linux, Python 3.9+ (verified on macOS arm64 with Python 3.15.2).
-* **System dependencies:** None required beyond Python 3.9+ and `pip` (`pqcrypto==1.0.0` ships prebuilt wheels for ML-KEM-768 and ML-DSA-65).
+* **OS & Python:** macOS or Linux, Python 3.11 is the CI baseline. The local test environment also ran Python 3.15.2 on macOS arm64.
+* **System dependencies:** Python, `pip`, and Node.js on `PATH` (`pqcrypto==1.0.0` ships prebuilt wheels for ML-KEM-768 and ML-DSA-65).
 
 ```bash
 python3 -m venv .venv
@@ -261,18 +261,25 @@ python -m src.cli demo-resumption-binding
 python -m src.cli verify-logs
 python -m src.cli doc-check
 
-# Run the Track-4-Toolkit lost-device validator (no regression)
-python ../Track-4-Toolkit/validate.py --entry ./track4_service.py
 ```
+
+The organizer's lost-device validator is optional for local setup. If you have
+the separate `Track-4-Toolkit` checkout next to this repository, run
+`python ../Track-4-Toolkit/validate.py --entry ./track4_service.py`.
+
+Use `src/` for the integrated implementation, `demo.node.operator_cli` for
+the sandbox operator commands, and `track4_service.py` for the judging adapter.
+For audit verification, `verify_log.py` is the operator entry point and calls
+`src.audit.verifier`. The `prototypes/person_a/` and
+`role3_logging_detector/` directories contain earlier standalone work.
 
 ---
 
 ## 📦 Dependency List (Pinned Versions & Licenses)
 
-See [`requirements.txt`](requirements.txt) for exact pins:
-* `cryptography==42.0.8` (Apache-2.0 / BSD-3-Clause) — X25519, HKDF-SHA256, AES-256-GCM, SHA-256
-* `pqcrypto==1.0.0` (MIT / Apache-2.0 / Public-domain PQClean bindings) — ML-KEM-768 (FIPS 203), ML-DSA-65 (FIPS 204)
-* `fastapi==0.111.0`, `uvicorn==0.30.0`, `pydantic==2.14.4`, `jsonschema==4.22.0`, `pytest==9.2.0`, `httpx==0.27.2`, `click==8.5.1`, `requests==2.32.3`, `sqlalchemy==2.0.58`, `alembic==1.14.0`, `psycopg[binary]==3.3.9`
+Install from [`requirements.txt`](requirements.txt) for the exact dependency
+pins. The cryptographic code uses `cryptography` (Apache-2.0 / BSD-3-Clause)
+and `pqcrypto` (MIT / Apache-2.0 / public-domain PQClean bindings).
 
 ---
 

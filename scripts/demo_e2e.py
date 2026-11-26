@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import sys
 import tempfile
 from pathlib import Path
@@ -113,13 +114,14 @@ def main() -> int:
 
         bpub, bpriv = generate_ml_dsa_keypair()
         bpath = tmp_path / "demo.tbv"
-        bkp.create_backup(admin_ctx, bpath, signing_privkey=bpriv, passphrase="demo-passphrase")
+        backup_passphrase = secrets.token_urlsafe(32)
+        bkp.create_backup(admin_ctx, bpath, signing_privkey=bpriv, passphrase=backup_passphrase)
         raw = bytearray(bpath.read_bytes())
         raw[-1] ^= 0xFF
         bad = tmp_path / "bad.tbv"
         bad.write_bytes(bytes(raw))
         try:
-            bkp.restore_backup(admin_ctx, bad, pinned_pubkey=bpub, passphrase="demo-passphrase")
+            bkp.restore_backup(admin_ctx, bad, pinned_pubkey=bpub, passphrase=backup_passphrase)
             results.append(("5. Backup Tamper Detection", "FAIL"))
             return 1
         except DomainIntegrityError:
