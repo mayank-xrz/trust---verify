@@ -84,11 +84,20 @@ Operator CLI (run while nodes are up):
 
 ```bash
 python3 -m demo.node.operator_cli status
-python3 -m demo.node.operator_cli rotate --identity node-a --role admin
-python3 -m demo.node.operator_cli revoke --key-id <KEY_ID> --reason "compromised"
+python3 -m demo.node.operator_cli rotate --identity node-a
+python3 -m demo.node.operator_cli revoke --identity node-a --key-id <KEY_ID> --reason "compromised"
 python3 -m demo.node.operator_cli verify-logs
 python3 -m demo.node.operator_cli alerts
 ```
+
+`make demo` generates fresh credentials and binds its services to loopback. When running demo nodes separately, configure distinct random bearer tokens for each purpose:
+
+- `DEMO_OPERATOR_TOKEN` authorizes key rotation and revocation. Set the same token in the CLI's environment when targeting that node. Successful actions are logged as `demo-operator`.
+- `DEMO_PEER_ENROLL_TOKEN` authorizes registration of a trusted `GET /keys/public` bundle with `POST /peers`. Refresh the bundle after recipient key rotation.
+- `DEMO_RECIPIENT_TOKEN` authorizes reads from that node's `GET /inbox/{receipt_id}`. Use a different recipient token for each node. `POST /receive` verifies and accepts a signed envelope and returns an opaque receipt, which grants no read access by itself.
+- `DEMO_REVOCATION_SYNC_TOKEN` authorizes only peer revocation updates. Configure it across the trusted nodes when enabling `PEER_NODES`. Use a protected transport for bearer credentials outside loopback.
+
+Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
 
 5-minute demo video: **TODO: paste the public link here and in `docs/project_brief.pdf`.**
 

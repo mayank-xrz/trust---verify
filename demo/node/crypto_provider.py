@@ -39,6 +39,14 @@ try:
 except ImportError:
     PQCRYPTO_AVAILABLE = False
 
+SIGNED_ENVELOPE_FIELDS = (
+    "version", "message_id", "sender_id", "recipient_id", "session_id",
+    "sequence_number", "timestamp_ns", "ciphertext", "nonce",
+    "additional_authenticated_data", "algorithm_suite", "key_id", "kem_ciphertext",
+    "ephemeral_kem_public_key",
+)
+
+
 class RecipientMismatchError(Exception):
     """Raised when envelope recipient binding does not match local node ID."""
 
@@ -196,6 +204,20 @@ class SecureMessaging:
         sender_public_key: bytes,
         resolve_private_key: Callable[[str], bytes],
     ) -> bytes:
+        plaintext = self.decrypt_for_recipient(
+            envelope, kem, verifier_sig, sender_public_key, resolve_private_key
+        )
+        self._record_replay(envelope)
+        return plaintext
+
+    def decrypt_for_recipient(
+        self,
+        envelope: Dict[str, Any],
+        kem: MLKEMKeyExchange,
+        verifier_sig: MLDSASignature,
+        sender_public_key: bytes,
+        resolve_private_key: Callable[[str], bytes],
+    ) -> bytes:
         """Verify the sender before resolving and using a local recipient key."""
         self._verify_envelope(envelope, verifier_sig, sender_public_key)
         key_id = envelope.get("key_id")
@@ -272,7 +294,9 @@ class SecureMessaging:
         sender_public_key: bytes,
     ) -> bytes:
         self._verify_envelope(envelope, verifier_sig, sender_public_key)
-        return self._decrypt_envelope(envelope, shared_key)
+        plaintext = self._decrypt_envelope(envelope, shared_key)
+        self._record_replay(envelope)
+        return plaintext
 
     def _verify_envelope(self, envelope: Dict[str, Any], verifier_sig: Any, sender_public_key: bytes) -> None:
         if envelope.get("recipient_id") != self.node_id:
@@ -294,24 +318,21 @@ class SecureMessaging:
             raise RecipientMismatchError("AAD internal recipient/sender binding mismatch!")
 
         try:
-            plaintext = AESGCM(shared_key[:32]).decrypt(nonce, ciphertext_bytes, aad_bytes)
+            return AESGCM(shared_key[:32]).decrypt(nonce, ciphertext_bytes, aad_bytes)
         except InvalidTag as exc:
             raise MessageTamperedError("AEAD authentication failed") from exc
+
+    def _record_replay(self, envelope: Dict[str, Any]) -> None:
         with self._counter_lock:
-            self.peer_replay_caches[sender_id].check_and_record(
+            self.peer_replay_caches[envelope["sender_id"]].check_and_record(
                 envelope["message_id"], envelope["sequence_number"], envelope["timestamp_ns"]
             )
-        return plaintext
 
     @staticmethod
     def _canonical_signature_payload(envelope: Dict[str, Any]) -> bytes:
-        fields = (
-            "version", "message_id", "sender_id", "recipient_id", "session_id",
-            "sequence_number", "timestamp_ns", "ciphertext", "nonce",
-            "additional_authenticated_data", "algorithm_suite", "key_id", "kem_ciphertext",
-            "ephemeral_kem_public_key",
+        return b"tbv/demo/envelope/v1\x00" + canonical(
+            {field: envelope.get(field) for field in SIGNED_ENVELOPE_FIELDS}
         )
-        return b"tbv/demo/envelope/v1\x00" + canonical({field: envelope.get(field) for field in fields})
 
 
 class SessionManager:

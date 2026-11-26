@@ -16,8 +16,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
-export DEMO_PEER_ENROLL_TOKEN
-DEMO_PEER_ENROLL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
+    value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    export "$credential=$value"
+done
 
 TEMP_DATA_DIR="$(mktemp -d -t tbv_demo_XXXXXX)"
 PIDS=()
@@ -53,7 +55,9 @@ echo "======================================================================"
 for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     nid="${spec%%:*}"
     port="${spec##*:}"
-    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" \
+    recipient_credential="DEMO_RECIPIENT_TOKEN_${nid#node-}"
+    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" PEER_NODES="" \
+        DEMO_RECIPIENT_TOKEN="${!recipient_credential:-}" \
         python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
     PIDS+=("$pid")
@@ -89,7 +93,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 NODES = {f"node-{name}": f"http://127.0.0.1:{port}" for name, port in zip("abc", (8001, 8002, 8003))}
-OPERATOR = {"Authorization": f"Bearer {os.environ['DEMO_PEER_ENROLL_TOKEN']}"}
+PEER_ENROLLMENT = {"Authorization": f"Bearer {os.environ['DEMO_PEER_ENROLL_TOKEN']}"}
+OPERATOR = {"Authorization": f"Bearer {os.environ['DEMO_OPERATOR_TOKEN']}"}
 
 
 def call(node, path, body=None, headers=None):
@@ -104,7 +109,7 @@ def call(node, path, body=None, headers=None):
 
 def enroll(local_node, peer):
     bundle = call(peer, "/keys/public")
-    call(local_node, "/peers", bundle, OPERATOR)
+    call(local_node, "/peers", bundle, PEER_ENROLLMENT)
     return bundle
 
 
@@ -117,7 +122,11 @@ def send(recipient, payload):
 
 
 def expect_delivery(recipient, envelope, payload):
-    result = call(recipient, "/receive", envelope)
+    receipt = call(recipient, "/receive", envelope)
+    if "payload" in receipt or receipt["status"] != "delivered":
+        raise RuntimeError(f"Unexpected delivery receipt from {recipient}")
+    token = os.environ[f"DEMO_RECIPIENT_TOKEN_{recipient[-1]}"]
+    result = call(recipient, f"/inbox/{receipt['receipt_id']}", headers={"Authorization": f"Bearer {token}"})
     if result["payload"] != payload:
         raise RuntimeError(f"Unexpected payload delivered on {recipient}")
 
@@ -145,7 +154,7 @@ print("\n▶ STEP 3: Rotate node-b's recipient key and verify grace and hard cut
 grace_payload = {"message": "In flight before rotation"}
 grace = send("node-b", grace_payload)
 late = send("node-b", {"message": "First delivery after cutoff"})
-call("node-b", "/keys/rotate", {"role": "admin"})
+call("node-b", "/keys/rotate", {}, OPERATOR)
 expect_delivery("node-b", grace, grace_payload)
 bundle = enroll("node-a", "node-b")
 assert bundle["kem_key_id"] != grace["key_id"]
@@ -157,11 +166,11 @@ print("  Old key accepted in grace and expired on cutoff. New key delivered duri
 
 print("\n▶ STEP 4: Revoke node-b's current key and verify node-c stays reachable")
 in_flight = send("node-b", {"message": "Undelivered before revocation"})
-call("node-b", "/keys/revoke", {"key_id": in_flight["key_id"], "role": "admin"})
+call("node-b", "/keys/revoke", {"key_id": in_flight["key_id"]}, OPERATOR)
 expect_denial("node-b", in_flight, "Recipient key is revoked")
 unaffected = {"message": "Unaffected recipient"}
 expect_delivery("node-c", send("node-c", unaffected), unaffected)
-call("node-b", "/keys/rotate", {"role": "admin"})
+call("node-b", "/keys/rotate", {}, OPERATOR)
 enroll("node-a", "node-b")
 replacement = {"message": "Delivered with the replacement key"}
 expect_delivery("node-b", send("node-b", replacement), replacement)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 
 class ReplayRejectedError(Exception):
@@ -78,8 +78,10 @@ class PersistentReplayCache:
         session_id: str,
         message_id: str,
         counter: int,
+        *,
+        on_accept: Optional[Callable[[sqlite3.Connection], None]] = None,
     ) -> None:
-        """Validate counter window and uniqueness, then persist atomically."""
+        """Persist replay state and any associated delivery in the same transaction."""
         if type(counter) is not int or counter < 0:
             raise CounterOutOfWindowError(f"Invalid negative or non-int counter: {counter}")
 
@@ -165,3 +167,5 @@ class PersistentReplayCache:
                 """,
                 (sender_identity, recipient_identity, session_id, prune_below),
             )
+            if on_accept is not None:
+                on_accept(db)
