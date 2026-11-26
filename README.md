@@ -148,15 +148,9 @@ python3 -m demo.node.operator_cli alerts
 
 `tests/test_detector_eval.py` runs a synthetic labelled set of 125 events (100 routine, 25 attack) and asserts precision, recall and F1 of at least 0.90, zero false alerts, and per-event evaluation under 50 ms. This set is easy to separate, so treat it as a regression check, not as evidence of real-world accuracy.
 
-`role3_logging_detector` includes a small labelled sample (`sample_logs/labelled_events.jsonl`, 6 events) and reports F1, median time to alert and false alerts per 1,000 benign events:
-
-```bash
-cd role3_logging_detector
-python3 -m unittest discover -s tests -v
-python3 -m src.cli evaluate sample_logs/labelled_events.jsonl
-```
-
-Time to alert here is the detector's processing time on in-memory events, not end-to-end latency from a live log stream.
+The [implementation inventory](docs/DUPLICATES.md) identifies the integrated
+entry points and describes the earlier standalone detector. Use the root
+checklist and labelled fixture for submission evidence.
 
 ## Performance
 
@@ -164,6 +158,7 @@ Time to alert here is the detector's processing time on in-memory events, not en
 
 ## Documentation
 
+- Implementation inventory: [`docs/DUPLICATES.md`](docs/DUPLICATES.md)
 - Threat model: [`docs/threat_model.md`](docs/threat_model.md), [`threat-model.json`](threat-model.json)
 - Project brief: [`docs/project_brief.pdf`](docs/project_brief.pdf)
 - Key lifecycle: [`docs/KEY_LIFECYCLE.md`](docs/KEY_LIFECYCLE.md); backup trust model: [`docs/BACKUP_TRUST_MODEL.md`](docs/BACKUP_TRUST_MODEL.md)
