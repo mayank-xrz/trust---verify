@@ -478,7 +478,15 @@ def create_app(
         }
 
     @app.post("/internal/test/arm-crash")
-    def arm_crash(req: ArmCrashRequest) -> dict[str, Any]:
+    def arm_crash(
+        req: ArmCrashRequest,
+        x_admin_enroll_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        # Defense in depth: the endpoint requires both an admin token and an
+        # explicit sandbox opt-in.  ``arm_crash_point`` also re-checks
+        # SANDBOX_MODE so a caller cannot reach the crash primitive directly.
+        if not _admin_enroll_token_valid(x_admin_enroll_token):
+            raise HTTPException(status_code=401, detail="INVALID_ADMIN_ENROLL_TOKEN")
         try:
             arm_crash_point(req.crash_point)
             return {"armed": req.crash_point}
