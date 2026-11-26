@@ -7,14 +7,15 @@ from dataclasses import dataclass
 from hmac import compare_digest
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Response
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from .audit_outbox import AuditEmitter
 from .clock import Clock, SystemClock
 from .db import create_db_engine, create_session_factory
-from .errors import IdentityKeysError, NotAuthorized
-from .key_lifecycle import EnvelopeEncryptionService
+from .errors import IdentityKeysError, NotAuthorized, StateUnavailable
+from .key_lifecycle import EnvelopeEncryptionService, load_wrap_master_key
 from .reenroll import ReenrollmentService
 from .revocation import NodeSyncManager, RevocationService
 from .rotation import RotationService, arm_crash_point, verify_cluster_sync
@@ -215,6 +216,29 @@ def create_app(
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "node_id": resolved_node}
+
+    @app.get("/readyz")
+    def readyz(response: Response) -> dict[str, Any]:
+        """Readiness probe: process is healthy only if its dependencies work."""
+        checks: dict[str, str] = {}
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        except Exception:  # noqa: BLE001 - readiness must never raise
+            checks["database"] = "error"
+        try:
+            load_wrap_master_key()
+            checks["wrap_key"] = "ok"
+        except (StateUnavailable, ValueError):
+            checks["wrap_key"] = "error"
+        ready = all(value == "ok" for value in checks.values())
+        response.status_code = 200 if ready else 503
+        return {
+            "status": "ready" if ready else "not_ready",
+            "node_id": resolved_node,
+            "checks": checks,
+        }
 
     @app.get("/node/status")
     def node_status() -> dict[str, Any]:

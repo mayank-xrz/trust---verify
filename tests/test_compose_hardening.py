@@ -59,6 +59,13 @@ def test_identity_nodes_wait_for_migration() -> None:
         assert depends["migrate"]["condition"] == "service_completed_successfully", name
 
 
+def test_identity_nodes_probe_readiness() -> None:
+    services = _compose()["services"]
+    for name in ("node-a", "node-b", "node-c"):
+        command = services[name]["healthcheck"]["test"]
+        assert any("/readyz" in str(part) for part in command), name
+
+
 def test_dockerfile_is_non_root_and_pinned() -> None:
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "FROM python:3.11-slim AS builder" in text
