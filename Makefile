@@ -1,4 +1,4 @@
-.PHONY: help setup up down test chaos bench demo gates clean distclean
+.PHONY: help setup up down test chaos bench demo gates brief clean distclean
 
 # All project targets run inside the local virtualenv created by `make setup`.
 # Override PYTHON only if you know that interpreter already has requirements.txt.
@@ -17,6 +17,7 @@ help:
 	@echo "  make chaos - Run lifecycle & crash chaos tests"
 	@echo "  make bench - Run reproducible performance measurements"
 	@echo "  make demo  - Run 5-minute judge walkthrough demo"
+	@echo "  make brief - Rebuild docs/project_brief.html and .pdf"
 	@echo "  make clean - Remove caches, temporary logs and data"
 	@echo "  make distclean - Also remove .venv"
 
@@ -53,6 +54,9 @@ bench:
 
 demo:
 	PATH="$(CURDIR)/$(VENV)/bin:$$PATH" ./scripts/run_demo.sh
+
+brief:
+	$(PYTHON) scripts/build_brief.py --pdf
 
 clean:
 	rm -rf __pycache__ src/**/__pycache__ tests/__pycache__ .pytest_cache /tmp/tbv_data /tmp/demo_audit.log
