@@ -4,9 +4,15 @@
 # Agent instructions & prompt files
 agent.md
 AGENT.md
+agents.md
+AGENTS.md
+*.agent.md
 claude.md
 CLAUDE.md
 .cursorrules
+.mcp.json
+.xerj/
+xerj_data/
 
 # Secrets, Keys & Environment Variables
 .env
