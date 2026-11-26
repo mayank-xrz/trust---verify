@@ -22,5 +22,5 @@
 ## 4. Cross-Links to Implementation & Walkthroughs
 - Hybrid Ephemeral ML-KEM-768 + X25519 Handshake: [src/crypto/handshake.py](../src/crypto/handshake.py) and [tests/test_forward_secrecy.py](../tests/test_forward_secrecy.py)
 - ML-DSA-65 Authenticated Envelopes: [src/crypto/envelope.py](../src/crypto/envelope.py) and [tests/test_replay_binding.py](../tests/test_replay_binding.py)
-- Existing PQC Wrappers: [src/crypto/pqc_kem.py](../src/crypto/pqc_kem.py) and [src/crypto/pqc_sig.py](../src/crypto/pqc_sig.py)
+- Unified PQC System & Primitives: [src/crypto/system.py](../src/crypto/system.py) and [src/crypto/primitives.py](../src/crypto/primitives.py)
 - Standards Status Table: [docs/04-nist-standards.md](04-nist-standards.md)

@@ -37,7 +37,7 @@ Source curriculum: Prof. Alfred Menezes, University of Waterloo — [Cryptograph
 | 5–6 | Quantum-Safe Cryptography, PQC Standards | [docs/04-nist-standards.md](04-nist-standards.md) | `python -m src.cli doc-check` |
 | 7–9 | Migration Timelines, PQC Software, PQC Deployments | [docs/05-migration-engineering.md](05-migration-engineering.md) | `python -m src.cli doc-check` |
 | 10–11 | Lattice-Based Cryptography, LWE | [docs/06-math-foundations.md](06-math-foundations.md) | `python -m src.cli doc-check` |
-| 12 | Kyber (ML-KEM) | [src/crypto/handshake.py](../src/crypto/handshake.py), [src/crypto/pqc_kem.py](../src/crypto/pqc_kem.py) | `python -m src.cli demo-forward-secrecy` / `pytest tests/test_forward_secrecy.py` |
-| 13–14 | SIS, Dilithium Signatures (ML-DSA) | [src/crypto/envelope.py](../src/crypto/envelope.py), [src/crypto/pqc_sig.py](../src/crypto/pqc_sig.py) | `python -m src.cli demo-replay` / `pytest tests/test_replay_binding.py` |
+| 12 | Kyber (ML-KEM) | [src/crypto/handshake.py](../src/crypto/handshake.py), [src/crypto/system.py](../src/crypto/system.py) | `python -m src.cli demo-forward-secrecy` / `pytest tests/test_forward_secrecy.py` |
+| 13–14 | SIS, Dilithium Signatures (ML-DSA) | [src/crypto/envelope.py](../src/crypto/envelope.py), [src/crypto/primitives.py](../src/crypto/primitives.py) | `python -m src.cli demo-replay` / `pytest tests/test_replay_binding.py` |
 | 15 | Falcon Signatures (FN-DSA) | [docs/04-nist-standards.md](04-nist-standards.md), [docs/06-math-foundations.md](06-math-foundations.md) | `python -m src.cli doc-check` |
 | 16 | FrodoKEM | [docs/06-math-foundations.md](06-math-foundations.md) | `python -m src.cli doc-check` |
