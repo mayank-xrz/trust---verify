@@ -124,8 +124,17 @@ def main() -> int:
             bkp.restore_backup(admin_ctx, bad, pinned_pubkey=bpub, passphrase=backup_passphrase)
             results.append(("5. Backup Tamper Detection", "FAIL"))
             return 1
-        except DomainIntegrityError:
-            results.append(("5. Backup Tamper Detection", "PASS"))
+        except DomainIntegrityError as exc:
+            assert exc.reason_code == "STEP3_CIPHERTEXT_HASH_MISMATCH"
+
+        wrong_pubkey, _ = generate_ml_dsa_keypair()
+        try:
+            bkp.restore_backup(admin_ctx, bpath, pinned_pubkey=wrong_pubkey, passphrase=backup_passphrase)
+        except DomainIntegrityError as exc:
+            assert exc.reason_code == "STEP2_BAD_SIGNATURE"
+            results.append((f"5. Backup Tamper Detection ({exc.reason_code})", "PASS"))
+        else:
+            raise AssertionError("Backup accepted with the wrong pinned signing key")
 
         disp = AuditDispatcher(sf, clock, "node-a", log_file_path=str(tmp_path / "audit.log"))
         delivered = disp.dispatch_pending()

@@ -11,6 +11,8 @@ import secrets
 import time
 from typing import Any, Dict
 
+from src.identity_keys.crypto import canonical_json_bytes, generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify
+
 
 class BackupIntegrityError(Exception):
     """Raised when backup file has been tampered with or corrupted."""
@@ -20,13 +22,21 @@ class BackupIntegrityError(Exception):
 class BackupManager:
     """Creates tamper-proof, MACed snapshots of node state and restores them securely."""
 
-    def __init__(self, backup_master_key: bytes):
+    def __init__(self, backup_master_key: bytes, *, pinned_pubkey: bytes | None = None, signing_privkey: bytes | None = None):
         if len(backup_master_key) < 32:
             raise ValueError("Backup master key must be at least 32 bytes.")
         self.master_key = backup_master_key
+        if signing_privkey is not None and pinned_pubkey is None:
+            raise ValueError("A signing key requires its pinned public key")
+        if pinned_pubkey is None:
+            pinned_pubkey, signing_privkey = generate_ml_dsa_keypair()
+        self.pinned_pubkey = pinned_pubkey
+        self.signing_privkey = signing_privkey
 
     def create_backup(self, state_data: Dict[str, Any], output_path: str) -> Dict[str, Any]:
         """Serializes, MACs, and writes backup snapshot."""
+        if self.signing_privkey is None:
+            raise ValueError("Backup creation requires an ML-DSA signing key")
         now = time.time()
         backup_id = f"bak-{int(now)}-{secrets.token_hex(4)}"
 
@@ -51,6 +61,12 @@ class BackupManager:
             },
             "payload_b64": base64.b64encode(canonical_json).decode("ascii"),
         }
+
+        manifest = wrapped_snapshot["manifest"]
+        signature = ml_dsa_sign(self.signing_privkey, canonical_json_bytes(manifest))
+        if not ml_dsa_verify(self.pinned_pubkey, canonical_json_bytes(manifest), signature):
+            raise ValueError("Backup signing key does not match the pinned public key")
+        wrapped_snapshot["manifest_sig_b64"] = base64.b64encode(signature).decode("ascii")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
@@ -95,6 +111,15 @@ class BackupManager:
             provided_mac = bytes.fromhex(claimed_mac)
         except (TypeError, ValueError) as e:
             raise BackupIntegrityError(f"Malformed backup MAC: {e}") from e
+
+        try:
+            signature = base64.b64decode(snapshot.get("manifest_sig_b64", ""), validate=True)
+        except (TypeError, ValueError) as exc:
+            raise BackupIntegrityError("Backup ML-DSA signature is malformed") from exc
+        if not signature:
+            raise BackupIntegrityError("Backup ML-DSA signature is missing")
+        if not ml_dsa_verify(self.pinned_pubkey, canonical_json_bytes(manifest), signature):
+            raise BackupIntegrityError("Backup ML-DSA signature verification failed")
 
         if not hmac.compare_digest(expected_mac, provided_mac):
             raise BackupIntegrityError("Backup HMAC signature verification failed! Tampering detected.")
