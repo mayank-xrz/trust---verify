@@ -1,0 +1,231 @@
+{
+  "adapter": "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py",
+  "python": "3.12.16",
+  "cases": [
+    {
+      "label": "setup",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "op": "setup",
+        "owners": {
+          "asset-f583cb3e85434560": "actor-dc2107154f75625d"
+        },
+        "disabled": [],
+        "contents": "[REDACTED PLAINTEXT BODY]",
+        "key_material": "[REDACTED]"
+      },
+      "pid": 12499,
+      "exit_code": 0,
+      "raw_stdout": "{\"ready\": true}\n",
+      "raw_stderr": "",
+      "assertions": {
+        "exit_zero": true,
+        "one_json_object": true,
+        "state_in_selected_dir": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "A authorized protected_read",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "op": "protected_read",
+        "actor": "actor-dc2107154f75625d",
+        "asset": "asset-f583cb3e85434560",
+        "challenge": "adb7489b3c95dd29a90b70c94a469a8e41bafb70d1e4f804",
+        "public_key": {
+          "base64_length": 1580,
+          "sha256_prefix": "c7e7e134837a"
+        }
+      },
+      "pid": 12500,
+      "exit_code": 0,
+      "raw_stdout": "{\"ciphertext\": \"SAMqEYZ2cmjLi45Qf4ORUQ1RRg3PxcbAIPEKjmQfTMyDHmKF9C8UzZAvi/aZTaN/vtmyrXZC/pjCN2xGaToHcirMVHkCK4/b4eDNZbITW4WZ+iSKI1ZMz/vt8Wa4W0dTbNXjdKPtEKMBQD63nE5yG2AbNh/z9aa5Fpf4ekZlfH91yXXYHDlrIBMaUc+BNTIXk/NosOMumsi9OGlZeRcqTKn5j7QHtnLSxfPcPt6qUTDfofHCeeG2Z0UBKkXQ3XNYiP/BAPEHpfU8R27B2dNbB4jdN+zCMC2s0Z/UNIowx7wyHAc4gERWsILmMq6g0eQDTgzkAt8VW/TPARFwPBeYtoR1XGx2UeuBsg7t7N64jsUixJC78d342HBtfuy1rPdGWzWh/Mbd0NrdvXwZi6SBWq0wD2vhXCoXb3JdEdofzGdi7jd/nzrSntOyt6x7B8BE+y10mga5EPBuunrQgrHqvYmCOIQ6yVM4qOcbZFgUgmvyRV3V7YMnpDp6aG2Lmy6BEmAYUD87XNVP5EOO5fnIeBx6L4VEqQ98lYBWElaw6wBuJyZDl9A3zXCE5i/NmnazDogJTUwgekNbTKq8MhYccNmCMYXrlXkRE+dER0M7PHVKZ3D9TExuIY4KgxbQOmJJ4Gqsa3V6PQgreuOJwX1qQ9AHSgM5gYOjXE5KMipDbE/gxclhR0BNqoDmLvPyh00aXey+d5f60BlNi2ODC1lY/GmH5XjYPkzekv7pxAvvrRNlDxnMlcXrLCV6CPaaKImmIO/mn9JuYJt60HzwpIRw8tKbMhxZHYN0C0IPlJdl6WoBu5Xl9j/vU3rEP9Tw5Rd21isHlqwUVgqkXI6C48WAGVDWiIbviXGySY1AOb+PJFmAn55w+uP8/2laVsgUX+wU5I6kQpzBAyI35IdnPsfDacqvk3JgwtOo8pmbsbk0phlg366mMImdwwPhAceUnvkBSTBk+oXXog5LnBP8wbfLuzKcW1S0DBoTquKjkEgRknF6azud3xrboOAdP/YdAKJm4BR6QHGJflIvIwsx9+KJ9DUATTlBk3G+h9l/HGA9AYwMlJ+90eo2qXplYe4EmfxrnJg3Mqh9ebAaKefZSlYByd5mMuBeVBxKRKjeI4fMHw5l41JjV1svLecFVtdOWAheQxJPaUnjTgZ8h7q3aKN2hdMQmJX3L+MI9UZwjE7Vty4OClX/OI8GoajdVfbIosIKA2D45VRKuVtBvsLks79i43TKR6QfQSQeKvjX7gegoRlAbU2Gve9123/hAW2ve7x/ZGby9WmHu/PpEZvFLm1+KP6rawbE1uChQzQd+xZ+hjqtKlR9aYJCmp1YxcozYhEEmsEQoyxxV962bARMhuxbKv9PjdoH2J5AYmMhr6DtXv+iEpmH/ItL8ZVQ3W0lWN5Rtp4HOthUFbeJuo5nONFeFfisW5uxf2sz1RIUj8PRCts=\", \"proof\": \"6e606d74d26f75cdba7bbb9029ecc4e7f00b27ce37f0d4476cbf2f664b3825d2\"}\n",
+      "raw_stderr": "",
+      "assertions": {
+        "exit_zero": true,
+        "separate_process": true,
+        "authorized_fields": true,
+        "standard_base64": true,
+        "kem_ciphertext_length": true,
+        "exact_hmac_transcript": true,
+        "lowercase_hex_proof": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "B unauthorized protected_read",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "op": "protected_read",
+        "actor": "non-owner-59121231fbf5a5bf",
+        "asset": "asset-f583cb3e85434560",
+        "challenge": "adb7489b3c95dd29a90b70c94a469a8e41bafb70d1e4f804",
+        "public_key": {
+          "base64_length": 1580,
+          "sha256_prefix": "c7e7e134837a"
+        }
+      },
+      "pid": 12501,
+      "exit_code": 0,
+      "raw_stdout": "{\"decision\": \"deny\"}\n",
+      "raw_stderr": "",
+      "assertions": {
+        "exit_zero": true,
+        "explicit_denial": true,
+        "no_ciphertext_or_proof": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "C1 invalid Base64",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "op": "protected_read",
+        "actor": "actor-dc2107154f75625d",
+        "asset": "asset-f583cb3e85434560",
+        "challenge": "adb7489b3c95dd29a90b70c94a469a8e41bafb70d1e4f804",
+        "public_key": {
+          "base64_length": 4,
+          "sha256_prefix": "53bc5cce8c57"
+        }
+      },
+      "pid": 12502,
+      "exit_code": 1,
+      "raw_stdout": "",
+      "raw_stderr": "Request failed\n",
+      "assertions": {
+        "nonzero_exit": true,
+        "no_stdout": true,
+        "diagnostic_only_on_stderr": true,
+        "no_traceback": true,
+        "no_proof_or_plaintext": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "C2 wrong key length",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "op": "protected_read",
+        "actor": "actor-dc2107154f75625d",
+        "asset": "asset-f583cb3e85434560",
+        "challenge": "adb7489b3c95dd29a90b70c94a469a8e41bafb70d1e4f804",
+        "public_key": {
+          "base64_length": 28,
+          "sha256_prefix": "064b9db4fce6"
+        }
+      },
+      "pid": 12503,
+      "exit_code": 1,
+      "raw_stdout": "",
+      "raw_stderr": "Request failed\n",
+      "assertions": {
+        "nonzero_exit": true,
+        "no_stdout": true,
+        "diagnostic_only_on_stderr": true,
+        "no_traceback": true,
+        "no_proof_or_plaintext": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "D tampered challenge",
+      "command": "local HMAC recomputation",
+      "input_summary": {
+        "original_challenge": "adb7489b3c95dd29a90b70c94a469a8e41bafb70d1e4f804",
+        "altered_challenge": "0b72c31ed1f29af2daffdd122b1b2cdcd6285c4546cc50b2",
+        "stored_body": "[REDACTED PLAINTEXT BODY]"
+      },
+      "raw_stdout": "{\"ciphertext\": \"SAMqEYZ2cmjLi45Qf4ORUQ1RRg3PxcbAIPEKjmQfTMyDHmKF9C8UzZAvi/aZTaN/vtmyrXZC/pjCN2xGaToHcirMVHkCK4/b4eDNZbITW4WZ+iSKI1ZMz/vt8Wa4W0dTbNXjdKPtEKMBQD63nE5yG2AbNh/z9aa5Fpf4ekZlfH91yXXYHDlrIBMaUc+BNTIXk/NosOMumsi9OGlZeRcqTKn5j7QHtnLSxfPcPt6qUTDfofHCeeG2Z0UBKkXQ3XNYiP/BAPEHpfU8R27B2dNbB4jdN+zCMC2s0Z/UNIowx7wyHAc4gERWsILmMq6g0eQDTgzkAt8VW/TPARFwPBeYtoR1XGx2UeuBsg7t7N64jsUixJC78d342HBtfuy1rPdGWzWh/Mbd0NrdvXwZi6SBWq0wD2vhXCoXb3JdEdofzGdi7jd/nzrSntOyt6x7B8BE+y10mga5EPBuunrQgrHqvYmCOIQ6yVM4qOcbZFgUgmvyRV3V7YMnpDp6aG2Lmy6BEmAYUD87XNVP5EOO5fnIeBx6L4VEqQ98lYBWElaw6wBuJyZDl9A3zXCE5i/NmnazDogJTUwgekNbTKq8MhYccNmCMYXrlXkRE+dER0M7PHVKZ3D9TExuIY4KgxbQOmJJ4Gqsa3V6PQgreuOJwX1qQ9AHSgM5gYOjXE5KMipDbE/gxclhR0BNqoDmLvPyh00aXey+d5f60BlNi2ODC1lY/GmH5XjYPkzekv7pxAvvrRNlDxnMlcXrLCV6CPaaKImmIO/mn9JuYJt60HzwpIRw8tKbMhxZHYN0C0IPlJdl6WoBu5Xl9j/vU3rEP9Tw5Rd21isHlqwUVgqkXI6C48WAGVDWiIbviXGySY1AOb+PJFmAn55w+uP8/2laVsgUX+wU5I6kQpzBAyI35IdnPsfDacqvk3JgwtOo8pmbsbk0phlg366mMImdwwPhAceUnvkBSTBk+oXXog5LnBP8wbfLuzKcW1S0DBoTquKjkEgRknF6azud3xrboOAdP/YdAKJm4BR6QHGJflIvIwsx9+KJ9DUATTlBk3G+h9l/HGA9AYwMlJ+90eo2qXplYe4EmfxrnJg3Mqh9ebAaKefZSlYByd5mMuBeVBxKRKjeI4fMHw5l41JjV1svLecFVtdOWAheQxJPaUnjTgZ8h7q3aKN2hdMQmJX3L+MI9UZwjE7Vty4OClX/OI8GoajdVfbIosIKA2D45VRKuVtBvsLks79i43TKR6QfQSQeKvjX7gegoRlAbU2Gve9123/hAW2ve7x/ZGby9WmHu/PpEZvFLm1+KP6rawbE1uChQzQd+xZ+hjqtKlR9aYJCmp1YxcozYhEEmsEQoyxxV962bARMhuxbKv9PjdoH2J5AYmMhr6DtXv+iEpmH/ItL8ZVQ3W0lWN5Rtp4HOthUFbeJuo5nONFeFfisW5uxf2sz1RIUj8PRCts=\", \"proof\": \"6e606d74d26f75cdba7bbb9029ecc4e7f00b27ce37f0d4476cbf2f664b3825d2\"}\n",
+      "raw_stderr": "",
+      "assertions": {
+        "challenge_changes_expected_proof": true,
+        "response_matches_original_only": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "malformed JSON process behavior",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": "[MALFORMED JSON]",
+      "pid": 12504,
+      "exit_code": 1,
+      "raw_stdout": "",
+      "raw_stderr": "Request failed\n",
+      "assertions": {
+        "nonzero_exit": true,
+        "no_stdout": true,
+        "stderr_only": true,
+        "no_traceback": true,
+        "no_plaintext_or_secret_in_output": true
+      },
+      "verdict": "PASS"
+    },
+    {
+      "label": "fallback temp state and fresh processes",
+      "command": [
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/../work/venv/bin/python",
+        "-B",
+        "/Users/mayank/Documents/Codex/2026-11-26/files-pasted-by-the-user-role/outputs/track4_service.py"
+      ],
+      "input_summary": {
+        "setup": "[REDACTED PLAINTEXT BODY]",
+        "read": {
+          "op": "read",
+          "actor": "actor-dc2107154f75625d",
+          "asset": "asset-f583cb3e85434560",
+          "request_id": "bf1ba5a0ff250bed"
+        }
+      },
+      "setup_pid": 12505,
+      "read_pid": 12506,
+      "setup_exit_code": 0,
+      "read_exit_code": 0,
+      "raw_setup_stdout": "{\"ready\": true}\n",
+      "raw_setup_stderr": "",
+      "read_stdout_redacted": "{\"decision\": \"allow\", \"body\": \"[REDACTED PLAINTEXT BODY]\"}\n",
+      "raw_read_stderr": "",
+      "assertions": {
+        "setup_exit_zero": true,
+        "read_exit_zero": true,
+        "separate_process": true,
+        "fallback_state_file": true,
+        "persisted_body_matches": true,
+        "no_secret_in_diagnostics": true,
+        "one_json_object_per_success": true
+      },
+      "verdict": "PASS"
+    }
+  ],
+  "overall": "PASS"
+}
