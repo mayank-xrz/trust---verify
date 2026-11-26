@@ -40,6 +40,13 @@ from src.crypto.primitives import CryptoError, unb64
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
 
+
+class RecipientKeyStateError(CryptoError):
+    def __init__(self, state: str, cutoff: float):
+        super().__init__(f"Recipient key is {state}")
+        self.state = state
+        self.cutoff = cutoff
+
 def _load_schema(filename: str) -> Dict[str, Any]:
     path = os.path.join(SCHEMAS_DIR, filename)
     if os.path.exists(path):
@@ -185,7 +192,7 @@ def create_app(
                 return unb64(record.private_key_b64, ml_kem_768.SECRET_KEY_SIZE)
             record = identity.key_manager.keys.get(key_id)
             if record is not None and record.owner_node_id == node_id:
-                raise CryptoError(f"Recipient key is {record.state.value.lower()}")
+                raise RecipientKeyStateError(record.state.value.lower(), record.grace_period_cutoff)
         raise CryptoError("Unknown recipient key")
 
     def _service_info() -> Dict[str, Any]:
@@ -458,6 +465,13 @@ def create_app(
                 status="DENIED",
                 metadata={"error": str(e)},
             )
+            metadata = {"error": str(e), "source_service": sender_id, "target_service": node_id}
+            if isinstance(e, RecipientKeyStateError):
+                metadata.update({
+                    "authenticated_sender": True,
+                    "recipient_key_state": e.state,
+                    "seconds_since_cutoff": time.time() - e.cutoff,
+                })
             alerts = audit.rule_engine.evaluate_event({
                 "event_id": envelope.get("message_id", str(uuid.uuid4())),
                 "timestamp_ns": time.time_ns(),
@@ -466,7 +480,7 @@ def create_app(
                 "service": node_id,
                 "resource": "/receive",
                 "status": "DENIED",
-                "metadata": {"error": str(e)},
+                "metadata": metadata,
             })
             for a in alerts:
                 recent_alerts.append(getattr(a, "to_dict", lambda: a)())

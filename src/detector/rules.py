@@ -179,6 +179,7 @@ class ContextRuleEngine:
         # subject -> deque of timestamps
         self.subject_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
         self.sensitive_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
+        self.stale_key_history: Dict[tuple[str, str], float] = {}
 
     def evaluate_event(self, event: Dict[str, Any]) -> List[RuleAlert]:
         """Evaluates single event against all explainable rules."""
@@ -195,6 +196,20 @@ class ContextRuleEngine:
         # 2. Crypto attack / replay check
         r2 = DetectionRules.check_crypto_tamper_or_replay(event)
         if r2:
+            metadata = event.get("metadata", {})
+            if (
+                metadata.get("authenticated_sender") is True
+                and metadata.get("recipient_key_state") == "expired"
+                and 0 <= metadata.get("seconds_since_cutoff", float("inf")) <= 5
+            ):
+                pair = (r2.subject, r2.service)
+                now = time.monotonic()
+                previous = self.stale_key_history.get(pair)
+                self.stale_key_history[pair] = now
+                if previous is None or now - previous > self.burst_window_sec:
+                    r2.rule_name = "RECENT_ROTATION_STALE_KEY"
+                    r2.severity = "LOW"
+                    r2.description = "Authenticated sender used a recently expired recipient key"
             alerts.append(r2)
 
         # 3. Burst frequency check (brute force / flood)
@@ -251,4 +266,13 @@ class ContextRuleEngine:
                         )
                     )
 
+        for alert in alerts:
+            metadata = event.get("metadata", {})
+            alert.evidence = {
+                **alert.evidence,
+                "identity": alert.subject,
+                "services": [metadata.get("source_service", alert.service), metadata.get("target_service", alert.service)],
+                "event_ids": [event.get("event_id", "")],
+                "rule_id": alert.rule_name,
+            }
         return alerts
