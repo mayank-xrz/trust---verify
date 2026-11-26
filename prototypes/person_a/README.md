@@ -1,5 +1,9 @@
 # Track 4 local crypto prototype
 
+> **Archived sub-project.** This directory is retained for provenance and is
+> excluded from the root pytest run. See [../../docs/ARCHIVED.md](../../docs/ARCHIVED.md).
+> The canonical implementation lives in `src/`.
+
 This directory is a self-contained local submission root. `track4_service.py` is its only root-level adapter. It implements the organizer's `setup`, `read`, `revoke`, `audit`, and `protected_read` operations. The separate `crypto/` package provides an experimental authenticated messaging API; it is not exposed as an organizer adapter operation.
 
 ## Requirements

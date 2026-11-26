@@ -18,3 +18,8 @@ files = ["src/identity_keys", "track4_service.py", "scripts/seed_sandbox.py", "s
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Standalone historical sub-projects keep their own import roots and are not
+# part of the root suite. They are retained for provenance (see docs/ARCHIVED.md)
+# and must be run from their own directories.
+norecursedirs = ["role3_logging_detector", "prototypes", ".venv", "build", "dist"]
+addopts = "--ignore=role3_logging_detector --ignore=prototypes"

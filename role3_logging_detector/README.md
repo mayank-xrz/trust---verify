@@ -1,5 +1,9 @@
 # Track 4 — Role 3: Logging & Explainable Detection
 
+> **Archived sub-project.** This directory is retained for provenance and is
+> excluded from the root pytest run. See [../docs/ARCHIVED.md](../docs/ARCHIVED.md).
+> The canonical implementation lives in `src/`.
+
 Beginner-friendly, zero-dependency Python module for **Track 4 ("Trust, but verify")** covering:
 - **Injection-proof, hash-chained `.jsonl` audit logging + verifier CLI** ([src/audit_logger.py](src/audit_logger.py))
 - **Rule + graph-based detector with clock-skew handling** ([src/detector.py](src/detector.py))
