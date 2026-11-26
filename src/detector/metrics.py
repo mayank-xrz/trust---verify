@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from statistics import median
 from typing import Any, Dict, List
 
 
@@ -18,6 +19,7 @@ class DetectionBenchmarkMetrics:
     f1_score: float
     mtta_ms: float  # Mean Time To Alert in milliseconds
     false_alerts_per_1k: float
+    median_time_to_alert_ms: float
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -44,7 +46,8 @@ def compute_f1_mtta(
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
     mtta = (sum(alert_latencies_ms) / len(alert_latencies_ms)) if alert_latencies_ms else 0.0
-    fp_per_1k = (fp / total * 1000.0) if total > 0 else 0.0
+    benign = fp + tn
+    fp_per_1k = (fp / benign * 1000.0) if benign else 0.0
 
     return DetectionBenchmarkMetrics(
         total_events=total,
@@ -57,4 +60,5 @@ def compute_f1_mtta(
         f1_score=round(f1, 4),
         mtta_ms=round(mtta, 2),
         false_alerts_per_1k=round(fp_per_1k, 4),
+        median_time_to_alert_ms=round(median(alert_latencies_ms), 4) if alert_latencies_ms else 0.0,
     )

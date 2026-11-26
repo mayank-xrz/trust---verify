@@ -337,7 +337,7 @@ def _load_public_key(args: argparse.Namespace) -> Optional[bytes]:
     return None
 
 
-def _self_test() -> int:
+def run_self_test() -> int:
     """Create a signed log, verify it, and assert a forged checkpoint is rejected."""
     public_key, secret_key = _sig_keygen()
     with tempfile.TemporaryDirectory() as tmp:
@@ -397,7 +397,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         # contract probe, so run the built-in signed-log self-test instead of
         # silently succeeding on nothing.
         if args.chain or args.checkpoints or args.self_test:
-            return _self_test()
+            return run_self_test()
         parser.print_usage()
         return 1
 
