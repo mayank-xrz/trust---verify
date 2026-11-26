@@ -24,6 +24,9 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     PublicFormat,
 )
+from pqcrypto.sign import ml_dsa_65
+
+from src.crypto._pqcrypto_compat import sig_keygen, sig_sign, sig_verify
 
 
 def sha256_hex(data: bytes) -> str:
@@ -65,6 +68,21 @@ def ed25519_verify(public_key_bytes: bytes, message: bytes, signature: bytes) ->
         return True
     except (InvalidSignature, ValueError):
         return False
+
+
+def generate_ml_dsa_keypair() -> tuple[bytes, bytes]:
+    """Generate an ML-DSA-65 (public_key, private_key) pair."""
+    return sig_keygen(ml_dsa_65)
+
+
+def ml_dsa_sign(private_key_bytes: bytes, message: bytes) -> bytes:
+    """Sign a message with an ML-DSA-65 private key."""
+    return sig_sign(ml_dsa_65, private_key_bytes, message)
+
+
+def ml_dsa_verify(public_key_bytes: bytes, message: bytes, signature: bytes) -> bool:
+    """Verify an ML-DSA-65 signature. Returns True iff cryptographically valid."""
+    return sig_verify(ml_dsa_65, public_key_bytes, message, signature)
 
 
 def aes_gcm_wrap(key_32: bytes, plaintext: bytes, aad: bytes) -> tuple[bytes, bytes]:

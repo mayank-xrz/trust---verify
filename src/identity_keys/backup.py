@@ -1,4 +1,4 @@
-"""Encrypted, Ed25519-signed backup creation and 11-step fail-closed restore."""
+"""Encrypted, ML-DSA-65-signed backup creation and 11-step fail-closed restore."""
 
 from __future__ import annotations
 
@@ -25,8 +25,8 @@ from .crypto import (
     b64d,
     b64e,
     canonical_json_bytes,
-    ed25519_sign,
-    ed25519_verify,
+    ml_dsa_sign,
+    ml_dsa_verify,
     sha256_hex,
 )
 from .db import tx_session
@@ -284,13 +284,14 @@ class BackupService:
                 "device_status_digest": dev_digest,
                 "merkle_root": merkle,
                 "header_sha256": header_sha256,
+                "signature_algorithm": "ML-DSA-65",
             }
             aad = header_bytes + canonical_json_bytes(manifest_core)
             enc_key = _scrypt_key(passphrase, salt)
             nonce, ciphertext = aes_gcm_wrap(enc_key, tar_gz, aad)
 
             manifest = {**manifest_core, "ciphertext_sha256": sha256_hex(ciphertext)}
-            manifest_sig = ed25519_sign(signing_privkey, canonical_json_bytes(manifest))
+            manifest_sig = ml_dsa_sign(signing_privkey, canonical_json_bytes(manifest))
 
             envelope = {
                 "header": header_core,
@@ -379,7 +380,7 @@ class BackupService:
             raise DomainIntegrityError("Malformed backup container", "STEP1_PARSE_ERROR") from exc
 
         # Step 2: Verify manifest signature using PINNED public key only
-        if not ed25519_verify(pinned_pubkey, canonical_json_bytes(manifest), sig_bytes):
+        if not ml_dsa_verify(pinned_pubkey, canonical_json_bytes(manifest), sig_bytes):
             self._audit_rejected(
                 actor_ctx, manifest.get("backup_id", "unknown"), "STEP2_BAD_SIGNATURE"
             )

@@ -17,7 +17,12 @@ from src.identity_keys.api import create_app
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.backup import BackupService
 from src.identity_keys.clock import FakeClock
-from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair
+from src.identity_keys.crypto import (
+    b64e,
+    ed25519_sign,
+    generate_ed25519_keypair,
+    generate_ml_dsa_keypair,
+)
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session
 from src.identity_keys.errors import Conflict
 from src.identity_keys.errors import IntegrityError as DomainIntegrityError
@@ -304,7 +309,7 @@ def test_11_availability_of_committed_protected_data_after_recovery(sandbox) -> 
 
 
 def test_12_successful_restoration_of_authentic_backup(sandbox, tmp_path: Path) -> None:
-    pub, priv = generate_ed25519_keypair()
+    pub, priv = generate_ml_dsa_keypair()
     bkp = tmp_path / "s12.tbv"
     sandbox["bkp_svc"].create_backup(sandbox["admin_ctx"], bkp, signing_privkey=priv, passphrase="pw")
     res = sandbox["bkp_svc"].restore_backup(sandbox["admin_ctx"], bkp, pinned_pubkey=pub, passphrase="pw")
@@ -312,7 +317,7 @@ def test_12_successful_restoration_of_authentic_backup(sandbox, tmp_path: Path) 
 
 
 def test_13_rejection_of_damaged_backup(sandbox, tmp_path: Path) -> None:
-    pub, priv = generate_ed25519_keypair()
+    pub, priv = generate_ml_dsa_keypair()
     bkp = tmp_path / "s13.tbv"
     sandbox["bkp_svc"].create_backup(sandbox["admin_ctx"], bkp, signing_privkey=priv, passphrase="pw")
     data = bytearray(bkp.read_bytes())
@@ -323,7 +328,7 @@ def test_13_rejection_of_damaged_backup(sandbox, tmp_path: Path) -> None:
 
 
 def test_14_rejection_of_rollback_that_would_reactivate_revoked_keys(sandbox, tmp_path: Path) -> None:
-    pub, priv = generate_ed25519_keypair()
+    pub, priv = generate_ml_dsa_keypair()
     bkp = tmp_path / "s14.tbv"
     sandbox["bkp_svc"].create_backup(sandbox["admin_ctx"], bkp, signing_privkey=priv, passphrase="pw")
     d1, _, _, _ = _enroll_token(sandbox, sandbox["users"]["alice"], "s14-d")
