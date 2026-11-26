@@ -37,7 +37,7 @@ class ReplayLedger:
         try:
             with db:
                 db.execute("BEGIN IMMEDIATE")
-                if db.execute("SELECT COUNT(*) FROM seen WHERE session=?", (session,)).fetchone()[0] >= self.max_rows:
+                if db.execute("SELECT COUNT(*) FROM seen WHERE session=? AND sender=? AND recipient=? AND epoch=?", (session, sender, recipient, epoch)).fetchone()[0] >= self.max_rows:
                     raise CryptoError("replay ledger capacity reached")
                 try:
                     db.execute("INSERT INTO seen VALUES (?,?,?,?,?)", (session, sender, recipient, epoch, counter))
@@ -51,7 +51,7 @@ class ReplayLedger:
         try:
             with db:
                 db.execute("BEGIN IMMEDIATE")
-                if db.execute("SELECT COUNT(*) FROM completed_transfers WHERE session=?", (session,)).fetchone()[0] >= self.max_rows:
+                if db.execute("SELECT COUNT(*) FROM completed_transfers WHERE session=? AND sender=? AND recipient=?", (session, sender, recipient)).fetchone()[0] >= self.max_rows:
                     raise CryptoError("transfer ledger capacity reached")
                 try:
                     db.execute(

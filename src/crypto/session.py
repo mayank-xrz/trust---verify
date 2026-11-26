@@ -13,6 +13,7 @@ Forward-secrecy scope:
 
 import hashlib
 import hmac
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,7 @@ import secrets
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
@@ -155,8 +157,9 @@ class TrustRegistry:
 
 
 class PrekeyStore:
-    def __init__(self, state_path=None):
+    def __init__(self, state_path=None, registry=None):
         self.state_path = Path(state_path) if state_path is not None else None
+        self.registry = registry
         self._private = {}
         if self.state_path is not None and self.state_path.exists():
             self._load()
@@ -166,11 +169,16 @@ class PrekeyStore:
             data = json.load(stream)
         self._private = {}
         for prekey_id, entry in data.get("prekeys", {}).items():
-            self._private[prekey_id] = (
-                unb64(entry["kem_private"], ml_kem_768.SECRET_KEY_SIZE),
-                unb64(entry["dh_private"], 48),
-                int(entry["expires"]),
-            )
+            self._private[prekey_id] = {
+                "kem_private": unb64(entry["kem_private"], ml_kem_768.SECRET_KEY_SIZE),
+                "dh_private": unb64(entry["dh_private"], 48),
+                "created_at": entry.get("created_at", 0),
+                "expires_at": entry.get("expires_at", entry.get("expires")),
+                "revoked": entry.get("revoked", False),
+                "offer": entry.get("offer"),
+                "identity": entry.get("identity"),
+                "device": entry.get("device"),
+            }
         self.purge_expired()
 
     def _save(self):
@@ -179,11 +187,16 @@ class PrekeyStore:
         payload = {
             "prekeys": {
                 prekey_id: {
-                    "kem_private": b64(kem_priv),
-                    "dh_private": b64(dh_priv),
-                    "expires": expires,
+                    "kem_private": b64(entry["kem_private"]),
+                    "dh_private": b64(entry["dh_private"]),
+                    "created_at": entry["created_at"],
+                    "expires_at": entry["expires_at"],
+                    "revoked": entry["revoked"],
+                    "offer": entry.get("offer"),
+                    "identity": entry.get("identity"),
+                    "device": entry.get("device"),
                 }
-                for prekey_id, (kem_priv, dh_priv, expires) in self._private.items()
+                for prekey_id, entry in self._private.items()
             }
         }
         try:
@@ -193,7 +206,7 @@ class PrekeyStore:
 
     def purge_expired(self, now=None):
         cutoff = time.time() if now is None else now
-        expired = [pid for pid, (_, _, exp) in self._private.items() if exp < cutoff]
+        expired = [pid for pid, entry in self._private.items() if entry["expires_at"] <= cutoff]
         for pid in expired:
             del self._private[pid]
         if expired:
@@ -202,9 +215,14 @@ class PrekeyStore:
 
     def offer(self, identity, device, signing_secret, lifetime=300):
         self.purge_expired()
+        if self.registry is not None and self.registry.is_revoked(identity, device):
+            raise CryptoError("peer trust revoked")
+        if type(lifetime) is not int or lifetime <= 0:
+            raise CryptoError("invalid prekey lifetime")
         public, private = ml_kem_768.generate_keypair()
         dh_public, dh_private = classical.keypair()
-        expires = int(time.time()) + lifetime
+        created = int(time.time())
+        expires = created + lifetime
         offer = {
             "version": VERSION,
             "suite": SUITE,
@@ -215,20 +233,41 @@ class PrekeyStore:
             "x25519_public_key": b64(dh_public),
             "expires": expires,
         }
-        self._private[offer["prekey_id"]] = (private, dh_private, expires)
+        signed_offer = {**offer, "signature": b64(sign(signing_secret, "track4/v1/prekey", offer))}
+        self._private[offer["prekey_id"]] = {"kem_private": private, "dh_private": dh_private,
+                                             "created_at": created, "expires_at": expires,
+                                             "revoked": False, "offer": signed_offer,
+                                             "identity": identity, "device": device}
         self._save()
-        return {**offer, "signature": b64(sign(signing_secret, "track4/v1/prekey", offer))}
+        return signed_offer
+
+    def bundle(self, prekey_id):
+        self.purge_expired()
+        entry = self._private.get(prekey_id)
+        if entry is None or entry["revoked"] or entry.get("offer") is None or (
+            self.registry is not None and self.registry.is_revoked(entry["identity"], entry["device"])
+        ):
+            raise CryptoError("expired or revoked prekey")
+        return entry["offer"].copy()
 
     def take(self, prekey_id):
         self.purge_expired()
         try:
-            private, dh_private, expires = self._private.pop(prekey_id)
+            entry = self._private.pop(prekey_id)
         except KeyError as exc:
             raise CryptoError("prekey used or missing") from exc
         self._save()
-        if expires < time.time():
-            raise CryptoError("expired prekey")
-        return private, dh_private
+        if entry["revoked"] or entry["expires_at"] <= time.time() or (
+            self.registry is not None and self.registry.is_revoked(entry["identity"], entry["device"])
+        ):
+            raise CryptoError("expired or revoked prekey")
+        return entry["kem_private"], entry["dh_private"]
+
+    def revoke(self, prekey_id):
+        if prekey_id not in self._private:
+            raise CryptoError("prekey used or missing")
+        self._private[prekey_id]["revoked"] = True
+        self._save()
 
 
 def _handshake_derive(kem_shared, dh_shared, init, sender_id, sender_dev, recv_id, recv_dev, with_confirm=False):
@@ -336,6 +375,8 @@ def accept(offer, init_signed, responder_signing_secret, registry, prekeys, stat
         unsigned_offer["responder_device"],
     ):
         raise CryptoError("wrong responder")
+    if registry.is_revoked(init["responder"], init["responder_device"]):
+        raise CryptoError("peer trust revoked")
     verify(
         registry.key(init["initiator"], init["initiator_device"]),
         "track4/v1/init",
@@ -404,16 +445,23 @@ class Session:
 
     grace_epochs = 0
 
-    def __init__(self, root, transcript, identity, device, ready=True, state_path=None, auto_rekey_at=None, _initial_chains=None):
+    def __init__(self, root, transcript, identity, device, ready=True, state_path=None, auto_rekey_at=None, _initial_chains=None, max_messages_per_epoch=MAX_MESSAGES_PER_EPOCH):
         self.root = root
         self.transcript = transcript
         self.identity = identity
         self.device = device
-        self.state_path = Path(state_path) if state_path is not None else None
+        if state_path is None:
+            label = canonical({"session_id": transcript["session_id"], "identity": identity, "device": device})
+            filename = hashlib.sha256(label).hexdigest() + ".json"
+            state_path = Path(os.environ.get("TRACK4_STATE_DIR") or tempfile.gettempdir()) / "track4-local" / "sessions" / filename
+        self.state_path = Path(state_path)
         self.epoch = 0
         self.send_counter = 0
         self.recv_counter = 0
-        self.auto_rekey_at = MAX_MESSAGES_PER_EPOCH - 10 if auto_rekey_at is None else auto_rekey_at
+        self.max_messages_per_epoch = max_messages_per_epoch
+        self.auto_rekey_at = max_messages_per_epoch if auto_rekey_at is None else auto_rekey_at
+        if type(self.max_messages_per_epoch) is not int or not 1 <= self.max_messages_per_epoch <= MAX_MESSAGES_PER_EPOCH or type(self.auto_rekey_at) is not int or not 1 <= self.auto_rekey_at <= self.max_messages_per_epoch:
+            raise CryptoError("invalid epoch message limit")
         self._skipped_keys = {}
         self._send_lock = threading.Lock()
         self.ready = ready
@@ -429,11 +477,15 @@ class Session:
             self._send_chain_key = _derive_chain_key(self.root, self.identity, self.device, self.epoch)
             self._recv_chain_key = _derive_chain_key(self.root, self.peer, self.peer_device, self.epoch)
         if self.state_path is not None and self.ready:
+            if self.state_path.exists():
+                raise CryptoError("session state already exists")
             self._persist()
 
     def _persist(self):
         if self.state_path is None:
             return
+        if self.state_path.is_dir():
+            raise CryptoError("invalid session state path")
         payload = {
             "session_id": self.transcript["session_id"],
             "identity": self.identity,
@@ -444,6 +496,8 @@ class Session:
             "ready": self.ready,
             "epoch": self.epoch,
             "send_counter": self.send_counter,
+            "max_messages_per_epoch": self.max_messages_per_epoch,
+            "auto_rekey_at": self.auto_rekey_at,
             "recv_counter": self.recv_counter,
             "root": b64(self.root),
             "send_chain_key": b64(self._send_chain_key),
@@ -453,6 +507,16 @@ class Session:
             },
         }
         try:
+            marker = self.state_path.with_name(self.state_path.name + ".counter")
+            position = (self.epoch, self.send_counter)
+            if marker.exists():
+                with marker.open(encoding="utf-8") as stream:
+                    old = json.load(stream)
+                previous = (old["epoch"], old["send_counter"])
+                if position < previous:
+                    raise CryptoError("session counter rollback detected")
+            # Write the high-water mark first. A crash between files fails closed on load.
+            _atomic_write_json(marker, {"epoch": position[0], "send_counter": position[1]})
             _atomic_write_json(self.state_path, payload)
         except OSError as exc:
             raise CryptoError("failed to persist session state") from exc
@@ -462,6 +526,24 @@ class Session:
         path = Path(state_path)
         with path.open(encoding="utf-8") as stream:
             data = json.load(stream)
+        marker = path.with_name(path.name + ".counter")
+        if not marker.exists():
+            raise CryptoError("session counter reservation missing")
+        with marker.open(encoding="utf-8") as stream:
+            high_water = json.load(stream)
+        if (data.get("epoch"), data.get("send_counter")) != (high_water.get("epoch"), high_water.get("send_counter")):
+            raise CryptoError("session counter rollback detected")
+        for field in ("session_id", "identity", "device", "peer", "peer_device", "transcript", "root", "send_chain_key", "recv_chain_key", "epoch", "send_counter", "recv_counter", "ready"):
+            if field not in data:
+                raise CryptoError("incomplete session state")
+        limit = data.get("max_messages_per_epoch", MAX_MESSAGES_PER_EPOCH)
+        if (not isinstance(data["transcript"], dict) or
+            type(limit) is not int or not 1 <= limit <= MAX_MESSAGES_PER_EPOCH or
+            type(data["epoch"]) is not int or data["epoch"] < 0 or
+            type(data["send_counter"]) is not int or not 0 <= data["send_counter"] <= limit or
+            type(data["recv_counter"]) is not int or not 0 <= data["recv_counter"] <= limit or
+            data["transcript"].get("session_id") != data["session_id"]):
+            raise CryptoError("invalid session counter or identity")
         inst = cls.__new__(cls)
         inst.root = unb64(data["root"], 32)
         inst.transcript = data["transcript"]
@@ -474,7 +556,10 @@ class Session:
         inst.epoch = int(data["epoch"])
         inst.send_counter = int(data["send_counter"])
         inst.recv_counter = int(data["recv_counter"])
-        inst.auto_rekey_at = int(data.get("auto_rekey_at", MAX_MESSAGES_PER_EPOCH - 10))
+        inst.max_messages_per_epoch = limit
+        inst.auto_rekey_at = data.get("auto_rekey_at", limit)
+        if type(inst.auto_rekey_at) is not int or not 1 <= inst.auto_rekey_at <= limit:
+            raise CryptoError("invalid epoch message limit")
         inst._send_chain_key = unb64(data["send_chain_key"], 32)
         inst._recv_chain_key = unb64(data["recv_chain_key"], 32)
         inst._skipped_keys = {
@@ -483,6 +568,34 @@ class Session:
         }
         inst._send_lock = threading.Lock()
         return inst
+
+    @contextmanager
+    def _disk_lock(self):
+        if self.state_path is None:
+            yield
+            return
+        lock_path = self.state_path.with_name(self.state_path.name + ".lock")
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+
+    def _refresh_for_send(self):
+        if self.state_path is None:
+            return
+        try:
+            fresh = type(self).load(self.state_path)
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise CryptoError("invalid persisted session state") from exc
+        if fresh.transcript != self.transcript or (fresh.identity, fresh.device) != (self.identity, self.device):
+            raise CryptoError("session state identity mismatch")
+        if fresh.epoch < self.epoch or (fresh.epoch == self.epoch and fresh.send_counter < self.send_counter):
+            raise CryptoError("session counter rollback detected")
+        for name in ("root", "epoch", "send_counter", "recv_counter", "_send_chain_key", "_recv_chain_key", "_skipped_keys", "ready"):
+            setattr(self, name, getattr(fresh, name))
 
     def _next_epoch_material(self, next_epoch):
         salt = hashlib.sha256(b"track4/v1/rekey\x00" + next_epoch.to_bytes(8, "big")).digest()
@@ -508,7 +621,9 @@ class Session:
         if not self.ready:
             raise CryptoError("handshake not confirmed")
         with self._send_lock:
-            return self._rekey_locked()
+            with self._disk_lock():
+                self._refresh_for_send()
+                return self._rekey_locked()
 
     def encrypt(self, plaintext, message_id=None, epoch=None):
         if not self.ready:
@@ -516,26 +631,25 @@ class Session:
         if not isinstance(plaintext, bytes):
             raise CryptoError("message limit exceeded or invalid plaintext")
         with self._send_lock:
-            if epoch is None and self.send_counter >= self.auto_rekey_at:
-                self._rekey_locked()
-            target_epoch = self.epoch if epoch is None else epoch
-            if type(target_epoch) is not int or target_epoch != self.epoch:
-                raise CryptoError("invalid key epoch")
-            if self.send_counter >= MAX_MESSAGES_PER_EPOCH:
-                raise CryptoError("message limit exceeded")
-            counter = self.send_counter
-            next_chain, msg_key = _ratchet_step(
-                self._send_chain_key, self.identity, self.device, counter, self.epoch
-            )
-            prev_chain = self._send_chain_key
-            self._send_chain_key = next_chain
-            self.send_counter = counter + 1
-            try:
+            with self._disk_lock():
+                self._refresh_for_send()
+                if epoch is None and self.send_counter >= self.auto_rekey_at:
+                    self._rekey_locked()
+                target_epoch = self.epoch if epoch is None else epoch
+                if type(target_epoch) is not int or target_epoch != self.epoch:
+                    raise CryptoError("invalid key epoch")
+                if self.send_counter >= self.max_messages_per_epoch:
+                    if epoch is not None:
+                        raise CryptoError("explicit epoch exhausted")
+                    self._rekey_locked()
+                counter = self.send_counter
+                next_chain, msg_key = _ratchet_step(
+                    self._send_chain_key, self.identity, self.device, counter, self.epoch
+                )
+                self._send_chain_key = next_chain
+                self.send_counter = counter + 1
                 self._persist()
-            except Exception:
-                self._send_chain_key = prev_chain
-                self.send_counter = counter
-                raise
+                reserved_epoch = self.epoch
         header = {
             "version": VERSION,
             "suite": SUITE,
@@ -546,7 +660,7 @@ class Session:
             "recipient_device": self.peer_device,
             "message_id": message_id or secrets.token_hex(16),
             "counter": counter,
-            "epoch": self.epoch,
+            "epoch": reserved_epoch,
         }
         nonce = counter.to_bytes(12, "big")
         ciphertext, tag = aead.encrypt(msg_key, nonce, canonical(header), plaintext)
@@ -592,7 +706,7 @@ class Session:
         ):
             raise CryptoError("recipient, session, or epoch mismatch")
         counter = header.get("counter")
-        if type(counter) is not int or not 0 <= counter < MAX_MESSAGES_PER_EPOCH or not isinstance(
+        if type(counter) is not int or not 0 <= counter < self.max_messages_per_epoch or not isinstance(
             header.get("message_id"), str
         ):
             raise CryptoError("invalid message metadata")
