@@ -177,8 +177,8 @@ Measured on a standard developer workstation (Apple Silicon / Linux x86_64) usin
 | **F1 Score** | $\ge 0.90$ | **0.96** | Tested against 500 ground-truth attack/benign scenarios |
 | **Precision** | $\ge 0.90$ | **0.95** | Replay, privilege escalation, lateral movement, swap attacks |
 | **Recall** | $\ge 0.90$ | **0.97** | Zero missed high-severity policy violations |
-| **Mean Time to Alert (MTTA)**| $< 50\text{ ms}$ | **0.002 ms ($1.69\,\mu\text{s}$)** | Deterministic in-memory evaluation |
-| **False Positive Rate** | $< 1 / 1,000$ | **0.4 per 1,000 events** | Routine worker activity with legitimate privileges |
+| **Median Time to Alert** | $< 50\text{ ms}$ | Run the detector evaluation | Time from rule evaluation to alert for correctly detected suspicious events |
+| **False Alerts per 1,000 Benign Events** | $< 1 / 1,000$ | Run the detector evaluation | Routine worker activity with legitimate privileges |
 
 ---
 

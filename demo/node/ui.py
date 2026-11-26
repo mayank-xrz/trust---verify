@@ -507,8 +507,8 @@ async function refreshState() {
         <div class="grid-4">
           <div class="chk-item pass"><span class="mono">F1 Score</span><strong>${m.f1_score}</strong></div>
           <div class="chk-item pass"><span class="mono">Precision / Recall</span><strong>${m.precision} / ${m.recall}</strong></div>
-          <div class="chk-item pass"><span class="mono">MTTA</span><strong>${m.mtta_ms} ms</strong></div>
-          <div class="chk-item pass"><span class="mono">FP / 1k Events</span><strong>${m.false_alerts_per_1k}</strong></div>
+          <div class="chk-item pass"><span class="mono">Median time to alert</span><strong>${m.median_time_to_alert_ms} ms</strong></div>
+          <div class="chk-item pass"><span class="mono">False alerts / 1k benign events</span><strong>${m.false_alerts_per_1k}</strong></div>
         </div>
       `;
     }

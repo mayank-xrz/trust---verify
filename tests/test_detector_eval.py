@@ -71,6 +71,14 @@ class TestDetectorEval(unittest.TestCase):
         self.assertLess(metrics.mtta_ms, 50.0, f"MTTA too high: {metrics.mtta_ms} ms")
         self.assertEqual(metrics.false_alerts_per_1k, 0.0)
 
+    def test_median_and_false_alerts_per_benign_event(self):
+        metrics = compute_f1_mtta(
+            [{"is_attack": False, "detected": True}, {"is_attack": True, "detected": True}],
+            [1, 2, 100],
+        )
+        self.assertEqual(metrics.median_time_to_alert_ms, 2)
+        self.assertEqual(metrics.false_alerts_per_1k, 1000)
+
     def test_clock_skew_buffering_and_uncertainty(self):
         """Verify clock sync buffer attaches uncertainty flags and sorts out-of-order events."""
         buffer = ClockSyncBuffer(hold_window_seconds=0.01, max_skew_ms=1000.0, uncertainty_skew_ms=300.0)

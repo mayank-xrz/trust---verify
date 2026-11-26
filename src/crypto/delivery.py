@@ -211,6 +211,10 @@ class ChunkReceiver:
             raise DeliveryInvalidError("Chunk count exceeds payload limit")
 
         buf = self._buffers.get(msg_id)
+        now = self.clock()
+        if buf is not None and now - buf["created_at"] >= self.timeout_seconds:
+            self._expire_message(msg_id)
+            return None
         if buf is None:
             if len(self._buffers) >= self.max_active_messages:
                 oldest_mid = min(self._buffers, key=lambda k: self._buffers[k]["created_at"])
@@ -237,7 +241,7 @@ class ChunkReceiver:
                     }
                 )
             buf = {
-                "created_at": self.clock(),
+                "created_at": now,
                 "sender_identity": sender_id,
                 "session_id": session_id,
                 "chunk_count": chunk_count,
@@ -354,7 +358,8 @@ class ChunkReceiver:
                 )
                 raise DeliveryInvalidError(f"Delivery failed at chunk {idx}: {reason}") from exc
 
-        reassembled = b"".join(plaintext_parts)
+        # A single-item bytes join can return the same object we are about to wipe.
+        reassembled = bytes(bytearray(plaintext_parts[0])) if len(plaintext_parts) == 1 else b"".join(plaintext_parts)
         _zeroize_parts(plaintext_parts)
         if len(reassembled) > MAX_FILE_SIZE_BYTES:
             self._buffers.pop(msg_id, None)
@@ -407,28 +412,28 @@ class ChunkReceiver:
         expired_ids = [
             mid for mid, buf in self._buffers.items() if (now - buf["created_at"]) >= self.timeout_seconds
         ]
-        reports: List[Dict[str, Any]] = []
-        for mid in expired_ids:
-            buf = self._buffers.pop(mid)
-            missing = sorted(set(range(buf["chunk_count"])) - set(buf["chunks"].keys()))
-            emit_crypto_event(
-                self.audit_logger,
-                actor=buf["sender_identity"],
-                source_service=buf["sender_identity"],
-                target_service=f"{self.local_identity}/{self.local_device}",
-                action="delivery_failed_incomplete",
-                outcome="failed",
-                session_id=buf["session_id"],
-                message_id=mid,
-                reason="delivery_timeout",
-                extra={"missing_chunks": ",".join(str(x) for x in missing)},
-            )
-            report = {
-                "action": "delivery_failed_incomplete",
-                "message_id": mid,
-                "missing_chunks": missing,
-                "reason": "delivery_timeout",
-            }
-            self._record_failure(report)
-            reports.append(report)
-        return reports
+        return [self._expire_message(mid) for mid in expired_ids]
+
+    def _expire_message(self, mid: str) -> Dict[str, Any]:
+        buf = self._buffers.pop(mid)
+        missing = sorted(set(range(buf["chunk_count"])) - set(buf["chunks"].keys()))
+        emit_crypto_event(
+            self.audit_logger,
+            actor=buf["sender_identity"],
+            source_service=buf["sender_identity"],
+            target_service=f"{self.local_identity}/{self.local_device}",
+            action="delivery_failed_incomplete",
+            outcome="failed",
+            session_id=buf["session_id"],
+            message_id=mid,
+            reason="delivery_timeout",
+            extra={"missing_chunks": ",".join(str(x) for x in missing)},
+        )
+        report = {
+            "action": "delivery_failed_incomplete",
+            "message_id": mid,
+            "missing_chunks": missing,
+            "reason": "delivery_timeout",
+        }
+        self._record_failure(report)
+        return report
