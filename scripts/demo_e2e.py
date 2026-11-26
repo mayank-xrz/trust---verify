@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from alembic.config import Config
+from pqcrypto.sign import ml_dsa_65
 
 from alembic import command
 
@@ -16,6 +17,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.seed_sandbox import seed_database  # noqa: E402
+from src.crypto._pqcrypto_compat import sig_keygen  # noqa: E402
 from src.identity_keys.audit_outbox import AuditDispatcher, AuditEmitter  # noqa: E402
 from src.identity_keys.backup import BackupService  # noqa: E402
 from src.identity_keys.clock import FakeClock  # noqa: E402
@@ -114,7 +116,8 @@ def main() -> int:
         ).allowed
         results.append(("4. Revocation & Secure Re-Enrollment", "PASS"))
 
-        bpub, bpriv = generate_ed25519_keypair()
+        # Backups are authenticated with ML-DSA-65, so use the matching keypair.
+        bpub, bpriv = sig_keygen(ml_dsa_65)
         bpath = tmp_path / "demo.tbv"
         bkp.create_backup(admin_ctx, bpath, signing_privkey=bpriv, passphrase="demo-passphrase")
         raw = bytearray(bpath.read_bytes())

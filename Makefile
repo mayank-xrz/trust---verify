@@ -61,7 +61,8 @@ brief:
 	$(PYTHON) scripts/build_brief.py --pdf
 
 clean:
-	rm -rf __pycache__ src/**/__pycache__ tests/__pycache__ .pytest_cache /tmp/tbv_data /tmp/demo_audit.log
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov /tmp/tbv_data /tmp/demo_audit.log
 
 distclean: clean
 	rm -rf $(VENV)
