@@ -159,8 +159,23 @@ def test_toolkit_adapter_and_practice_triage_routes(tmp_path: Path) -> None:
     prac = client.post("/api/sandbox/detector/practice-events", json={"use_sample": True}).json()
     assert prac["ok"] is True
     assert prac["total_events"] >= 15
-    if prac["label_matches"] != "no local labels.csv":
-        assert prac["label_matches"] == "22/22"
+    if prac["dataset_source"] == "built-in synthetic sample":
+        assert prac["label_matches"] == "no labels.csv provided"
+        assert prac["findings_summary"]["unexpected_role_changes"]
+
+    labelled = client.post(
+        "/api/sandbox/detector/practice-events",
+        json={
+            "events_csv": (
+                "event_id,event_time_utc,received_time_utc,actor,source_service,target_service,action,outcome\n"
+                "evt-1,2026-01-15T09:00:00Z,2026-01-15T09:00:00Z,alice,portal,reports,read,allow\n"
+            ),
+            "labels_csv": "event_id,label\nevt-1,routine\n",
+        },
+    ).json()
+    assert labelled["ok"] is True
+    assert labelled["label_matches"] == "1/1"
+    assert labelled["mismatches"] == []
 
 
 def test_audit_file_verify_endpoint(tmp_path: Path) -> None:
