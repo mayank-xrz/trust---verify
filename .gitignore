@@ -1,27 +1,39 @@
-# Byte-compiled / optimized / DLL files
+# ==============================================================================
+# Restricted Files (Explicitly blocked from main)
+# ==============================================================================
+# Agent instructions & prompt files
+agent.md
+AGENT.md
+claude.md
+CLAUDE.md
+.cursorrules
+
+# Secrets, Keys & Environment Variables
+.env
+.env.*
+*.key
+*.pem
+
+# Build artifacts, caches & virtual environments
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-
-# Virtual environments
 .venv/
 venv/
 env/
 ENV/
-
-# Build and distribution
 build/
 dist/
 *.egg-info/
 
-# Testing and coverage
+# Testing & coverage
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Logs and runtime artifacts
+# Runtime logs & OS artifacts
 *.log
 /tmp/
 .DS_Store

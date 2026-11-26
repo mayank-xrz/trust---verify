@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Git Pre-Push Hook: Block Sensitive / Restricted Files from Main
+# ==============================================================================
+
+set -e
+
+REMOTE="$1"
+URL="$2"
+
+# Blocked regex pattern covering:
+# agent.md, AGENT.md, CLAUDE.md, claude.md, .cursorrules, .env, *.key, *.pem, __pycache__, .venv, dist/, build/
+BLOCKED_PATTERN='(^|/)(([aA][gG][eE][nN][tT]|[cC][lL][aA][uU][dD][eE])\.[mM][dD]|\.cursorrules|\.env(\..*)?|.*\.key|.*\.pem)$|(^|/)(__pycache__|\.venv|dist|build)($|/)'
+
+ZERO_OID="0000000000000000000000000000000000000000"
+
+while read local_ref local_oid remote_ref remote_oid; do
+  # Check if pushing to main
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    # Skip branch deletion
+    if [ "$local_oid" = "$ZERO_OID" ]; then
+      continue
+    fi
+
+    # Determine range of commits being pushed
+    if [ "$remote_oid" = "$ZERO_OID" ]; then
+      # Remote branch doesn't exist yet, check all files in local commit
+      FILES=$(git ls-tree -r --name-only "$local_oid")
+    else
+      # Check files changed between remote and local
+      FILES=$(git diff-tree --no-commit-id --name-only -r "$remote_oid" "$local_oid" 2>/dev/null || git ls-tree -r --name-only "$local_oid")
+    fi
+
+    # Scan for blocked patterns
+    OFFENDING_FILES=$(echo "$FILES" | grep -E "$BLOCKED_PATTERN" || true)
+
+    if [ -n "$OFFENDING_FILES" ]; then
+      echo "======================================================================"
+      echo "❌ PUSH REJECTED: Sensitive / restricted files are forbidden on main!"
+      echo "======================================================================"
+      echo "Offending files:"
+      echo "$OFFENDING_FILES" | sed 's/^/  - /'
+      echo ""
+      echo "Blocked list:"
+      echo "  • agent.md, AGENT.md, CLAUDE.md, claude.md, .cursorrules"
+      echo "  • .env, .env.*, *.key, *.pem"
+      echo "  • __pycache__, .venv, dist/, build/"
+      echo "======================================================================"
+      exit 1
+    fi
+  fi
+done
+
+exit 0
