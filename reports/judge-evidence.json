@@ -1,0 +1,154 @@
+{
+  "environment": {
+    "os": "macOS arm64",
+    "python": "3.11.18",
+    "transport": "localhost HTTP",
+    "database": "shared SQLite WAL"
+  },
+  "live_revocation": [
+    {
+      "trial": 1,
+      "request_ack_ms": 3.012,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 4.922,
+          "watermark_ms": 29.432,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.821,
+          "watermark_ms": 252.718,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.451,
+          "watermark_ms": 214.231,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "request_ack_ms": 2.546,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.254,
+          "watermark_ms": 13.553,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 5.564,
+          "watermark_ms": 238.169,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.795,
+          "watermark_ms": 197.566,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 3,
+      "request_ack_ms": 3.075,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.957,
+          "watermark_ms": 258.086,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 7.62,
+          "watermark_ms": 230.252,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.316,
+          "watermark_ms": 181.169,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 4,
+      "request_ack_ms": 3.49,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 6.46,
+          "watermark_ms": 230.933,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.803,
+          "watermark_ms": 207.261,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 8.167,
+          "watermark_ms": 156.409,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 5,
+      "request_ack_ms": 2.923,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.182,
+          "watermark_ms": 243.592,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.767,
+          "watermark_ms": 210.152,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 5.524,
+          "watermark_ms": 162.757,
+          "other_denials": 0
+        }
+      }
+    }
+  ],
+  "detector_http": {
+    "samples_ms": [
+      0.8675,
+      0.6595,
+      0.7644,
+      0.7859,
+      0.6718,
+      0.7929,
+      0.7123,
+      0.6071,
+      0.6295,
+      0.7635,
+      0.6844,
+      0.714,
+      0.8268,
+      0.7012,
+      0.6937,
+      0.7784,
+      0.633,
+      0.6864,
+      0.7471,
+      0.6319,
+      0.6931
+    ],
+    "median_ms": 0.7012
+  },
+  "detector_fixture": {
+    "total_events": 1054,
+    "true_positives": 30,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "true_negatives": 1024,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "mtta_ms": 0.0,
+    "false_alerts_per_1k": 0.0,
+    "median_time_to_alert_ms": 0.0025
+  }
+}

@@ -163,6 +163,9 @@ Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelope
 
 ## Detection results
 
+[Measured judge evidence](reports/JUDGE_EVIDENCE.md) includes per-node HTTP revocation observations,
+local HTTP request-to-alert latency, and the synthetic detector score.
+
 `tests/test_detector_eval.py` runs a synthetic labelled set of 125 events (100 routine, 25 attack) and asserts precision, recall and F1 of at least 0.90, zero false alerts, and per-event evaluation under 50 ms. This set is easy to separate, so treat it as a regression check, not as evidence of real-world accuracy.
 
 The [implementation inventory](docs/DUPLICATES.md) identifies the integrated
