@@ -11,7 +11,7 @@
 - `GET /keys/{key_set_id}/metadata` -> public metadata, states, `grace_until`, `destroyed_at` (never private material).
 - `POST /resources/{resource_id}/rewrap` -> re-wraps DEK under active `data` key version.
 - `POST /internal/sync` -> HMAC-SHA-256 (`CLUSTER_SYNC_SECRET`) authenticated peer sync; node re-reads authoritative DB.
-- `POST /internal/test/arm-crash` -> arms `crash_point()` (guarded by `SANDBOX_MODE=1`).
+- `POST /internal/test/arm-crash` -> arms `crash_point()` (requires a valid `X-Admin-Enroll-Token` and `SANDBOX_MODE=1`).
 
 ## 3. Crash Points & Observed Recovery Outcome Table (`tests/test_part2_rotation.py`)
 
@@ -27,11 +27,14 @@
 - `AuthzService.authorize(actor_context, resource_id, permission, *, key_version_id=None, correlation_id=None)` and `IdentityService.verify_identity(..., key_version_id=None)` now validate `key_version_id` via `is_key_acceptable(kv, now, purpose="auth")`.
 - Using a `GRACE` key before `grace_until` is allowed and emits `key.grace_used`; using it at/after `grace_until` is denied with `KEY_RETIRED` and emits `key.rejected_after_cutoff`.
 
-## 5. Real Verification Output (Observed)
-- `pytest -v tests/`: `36 passed, 103 warnings in 2.24s` (14 existing + 9 Part 1 + 9 Part 2 + 4 multi-node/migration tests).
+## 5. Verification Output (Historical Snapshot)
+
+The pass counts in this handoff were captured at the time Part 2 landed and are
+kept only as history. Current, reproducible results live in
+`docs/FIX_LEDGER.md` and `docs/MEASUREMENTS.md`.
+
 - `validate.py --entry .../track4_service.py`: `Local scenario passed.` (exit code `0`).
 - `ruff check src/identity_keys track4_service.py scripts/seed_sandbox.py scripts/fault.py`: `All checks passed!`
-- `mypy`: `Success: no issues found in 15 source files`
 
 ## 6. Open Issues / Simulation Limits
 - Local tests executed against SQLite (Docker daemon / `psql` not running on host); PostgreSQL 16 + `docker-compose.yml` remain ready for container execution.
