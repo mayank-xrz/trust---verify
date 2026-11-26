@@ -32,6 +32,7 @@ from .policy import (
     FilePolicyError,
     MAX_FILE_SIZE_BYTES,
     SingleDeviceRegistry,
+    TimezoneMismatchError,
     validate_shared_file,
 )
 from .replay_cache import PersistentReplayCache
@@ -51,9 +52,11 @@ class SecureCryptoSystem:
         signing_secret_key: Optional[bytes] = None,
         replay_window: int = 256,
         delivery_timeout: float = DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+        timezone: Optional[str] = None,
     ) -> None:
         self.identity = identity
         self.device = device
+        self.timezone = timezone
         self.state_dir = Path(state_dir)
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -83,11 +86,74 @@ class SecureCryptoSystem:
         )
         self.device_registry = SingleDeviceRegistry(self.state_dir / "devices.db")
         self.device_registry.register_device(identity, device)
+        self.threat_logs: List[Dict[str, Any]] = []
+        if timezone is not None:
+            self.device_registry.verify_access_timezone(identity, device, timezone)
         self._sessions: Dict[str, SessionKeys] = {}
         self._session_epochs: Dict[str, int] = {}
         self._outbound_counters: Dict[str, int] = {}
         self._pending_handshakes: Dict[str, EphemeralHandshakeSession] = {}
         self._pending_rekeys: Dict[str, Tuple[str, EphemeralHandshakeSession]] = {}
+
+    # ------------------------------------------------------------------
+    # Access Policy: Device + Timezone Anomaly Threat Detection
+    # ------------------------------------------------------------------
+    def get_threat_logs(self) -> List[Dict[str, Any]]:
+        return list(self.threat_logs)
+
+    def authorize_peer_access(
+        self,
+        peer_identity: str,
+        peer_device: str,
+        request_timezone: Optional[str] = None,
+        *,
+        session_id: str = "",
+        message_id: str = "",
+    ) -> None:
+        """Enforce 1-device policy and detect cross-timezone anomaly threats."""
+        try:
+            if request_timezone is not None:
+                self.device_registry.verify_access_timezone(peer_identity, peer_device, request_timezone)
+            else:
+                self.device_registry.verify_device(peer_identity, peer_device)
+        except TimezoneMismatchError as exc:
+            details = dict(exc.threat_details)
+            event = emit_crypto_event(
+                self.audit_logger,
+                actor=peer_identity or "unknown",
+                source_service=f"{peer_identity}/{peer_device}",
+                target_service=f"{self.identity}/{self.device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=session_id,
+                message_id=message_id,
+                reason=exc.reason,
+                extra={
+                    "threat": details.get("threat", "ANOMALOUS_TIMEZONE_ACCESS"),
+                    "severity": details.get("severity", "HIGH"),
+                    "last_device": details.get("last_device", ""),
+                    "current_device": details.get("current_device", peer_device),
+                    "last_timezone": details.get("last_timezone", ""),
+                    "request_timezone": details.get("request_timezone", str(request_timezone)),
+                    "detail": details.get("detail", str(exc)),
+                },
+            )
+            self.threat_logs.append({**(event or {}), **details})
+            raise
+        except DevicePolicyError as exc:
+            event = emit_crypto_event(
+                self.audit_logger,
+                actor=peer_identity or "unknown",
+                source_service=f"{peer_identity}/{peer_device}",
+                target_service=f"{self.identity}/{self.device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=session_id,
+                message_id=message_id,
+                reason=exc.reason,
+            )
+            self.threat_logs.append({**(event or {}), "threat": "DEVICE_POLICY_VIOLATION", "detail": str(exc)})
+            raise
 
     # ------------------------------------------------------------------
     # Handshake (Responder & Initiator)
@@ -264,9 +330,22 @@ class SecureCryptoSystem:
         self,
         envelope: Dict[str, Any],
         sender_public_key: bytes,
+        *,
+        request_timezone: Optional[str] = None,
     ) -> bytes:
-        """Verify recipient binding, signature, epoch, replay cache, key commit, and decrypt AEAD."""
+        """Verify device/timezone policy, recipient binding, signature, epoch, replay cache, and decrypt."""
         sid = str(envelope.get("session_id", ""))
+        sender_id = str(envelope.get("sender_identity", ""))
+        sender_dev = str(envelope.get("sender_device", ""))
+        msg_id = str(envelope.get("message_id", ""))
+        if sender_id and sender_dev:
+            self.authorize_peer_access(
+                sender_id,
+                sender_dev,
+                request_timezone,
+                session_id=sid,
+                message_id=msg_id,
+            )
         keys = self._sessions.get(sid)
         active_epoch = self._session_epochs.get(sid)
         if keys is not None and active_epoch is not None and int(envelope.get("epoch", -1)) != active_epoch:
@@ -353,8 +432,15 @@ class SecureCryptoSystem:
         fresh_nonce: bytes,
         proof_of_possession: str,
         new_transcript_hash: str,
+        request_timezone: Optional[str] = None,
     ) -> Tuple[SessionKeys, Dict[str, object]]:
-        """Responder: verify peer binding, expiry, replay, and PoP, then install new session."""
+        """Responder: enforce device/timezone policy, verify peer/expiry/replay/PoP, and install new session."""
+        self.authorize_peer_access(
+            presented_identity,
+            presented_device,
+            request_timezone,
+            session_id=str(ticket.get("session_id", "")),
+        )
         new_keys, rotated_ticket = self.resumption_store.resume(
             ticket,
             presented_identity=presented_identity,
@@ -406,27 +492,21 @@ class SecureCryptoSystem:
         self,
         envelope: Dict[str, Any],
         sender_public_key: bytes,
+        *,
+        request_timezone: Optional[str] = None,
     ) -> Optional[Tuple[Dict[str, Any], bytes]]:
-        """Decrypt file chunk and enforce 20 MB + format + single-device policy on reassembly."""
+        """Decrypt file chunk and enforce 20 MB + format + single-device + timezone policy on reassembly."""
         sender_id = str(envelope.get("sender_identity", ""))
         sender_dev = str(envelope.get("sender_device", ""))
         sid = str(envelope.get("session_id", ""))
         msg_id = str(envelope.get("message_id", ""))
-        try:
-            self.device_registry.verify_device(sender_id, sender_dev)
-        except DevicePolicyError as exc:
-            emit_crypto_event(
-                self.audit_logger,
-                actor=sender_id or "unknown",
-                source_service=f"{sender_id}/{sender_dev}",
-                target_service=f"{self.identity}/{self.device}",
-                action="message_rejected",
-                outcome="rejected",
-                session_id=sid,
-                message_id=msg_id,
-                reason=exc.reason,
-            )
-            raise
+        self.authorize_peer_access(
+            sender_id,
+            sender_dev,
+            request_timezone,
+            session_id=sid,
+            message_id=msg_id,
+        )
 
         framed = self.decrypt_chunk(envelope, sender_public_key)
         if framed is None:

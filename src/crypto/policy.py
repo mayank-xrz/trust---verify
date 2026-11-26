@@ -11,9 +11,12 @@ Constraints enforced:
 from __future__ import annotations
 import hashlib
 import json
+import re
 import sqlite3
+import time
 from pathlib import Path
-from typing import Dict, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MiB
 MAX_DEVICES_PER_USER = 1
@@ -81,6 +84,46 @@ class DevicePolicyError(ValueError):
 
 class DeviceLimitExceededError(DevicePolicyError):
     reason = "device_limit_exceeded"
+
+
+class TimezoneMismatchError(DevicePolicyError):
+    reason = "timezone_mismatch_threat"
+
+    def __init__(self, message: str, threat_details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.threat_details: Dict[str, Any] = threat_details or {}
+
+
+_OFFSET_RE = re.compile(r"^(?:UTC|GMT)?([+-])(\d{2}):?(\d{2})$", re.IGNORECASE)
+
+
+def normalize_timezone(tz: str) -> str:
+    """Validate and canonicalize an IANA timezone name or fixed UTC offset."""
+    if not isinstance(tz, str) or not tz.strip():
+        raise TimezoneMismatchError(
+            "Invalid or empty timezone",
+            threat_details={"threat": "INVALID_TIMEZONE", "request_timezone": str(tz)},
+        )
+    raw = tz.strip()
+    if raw.upper() in ("Z", "UTC", "GMT"):
+        return "UTC"
+    m = _OFFSET_RE.match(raw)
+    if m:
+        sign, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
+        if hh > 14 or mm >= 60:
+            raise TimezoneMismatchError(
+                f"Invalid UTC offset timezone: {raw}",
+                threat_details={"threat": "INVALID_TIMEZONE", "request_timezone": raw},
+            )
+        return f"UTC{sign}{hh:02d}:{mm:02d}"
+    try:
+        zi = ZoneInfo(raw)
+        return zi.key
+    except ZoneInfoNotFoundError as exc:
+        raise TimezoneMismatchError(
+            f"Unknown timezone: {raw}",
+            threat_details={"threat": "INVALID_TIMEZONE", "request_timezone": raw},
+        ) from exc
 
 
 def _verify_magic_bytes(ext: str, data: bytes) -> bool:
@@ -213,6 +256,16 @@ class SingleDeviceRegistry:
                 WHERE status = 'active'
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_login_state (
+                    user_id TEXT PRIMARY KEY,
+                    last_device_id TEXT NOT NULL,
+                    last_timezone TEXT NOT NULL,
+                    last_login_ts REAL NOT NULL
+                )
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=5.0)
@@ -313,4 +366,69 @@ class SingleDeviceRegistry:
                 ON CONFLICT(user_id, device_id) DO UPDATE SET status='active'
                 """,
                 (user_id, new_device_id),
+            )
+
+    def verify_access_timezone(self, user_id: str, device_id: str, request_timezone: str) -> None:
+        """Bind user/device to its last login timezone; reject cross-timezone anomalies."""
+        self.verify_device(user_id, device_id)
+        norm_tz = normalize_timezone(request_timezone)
+        now = time.time()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT last_device_id, last_timezone, last_login_ts FROM user_login_state WHERE user_id=?",
+                (user_id,),
+            ).fetchone()
+            if row is None:
+                db.execute(
+                    """
+                    INSERT INTO user_login_state (user_id, last_device_id, last_timezone, last_login_ts)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (user_id, device_id, norm_tz, now),
+                )
+                return
+
+            last_device, last_tz, last_ts = row
+            if norm_tz != last_tz or device_id != last_device:
+                details: Dict[str, Any] = {
+                    "threat": "ANOMALOUS_TIMEZONE_ACCESS",
+                    "severity": "HIGH",
+                    "user_id": user_id,
+                    "last_device": str(last_device),
+                    "current_device": device_id,
+                    "last_timezone": str(last_tz),
+                    "request_timezone": norm_tz,
+                    "last_login_ts": float(last_ts),
+                    "detail": (
+                        f"Access rejected for '{user_id}': device/timezone differs from last login "
+                        f"(last='{last_device}' @ '{last_tz}', current='{device_id}' @ '{norm_tz}') "
+                        "and can cause session hijack or distributed clock/auth fault."
+                    ),
+                }
+                raise TimezoneMismatchError(details["detail"], threat_details=details)
+
+            db.execute(
+                "UPDATE user_login_state SET last_login_ts=? WHERE user_id=?",
+                (now, user_id),
+            )
+
+    def reset_login_timezone(self, user_id: str, new_timezone: str, device_id: Optional[str] = None) -> None:
+        """Explicit administrative update of a user's baseline login timezone (e.g., approved travel)."""
+        norm_tz = normalize_timezone(new_timezone)
+        target_dev = device_id or self.active_device(user_id)
+        if not target_dev:
+            raise DevicePolicyError(f"No active device for user '{user_id}'")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """
+                INSERT INTO user_login_state (user_id, last_device_id, last_timezone, last_login_ts)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    last_device_id=excluded.last_device_id,
+                    last_timezone=excluded.last_timezone,
+                    last_login_ts=excluded.last_login_ts
+                """,
+                (user_id, target_dev, norm_tz, time.time()),
             )

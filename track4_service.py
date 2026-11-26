@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from src.crypto.policy import TimezoneMismatchError, normalize_timezone
 from src.crypto.primitives import CryptoError, b64, canonical, unb64
 from src.crypto.protected_read import protected_read
 from src.crypto.session import TrustRegistry, PrekeyStore
@@ -118,7 +119,7 @@ def _compute_entry_hash(prev_hash, entry_body):
     return hashlib.sha256(prev_hash.encode("ascii") + canonical(entry_body)).hexdigest()
 
 
-def _append_audit(state, op, actor, asset, request_id, decision):
+def _append_audit(state, op, actor, asset, request_id, decision, threat=None):
     audit_log = state.setdefault("audit_log", [])
     prev_hash = audit_log[-1]["entry_hash"] if audit_log else GENESIS_HASH
     entry_body = {
@@ -130,8 +131,43 @@ def _append_audit(state, op, actor, asset, request_id, decision):
         "decision": decision,
         "prev_hash": prev_hash,
     }
+    if threat is not None:
+        entry_body["threat"] = threat
     entry_hash = _compute_entry_hash(prev_hash, entry_body)
     audit_log.append({**entry_body, "entry_hash": entry_hash})
+
+
+def _check_timezone_policy(state, actor, request):
+    req_tz = request.get("timezone")
+    if req_tz is None:
+        return None
+    req_dev = request.get("device") or "default"
+    if not isinstance(req_dev, str) or not req_dev:
+        return {"threat": "INVALID_DEVICE", "detail": "Invalid device identifier"}
+    try:
+        norm_tz = normalize_timezone(req_tz)
+    except TimezoneMismatchError as exc:
+        return exc.threat_details
+    last_logins = state.setdefault("last_login", {})
+    prev = last_logins.get(actor)
+    if prev is None:
+        last_logins[actor] = {"device": req_dev, "timezone": norm_tz}
+        return None
+    if prev["timezone"] != norm_tz or prev["device"] != req_dev:
+        return {
+            "threat": "ANOMALOUS_TIMEZONE_ACCESS",
+            "severity": "HIGH",
+            "last_device": prev["device"],
+            "current_device": req_dev,
+            "last_timezone": prev["timezone"],
+            "request_timezone": norm_tz,
+            "detail": (
+                f"Access rejected for '{actor}': device/timezone differs from last login "
+                f"(last='{prev['device']}' @ '{prev['timezone']}', current='{req_dev}' @ '{norm_tz}') "
+                "and can cause session hijack or auth fault."
+            ),
+        }
+    return None
 
 
 def verify_chain(audit_log):
@@ -223,12 +259,15 @@ def dispatch(request):
             if not isinstance(actor, str) or not isinstance(asset, str):
                 raise ValueError("invalid identity")
             allowed = state["owners"].get(asset) == actor and actor not in state["disabled"] and asset in state["contents"]
+            tz_threat = _check_timezone_policy(state, actor, request) if allowed else None
+            if tz_threat is not None:
+                allowed = False
             if op == "read":
                 request_id = request.get("request_id")
                 if not isinstance(request_id, str):
                     raise ValueError("invalid request id")
                 decision = "allow" if allowed else "deny"
-                _append_audit(state, "read", actor, asset, request_id, decision)
+                _append_audit(state, "read", actor, asset, request_id, decision, threat=tz_threat)
                 save(path, state)
                 if not allowed:
                     return {"decision": "deny"}
@@ -247,7 +286,7 @@ def dispatch(request):
             state["used_challenges"] = used
             replay = challenge_hash is not None and any(secrets.compare_digest(challenge_hash, key) for key in used)
             if not allowed or not valid_challenge or replay:
-                _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny")
+                _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny", threat=tz_threat)
                 save(path, state)
                 return {"decision": "deny"}
             try:
