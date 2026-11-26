@@ -7,7 +7,8 @@ import subprocess
 import sys
 import time
 
-from scripts.evaluate_detector import evaluate
+from scripts.evaluate_detector import CHALLENGE, FIXTURE, evaluate_both
+from scripts.measure_live_revocation import measure, revocation_table
 from src.detector.clock_sync import ClockSyncBuffer, SkewStatus
 
 BRIEF = "tests/integration/test_brief_scenarios.py"
@@ -26,13 +27,11 @@ def test_evidence(evidence, *tests):
 
 
 def revocation():
-    output = run(
-        "-m", "pytest", "-qs", "--disable-warnings", BRIEF,
-        "-k", "measured_cross_node_revocation or unaffected_users or authorized_reenrollment",
-    )
-    measurement = next(line.split("REVOCATION_EVIDENCE ", 1)[1]
-                       for line in output.splitlines() if "REVOCATION_EVIDENCE " in line)
-    return f"{measurement}; owner re-enrolled and unaffected user retained access"
+    trial, = measure(1)
+    print(revocation_table(trial), flush=True)
+    return (f"last confirmed DEVICE_REVOKED response {trial['last_denial_ms']:.3f} ms "
+            f"after authority timestamp {trial['revoked_at_utc']}; all three live nodes "
+            "accepted the replacement and unaffected credentials and still denied the old device")
 
 
 def clock():
@@ -48,10 +47,14 @@ def clock():
 
 
 def detector():
-    metrics = evaluate()
     test_evidence("", "tests/test_labelled_detector.py")
-    return (f"synthetic fixture F1={metrics.f1_score:.3f}; median={metrics.median_time_to_alert_ms:.4f} ms; "
-            f"false escalations/1,000 benign={metrics.false_alerts_per_1k:g}")
+    return "; ".join(
+        f"synthetic {name} {mode}: F1={metrics.f1_score:.3f}, "
+        f"median={metrics.median_time_to_alert_ms:.4f} ms, "
+        f"false alerts/1,000 benign={metrics.false_alerts_per_1k:g}"
+        for name, fixture in (("regression", FIXTURE), ("challenge", CHALLENGE))
+        for mode, metrics in evaluate_both(fixture).items()
+    )
 
 
 def crypto(command, checks, evidence):

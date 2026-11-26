@@ -97,11 +97,11 @@ status.
 | Objective | Evidence produced |
 | --- | --- |
 | Key rotation | 2-second HTTP-demo grace period and rejection after cutoff, plus three-node authorization checks |
-| Revocation across nodes | Time from commit to the last confirmed denial across three in-process nodes with explicit sync, re-enrollment, and unaffected-user access |
+| Revocation across nodes | Authority timestamp to each confirmed HTTP denial across three separate processes, with owner re-enrollment and unaffected-user access |
 | Crash recovery | Consistent key version, preserved committed data, and revoked credentials still denied |
 | Backup integrity | Damaged payload and missing or invalid pinned signatures rejected |
 | Log integrity | User text stays within one event, and the chain and signed checkpoints verify |
-| Routine vs suspicious activity | F1, median rule-evaluation time to alert, and false alerts per 1,000 benign events on the labelled synthetic fixture |
+| Routine vs suspicious activity | F1, median rule-evaluation time to alert, and false alerts per 1,000 benign events on both labelled synthetic fixtures and for both alert policies |
 | Lateral movement | Rule and path evidence for disallowed service hops |
 | Clock differences | Supported timestamp-gap range, ordering checks, and an `order_uncertain` example |
 | Replay and recipient binding | Duplicate or wrong-recipient messages rejected |
@@ -109,9 +109,10 @@ status.
 | Delivery under loss or reordering | Valid reordered file delivered, incomplete file discarded and reported |
 | Session resumption | Same peer resumes and a different identity is rejected |
 
-Run `python -m scripts.evaluate_detector` to print the detector metrics on the
-same fixture independently. The score treats LOW stale-key notices as
-informational and measures latency inside the detector, in memory.
+Run `python -m scripts.evaluate_detector` to score both synthetic datasets with
+all alerts and with non-LOW alerts. The original fixture is regression evidence.
+The second fixture has a separate generator and was scored with the same rules.
+Latency is measured inside the detector, in memory.
 
 Operator CLI (run while nodes are up):
 

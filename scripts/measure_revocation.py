@@ -57,6 +57,10 @@ def _enroll_and_authenticate(
         },
     ).raise_for_status().json()
     device_id = device["device_id"]
+    return device_id, _authenticate(client, device_id, priv)
+
+
+def _authenticate(client: TestClient, device_id: str, private_key: bytes) -> str:
     challenge = client.post(
         "/api/v1/auth/challenge", params={"device_id": device_id}
     ).raise_for_status().json()["challenge"]
@@ -65,22 +69,22 @@ def _enroll_and_authenticate(
         json={
             "device_id": device_id,
             "challenge": challenge,
-            "signature_b64": b64e(ed25519_sign(priv, challenge.encode())),
+            "signature_b64": b64e(ed25519_sign(private_key, challenge.encode())),
         },
     ).raise_for_status().json()
-    return device_id, result["access_token"]
+    return result["access_token"]
 
 
-def _authorize(client: TestClient, token: str) -> dict[str, Any]:
+def _authorize(client: TestClient, token: str, resource_id: str = "brief-alpha") -> dict[str, Any]:
     return client.post(
         "/api/v1/authorize",
         headers={"Authorization": f"Bearer {token}"},
-        json={"resource_id": "brief-alpha", "permission": "resource:read"},
+        json={"resource_id": resource_id, "permission": "resource:read"},
     ).raise_for_status().json()
 
 
 def _probe_node(
-    client: TestClient, token: str, committed: concurrent.futures.Future[tuple[int, int]],
+    client: TestClient, token: str, committed: concurrent.futures.Future[tuple[int, int]], *, on_denial=None,
 ) -> tuple[float, float, int]:
     commit_ns, commit_seq = committed.result(timeout=PROBE_TIMEOUT_SECONDS)
     deadline = time.monotonic() + PROBE_TIMEOUT_SECONDS
@@ -92,6 +96,8 @@ def _probe_node(
             if not decision["allowed"]:
                 if decision["reason_code"] == "DEVICE_REVOKED":
                     denied_ns = time.monotonic_ns()
+                    if on_denial is not None:
+                        on_denial()
                 else:
                     other_denials += 1
         if synced_ns is None:

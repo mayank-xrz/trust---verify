@@ -150,5 +150,103 @@
     "mtta_ms": 0.0,
     "false_alerts_per_1k": 0.0,
     "median_time_to_alert_ms": 0.0025
+  },
+  "timestamped_device_key_revocation": {
+    "trial": 1,
+    "revocation_id": "ed83eb3b-b061-45ec-92b8-b1e94d9ea2fc",
+    "commit_seq": 1,
+    "revoked_at_utc": "2026-11-26T23:31:32.055441+00:00",
+    "request_ack_ms": 5.39,
+    "last_denial_ms": 6.612,
+    "nodes": {
+      "node-a": {
+        "first_denial_utc": "2026-11-26T23:31:32.060461+00:00",
+        "elapsed_ms": 5.02,
+        "request_to_denial_ms": 7.332,
+        "request_to_watermark_ms": 80.589,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      },
+      "node-b": {
+        "first_denial_utc": "2026-11-26T23:31:32.062053+00:00",
+        "elapsed_ms": 6.612,
+        "request_to_denial_ms": 8.926,
+        "request_to_watermark_ms": 43.783,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      },
+      "node-c": {
+        "first_denial_utc": "2026-11-26T23:31:32.061131+00:00",
+        "elapsed_ms": 5.69,
+        "request_to_denial_ms": 8.004,
+        "request_to_watermark_ms": 247.825,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      }
+    }
+  },
+  "synthetic_detector_scores": {
+    "regression": {
+      "all_severities": {
+        "total_events": 1054,
+        "true_positives": 30,
+        "false_positives": 12,
+        "false_negatives": 0,
+        "true_negatives": 1012,
+        "precision": 0.7143,
+        "recall": 1.0,
+        "f1_score": 0.8333,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 11.7188,
+        "median_time_to_alert_ms": 0.002
+      },
+      "non_low": {
+        "total_events": 1054,
+        "true_positives": 30,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "true_negatives": 1024,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 0.0,
+        "median_time_to_alert_ms": 0.002
+      }
+    },
+    "challenge": {
+      "all_severities": {
+        "total_events": 1076,
+        "true_positives": 30,
+        "false_positives": 11,
+        "false_negatives": 6,
+        "true_negatives": 1029,
+        "precision": 0.7317,
+        "recall": 0.8333,
+        "f1_score": 0.7792,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 10.5769,
+        "median_time_to_alert_ms": 0.0016
+      },
+      "non_low": {
+        "total_events": 1076,
+        "true_positives": 30,
+        "false_positives": 0,
+        "false_negatives": 6,
+        "true_negatives": 1040,
+        "precision": 1.0,
+        "recall": 0.8333,
+        "f1_score": 0.9091,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 0.0,
+        "median_time_to_alert_ms": 0.0016
+      }
+    }
   }
 }
