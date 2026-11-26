@@ -13,6 +13,8 @@ from .clock import Clock, SystemClock
 from .db import create_db_engine, create_session_factory
 from .errors import IdentityKeysError, NotAuthorized
 from .key_lifecycle import EnvelopeEncryptionService
+from .reenroll import ReenrollmentService
+from .revocation import NodeSyncManager, RevocationService
 from .rotation import RotationService, arm_crash_point, verify_cluster_sync
 from .services import AuthzService, IdentityService, KeyMetadataService
 from .tokens import ActorContext, TokenAuthority
@@ -57,6 +59,49 @@ class ArmCrashRequest(BaseModel):
     crash_point: str | None = None
 
 
+class RevokeDeviceRequest(BaseModel):
+    device_id: str
+    reason_code: str = "DEVICE_LOST"
+
+
+class RevokeKeyVersionRequest(BaseModel):
+    key_version_id: str
+    reason_code: str = "KEY_COMPROMISED"
+
+
+class RevokePermissionRequest(BaseModel):
+    user_id: str
+    grant_id_or_perm: str
+    reason_code: str = "POLICY_VIOLATION"
+
+
+class EmergencyRotateRequest(BaseModel):
+    key_set_id: str
+    idempotency_key: str
+
+
+class ReenrollBeginRequest(BaseModel):
+    user_id: str
+
+
+class ReenrollCompleteRequest(BaseModel):
+    enrollment_id: str
+    nonce: str
+    label: str
+    new_public_key_b64: str
+    pop_signature_b64: str
+    old_device_ids: list[str] | None = None
+    recovery_code: str | None = None
+    admin_approval: dict[str, Any] | None = None
+
+
+class AdminApprovalRequest(BaseModel):
+    user_id: str
+    new_pk_fingerprint: str
+    enrollment_id: str
+    ttl_seconds: int = 600
+
+
 def create_app(
     *,
     node_id: str | None = None,
@@ -82,6 +127,16 @@ def create_app(
     metadata_svc = KeyMetadataService(session_factory)
     rotation_svc = RotationService(session_factory, resolved_clock, emitter, node_id=resolved_node)
     envelope_svc = EnvelopeEncryptionService(session_factory, resolved_clock, emitter)
+    revocation_svc = RevocationService(
+        session_factory, resolved_clock, emitter, node_id=resolved_node
+    )
+    sync_mgr = NodeSyncManager(
+        session_factory,
+        resolved_clock,
+        node_id=resolved_node,
+        stale_after_ms=int(os.environ.get("STALE_AFTER_MS", "2000")),
+    )
+    reenroll_svc = ReenrollmentService(session_factory, resolved_clock, emitter)
 
     app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})")
     app.state.engine = engine
@@ -91,6 +146,9 @@ def create_app(
     app.state.authz_svc = authz_svc
     app.state.rotation_svc = rotation_svc
     app.state.envelope_svc = envelope_svc
+    app.state.revocation_svc = revocation_svc
+    app.state.sync_mgr = sync_mgr
+    app.state.reenroll_svc = reenroll_svc
 
     def require_actor(authorization: str | None = Header(default=None)) -> ActorContext:
         if not authorization or not authorization.startswith("Bearer "):
@@ -157,6 +215,16 @@ def create_app(
     def authorize(
         req: AuthorizeRequest, actor: ActorContext = Depends(require_actor)
     ) -> dict[str, Any]:
+        if sync_mgr.last_sync_at is None:
+            sync_mgr.pull_revocations()
+        if sync_mgr.is_stale():
+            return {
+                "allowed": False,
+                "reason_code": "STALE_STATE",
+                "key_version_id": req.key_version_id,
+                "decision_id": "stale-deny",
+                "node_id": resolved_node,
+            }
         decision = authz_svc.authorize(
             actor, req.resource_id, req.permission, key_version_id=req.key_version_id
         )
@@ -167,6 +235,94 @@ def create_app(
             "decision_id": decision.decision_id,
             "node_id": resolved_node,
         }
+
+    @app.get("/node/sync-status")
+    def node_sync_status() -> dict[str, Any]:
+        return sync_mgr.sync_status()
+
+    @app.post("/revocations/device")
+    def api_revoke_device(
+        req: RevokeDeviceRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return revocation_svc.revoke_device(actor, req.device_id, req.reason_code)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/revocations/key-version")
+    def api_revoke_key_version(
+        req: RevokeKeyVersionRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return revocation_svc.revoke_key_version(actor, req.key_version_id, req.reason_code)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/revocations/permission")
+    def api_revoke_permission(
+        req: RevokePermissionRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return revocation_svc.revoke_permission(
+                actor, req.user_id, req.grant_id_or_perm, req.reason_code
+            )
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/rotations/emergency")
+    def api_emergency_rotate(
+        req: EmergencyRotateRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return revocation_svc.emergency_rotate(
+                key_set_id=req.key_set_id,
+                idempotency_key=req.idempotency_key,
+                actor_ctx=actor,
+            )
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/reenroll/recovery-codes")
+    def api_generate_codes(actor: ActorContext = Depends(require_actor)) -> dict[str, Any]:
+        return {"codes": reenroll_svc.generate_recovery_codes(actor.user_id)}
+
+    @app.post("/reenroll/approve")
+    def api_approve_reenroll(
+        req: AdminApprovalRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return reenroll_svc.create_admin_approval(
+                actor,
+                user_id=req.user_id,
+                new_pk_fingerprint=req.new_pk_fingerprint,
+                enrollment_id=req.enrollment_id,
+                ttl_seconds=req.ttl_seconds,
+            )
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/reenroll/begin")
+    def api_reenroll_begin(req: ReenrollBeginRequest) -> dict[str, str]:
+        try:
+            return reenroll_svc.begin_reenrollment(req.user_id)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=400, detail=exc.reason_code) from exc
+
+    @app.post("/reenroll/complete")
+    def api_reenroll_complete(req: ReenrollCompleteRequest) -> dict[str, Any]:
+        try:
+            return reenroll_svc.complete_reenrollment(
+                enrollment_id=req.enrollment_id,
+                nonce=req.nonce,
+                label=req.label,
+                new_public_key_b64=req.new_public_key_b64,
+                pop_signature_b64=req.pop_signature_b64,
+                old_device_ids=req.old_device_ids,
+                recovery_code=req.recovery_code,
+                admin_approval=req.admin_approval,
+            )
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
 
     @app.post("/rotations")
     def create_rotation(
@@ -216,12 +372,17 @@ def create_app(
         if not verify_cluster_sync(req.payload, req.hmac):
             raise HTTPException(status_code=401, detail="INVALID_CLUSTER_HMAC")
         # Never trust push payload as truth: re-read authoritative DB state
+        watermark = sync_mgr.pull_revocations()
         ks_id = str(req.payload.get("key_set_id", ""))
-        meta = rotation_svc.get_key_set_metadata(ks_id)
+        current_version = None
+        if ks_id:
+            meta = rotation_svc.get_key_set_metadata(ks_id)
+            current_version = meta["current_version"]
         return {
             "synced": True,
             "node_id": resolved_node,
-            "current_version": meta["current_version"],
+            "watermark": watermark,
+            "current_version": current_version,
         }
 
     @app.post("/internal/test/arm-crash")

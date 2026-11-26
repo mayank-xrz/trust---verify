@@ -51,6 +51,10 @@ VALID_CRASH_POINTS = {
     "rotate.before_commit",
     "rotate.after_commit",
     "rotate.during_sync",
+    "revoke.before_commit",
+    "revoke.after_commit",
+    "reenroll.before_commit",
+    "reenroll.after_commit",
 }
 
 

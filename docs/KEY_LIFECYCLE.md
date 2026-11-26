@@ -51,7 +51,37 @@ sequenceDiagram
     Nodes->>DB: Re-read authoritative key_versions & update node_sync_state
 ```
 
-## 5. Simulation vs. Production Deployment Differences
+## 5. Cross-Node Revocation Sequence
+
+```mermaid
+sequenceDiagram
+    participant Op as Operator / Owner
+    participant DB as Authoritative DB
+    participant Nodes as node-a / node-b / node-c
+
+    Op->>DB: Single Tx: device/key/grant -> REVOKED + gapless commit_seq + outbox + audit
+    DB-->>Op: Committed (t_commit)
+    Op->>Nodes: POST /internal/sync (HMAC hint)
+    Nodes->>DB: SELECT revocations WHERE commit_seq > watermark ORDER BY commit_seq
+    Nodes->>Nodes: Advance contiguous watermark & deny REVOKED credentials (t_enforced)
+```
+
+## 6. Secure Device Re-Enrollment Flowchart
+
+```mermaid
+flowchart TD
+    A["begin_reenrollment(user_id)"] --> B["Issue 10-min single-use nonce"]
+    B --> C["complete_reenrollment()"]
+    C --> D{"Rate limit & backoff OK?"}
+    D -- No --> E["Deny RATE_LIMITED + ALERT audit"]
+    D -- Yes --> F{"Valid scrypt code or admin approval + PoP?"}
+    F -- No --> G["Dummy KDF + identical INVALID_RECOVERY_PROOF"]
+    F -- Yes --> H{"Fingerprint never revoked?"}
+    H -- No --> I["Reject REVOKED_KEY_REUSE"]
+    H -- Yes --> J["Single Tx: revoke old device, insert new device, link replaced_by, burn code"]
+```
+
+## 7. Simulation vs. Production Deployment Differences
 - **Shared DB vs. Consensus:** All 3 nodes share one PostgreSQL 16 database (`SELECT ... FOR UPDATE` on `key_sets`) rather than running Raft/Paxos.
 - **HMAC Cluster Secret vs. mTLS:** `/internal/sync` authenticates with HMAC-SHA-256 (`CLUSTER_SYNC_SECRET` env var) instead of mutual TLS certificates.
 - **Env Wrap Key vs. HSM/KMS:** `WRAP_MASTER_KEY_B64` is supplied via environment variable instead of an external KMS/HSM.

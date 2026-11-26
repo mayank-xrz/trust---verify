@@ -38,6 +38,7 @@ def seed_database(session_factory: sessionmaker[Session], seed: int = 42) -> dic
         "resource:share",
         "key:rotate",
         "device:revoke",
+        "device:approve_reenroll",
         "backup:create",
         "backup:restore",
     ]

@@ -167,9 +167,8 @@ def is_key_acceptable(
         if key_version.state == "ACTIVE":
             return True, "KEY_ACTIVE"
         if key_version.state == "GRACE":
-            if (
-                key_version.grace_until is not None
-                and _as_utc(now) < _as_utc(key_version.grace_until)
+            if key_version.grace_until is not None and _as_utc(now) < _as_utc(
+                key_version.grace_until
             ):
                 return True, "KEY_GRACE_VALID"
             return False, "KEY_RETIRED"
@@ -282,10 +281,7 @@ class EnvelopeEncryptionService:
             kek_bytes = unwrap_key_material(master_key, kek_row)
             aad = res.dek_aad or resource_id.encode("utf-8")
             assert (
-                res.dek_nonce
-                and res.wrapped_dek
-                and res.content_nonce
-                and res.content_ciphertext
+                res.dek_nonce and res.wrapped_dek and res.content_nonce and res.content_ciphertext
             )
             dek = aes_gcm_unwrap(kek_bytes, res.dek_nonce, res.wrapped_dek, aad)
             return aes_gcm_unwrap(dek, res.content_nonce, res.content_ciphertext, aad)
