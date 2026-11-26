@@ -350,3 +350,12 @@ class AuthChallenge(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TrustAnchor(Base):
+    __tablename__ = "trust_anchor"
+
+    anchor_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    revocation_commit_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    revocation_head_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

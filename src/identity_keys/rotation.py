@@ -55,6 +55,9 @@ VALID_CRASH_POINTS = {
     "revoke.after_commit",
     "reenroll.before_commit",
     "reenroll.after_commit",
+    "restore.before_apply",
+    "restore.during_apply",
+    "restore.after_apply",
 }
 
 
