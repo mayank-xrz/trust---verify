@@ -10,6 +10,69 @@ import dataclasses
 import time
 from typing import Any, Dict, List, Optional
 
+APPROVED_CHANGE_WINDOWS = frozenset({"approved", "active", "open", "scheduled"})
+
+
+@dataclasses.dataclass(frozen=True)
+class ChangeTicket:
+    """A declared, approved change window that can suppress privilege alerts."""
+
+    ticket_id: str
+    subject: Optional[str] = None
+    not_before_ns: int = 0
+    not_after_ns: int = (1 << 63) - 1
+    approved: bool = True
+
+    def covers(self, subject: str, timestamp_ns: int) -> bool:
+        if not self.approved:
+            return False
+        if self.subject is not None and self.subject != subject:
+            return False
+        return self.not_before_ns <= timestamp_ns <= self.not_after_ns
+
+
+class ChangeTicketRegistry:
+    """Authoritative registry of approved change tickets.
+
+    The rule engine only needs the declared ``change_ticket`` /
+    ``change_window`` metadata to be present.  When a registry is supplied, the
+    ticket must additionally be registered, approved, owned by the subject, and
+    inside its time window, so an arbitrary event cannot self-approve.
+    """
+
+    def __init__(self, tickets: Optional[List[ChangeTicket]] = None) -> None:
+        self._tickets: Dict[str, ChangeTicket] = {}
+        for ticket in tickets or []:
+            self.register(ticket)
+
+    def register(self, ticket: ChangeTicket) -> None:
+        self._tickets[ticket.ticket_id] = ticket
+
+    def revoke(self, ticket_id: str) -> None:
+        self._tickets.pop(ticket_id, None)
+
+    def is_approved(self, ticket_id: str, subject: str, timestamp_ns: int) -> bool:
+        ticket = self._tickets.get(ticket_id)
+        return ticket is not None and ticket.covers(subject, timestamp_ns)
+
+
+def declared_approved_change(
+    event: Dict[str, Any],
+    registry: Optional[ChangeTicketRegistry] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return change-ticket evidence iff the event is inside an approved window."""
+    metadata = event.get("metadata") or {}
+    ticket_id = str(metadata.get("change_ticket", "")).strip()
+    window = str(metadata.get("change_window", "")).strip().lower()
+    if not ticket_id or window not in APPROVED_CHANGE_WINDOWS:
+        return None
+    subject = str(event.get("subject", ""))
+    timestamp_ns = int(event.get("timestamp_ns", 0))
+    if registry is not None and not registry.is_approved(ticket_id, subject, timestamp_ns):
+        return None
+    return {"change_ticket": ticket_id, "change_window": window}
+
+
 
 @dataclasses.dataclass
 class RuleAlert:
@@ -100,20 +163,34 @@ class DetectionRules:
 class ContextRuleEngine:
     """Stateful context engine tracking frequency bursts and routine vs suspicious transitions."""
 
-    def __init__(self, burst_threshold: int = 15, burst_window_sec: float = 1.0):
+    def __init__(
+        self,
+        burst_threshold: int = 15,
+        burst_window_sec: float = 1.0,
+        change_tickets: Optional[ChangeTicketRegistry] = None,
+        slow_sensitive_threshold: int = 4,
+        slow_window_sec: float = 300.0,
+    ):
         self.burst_threshold = burst_threshold
         self.burst_window_sec = burst_window_sec
+        self.change_tickets = change_tickets
+        self.slow_sensitive_threshold = slow_sensitive_threshold
+        self.slow_window_sec = slow_window_sec
         # subject -> deque of timestamps
         self.subject_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
+        self.sensitive_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
 
     def evaluate_event(self, event: Dict[str, Any]) -> List[RuleAlert]:
         """Evaluates single event against all explainable rules."""
         alerts = []
 
-        # 1. Stateless privilege elevation check
-        r1 = DetectionRules.check_unauthorized_admin(event)
-        if r1:
-            alerts.append(r1)
+        # 1. Stateless privilege elevation check, unless the event is covered by
+        # an approved declared-change window (e.g. an approved deploy bot).
+        change = declared_approved_change(event, self.change_tickets)
+        if change is None:
+            r1 = DetectionRules.check_unauthorized_admin(event)
+            if r1:
+                alerts.append(r1)
 
         # 2. Crypto attack / replay check
         r2 = DetectionRules.check_crypto_tamper_or_replay(event)
@@ -145,5 +222,33 @@ class ContextRuleEngine:
                         evidence={"call_count": len(dq), "window_sec": self.burst_window_sec},
                     )
                 )
+
+            # 4. Low-and-slow sensitive access check (catches attackers staying below burst threshold on allowed edges)
+            act_u = str(event.get("action", "")).upper()
+            res_l = str(event.get("resource", "")).lower()
+            is_sensitive = (
+                any(tok in act_u for tok in ("SECRET", "EXPORT", "DUMP", "KEY_ACCESS"))
+                or "/secrets" in res_l
+                or "/keys/" in res_l
+            )
+            if is_sensitive:
+                sdq = self.sensitive_history[subject]
+                sdq.append(now_sec)
+                while sdq and (now_sec - sdq[0] > self.slow_window_sec):
+                    sdq.popleft()
+                if len(sdq) >= self.slow_sensitive_threshold:
+                    alerts.append(
+                        RuleAlert(
+                            alert_id=f"alert-slow-{event.get('event_id', '')[:8]}",
+                            rule_name="LOW_AND_SLOW_SENSITIVE_ACCESS",
+                            severity="HIGH",
+                            timestamp_ns=event.get("timestamp_ns", time.time_ns()),
+                            subject=subject,
+                            service=event.get("service", ""),
+                            resource=event.get("resource", ""),
+                            description=f"Subject '{subject}' made {len(sdq)} sensitive access calls within {self.slow_window_sec}s",
+                            evidence={"sensitive_count": len(sdq), "window_sec": self.slow_window_sec},
+                        )
+                    )
 
         return alerts

@@ -6,8 +6,10 @@ import hashlib
 import hmac
 import os
 import secrets
+import tempfile
 import uuid
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
@@ -27,12 +29,14 @@ from .crypto import (
 from .db import tx_session
 from .errors import Conflict, NotAuthorized, NotFound, StateUnavailable
 from .key_lifecycle import (
+    create_rotation_cutoff,
     load_wrap_master_key,
     transition_key,
     unwrap_key_material,
     wrap_key_material,
 )
 from .models import (
+    Device,
     KeySet,
     KeyVersion,
     NodeSyncState,
@@ -40,6 +44,7 @@ from .models import (
     Permission,
     RolePermission,
     Rotation,
+    User,
     UserRole,
 )
 from .tokens import ActorContext
@@ -95,6 +100,53 @@ def verify_cluster_sync(payload: dict[str, Any], signature_hex: str) -> bool:
     return hmac.compare_digest(expected, signature_hex)
 
 
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Durably write ``payload`` with fsync -> rename -> directory fsync ordering."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = canonical_json_bytes(payload)
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+
+
+COMMITTED_ROTATION_STATES = {"COMMITTED", "NOTIFIED", "SYNCED"}
+IN_FLIGHT_ROTATION_STATES = {"STARTED", "PENDING_PERSISTED", "VERIFIED"}
+ABORTED_ROTATION_STATES = {"ABORTED", "FAILED"}
+
+
+def _idempotent_replay_result(existing: "Rotation") -> str:
+    """Return a prior rotation only when it reached a committed terminal state.
+
+    Replaying the idempotency key of an aborted or in-flight rotation must not
+    look like success; callers have to retry with a fresh idempotency key after
+    recovery has repaired the key set.
+    """
+    if existing.status in COMMITTED_ROTATION_STATES:
+        return existing.rotation_id
+    if existing.status in ABORTED_ROTATION_STATES:
+        raise Conflict(
+            "Rotation previously aborted; retry with a new idempotency key",
+            reason_code="ROTATION_ABORTED",
+        )
+    raise Conflict(
+        "Rotation already in progress for idempotency key",
+        reason_code="ROTATION_IN_FLIGHT",
+    )
+
+
 class RotationService:
     """DB-driven, idempotent, crash-safe key rotation and recovery coordinator."""
 
@@ -111,6 +163,46 @@ class RotationService:
         self.emitter = emitter
         self.node_id = node_id
         self.peer_urls = peer_urls or {}
+
+    def _journal_dir(self) -> Path:
+        """Directory for the rotation write-ahead journal (durable intent/commit markers)."""
+        configured = os.environ.get("ROTATION_JOURNAL_DIR", "").strip()
+        if configured:
+            return Path(configured).expanduser()
+        try:
+            bind = self.session_factory.kw.get("bind")
+            url = bind.url if bind is not None else None
+        except Exception:
+            url = None
+        if (
+            url is not None
+            and url.get_backend_name() == "sqlite"
+            and url.database
+            and url.database != ":memory:"
+        ):
+            return Path(url.database).expanduser().resolve().parent / "rotation_journal"
+        return Path(tempfile.gettempdir()) / "tbv_rotation_journal"
+
+    def _write_journal(self, rotation_id: str, status: str, **fields: Any) -> Path:
+        """Atomically persist a rotation journal record before/after the DB commit."""
+        path = self._journal_dir() / f"rotation-{rotation_id}.{status.lower()}.json"
+        payload = {
+            "rotation_id": rotation_id,
+            "status": status,
+            "node_id": self.node_id,
+            "written_at": self.clock.now().isoformat(),
+            **fields,
+        }
+        _atomic_write_json(path, payload)
+        return path
+
+    def _clear_journal(self, rotation_id: str) -> None:
+        """Remove stale intent markers after an aborted rotation is repaired."""
+        directory = self._journal_dir()
+        if not directory.exists():
+            return
+        for path in directory.glob(f"rotation-{rotation_id}.intent.json"):
+            path.unlink(missing_ok=True)
 
     def create_initial_key_set(self, key_set_id: str, scope: str) -> str:
         """Bootstrap a key_set with version 1 in ACTIVE state."""
@@ -180,6 +272,12 @@ class RotationService:
         return aes_gcm_unwrap(priv, nonce, ct, b"rotation-self-test") == test_dek
 
     def _require_rotate_permission(self, session: Session, actor_ctx: ActorContext) -> None:
+        user = session.get(User, actor_ctx.user_id)
+        if user is not None and user.status != "active":
+            raise NotAuthorized("User is not active", reason_code="USER_INACTIVE")
+        device = session.get(Device, actor_ctx.device_id)
+        if device is not None and (device.user_id != actor_ctx.user_id or device.status != "active"):
+            raise NotAuthorized("Device is not active", reason_code="DEVICE_REVOKED")
         has_perm = (
             session.execute(
                 select(Permission.name)
@@ -215,7 +313,7 @@ class RotationService:
                 select(Rotation).where(Rotation.idempotency_key == idempotency_key)
             ).scalar_one_or_none()
             if existing_rot is not None:
-                return existing_rot.rotation_id
+                return _idempotent_replay_result(existing_rot)
 
         crash_point("rotate.before_start")
 
@@ -227,7 +325,7 @@ class RotationService:
                 select(Rotation).where(Rotation.idempotency_key == idempotency_key)
             ).scalar_one_or_none()
             if existing_rot is not None:
-                return existing_rot.rotation_id
+                return _idempotent_replay_result(existing_rot)
 
             ks = session.execute(
                 select(KeySet).where(KeySet.key_set_id == key_set_id).with_for_update()
@@ -351,6 +449,15 @@ class RotationService:
 
         # Step 4: COMMITTED (single atomic transaction)
         now4 = self.clock.now()
+        self._write_journal(
+            rotation_id,
+            "INTENT",
+            key_set_id=key_set_id,
+            from_version=from_version,
+            to_version=to_version,
+            pending_key_version_id=pending_kv_id,
+            old_active_key_version_id=old_active_id,
+        )
         with tx_session(self.session_factory) as session:
             ks = session.execute(
                 select(KeySet).where(KeySet.key_set_id == key_set_id).with_for_update()
@@ -366,13 +473,23 @@ class RotationService:
             # Transition old ACTIVE -> GRACE (or RETIRED if zero grace)
             if old_active_id is not None:
                 if grace_seconds > 0:
-                    transition_key(
+                    cutoff_at = now4 + timedelta(seconds=grace_seconds)
+                    old_kv = transition_key(
                         session,
                         old_active_id,
                         "GRACE",
                         rotation_id,
                         now4,
-                        grace_until=now4 + timedelta(seconds=grace_seconds),
+                        grace_until=cutoff_at,
+                    )
+                    create_rotation_cutoff(
+                        session,
+                        key_set_id=key_set_id,
+                        key_version_id=old_kv.key_version_id,
+                        version=old_kv.version,
+                        scope=old_kv.scope,
+                        grace_until=cutoff_at,
+                        signed_at=now4,
                     )
                 else:
                     transition_key(session, old_active_id, "RETIRED", rotation_id, now4)
@@ -423,6 +540,14 @@ class RotationService:
                 },
             )
 
+        self._write_journal(
+            rotation_id,
+            "COMMITTED",
+            key_set_id=key_set_id,
+            from_version=from_version,
+            to_version=to_version,
+            active_key_version_id=pending_kv_id,
+        )
         crash_point("rotate.after_commit")
 
         # Step 5: NOTIFIED -> SYNCED
@@ -541,10 +666,11 @@ class RotationService:
                     .all()
                 )
                 for kv in pending_kvs:
-                    transition_key(session, kv.key_version_id, "RETIRED", rot.rotation_id, now)
-                    kv.wrapped_private_material = None
-                    kv.wrap_nonce = None
-                    kv.wrap_aad = None
+                    # The aborted key never became ACTIVE. Delete it so a retry can
+                    # reuse this version number instead of colliding with
+                    # UNIQUE(key_set_id, version) forever.
+                    session.delete(kv)
+                self._clear_journal(rot.rotation_id)
                 rot.status = "ABORTED"
                 rot.last_error = "Aborted during crash recovery"
                 rot.updated_at = now

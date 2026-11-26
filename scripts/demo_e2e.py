@@ -19,7 +19,7 @@ from scripts.seed_sandbox import seed_database  # noqa: E402
 from src.identity_keys.audit_outbox import AuditDispatcher, AuditEmitter  # noqa: E402
 from src.identity_keys.backup import BackupService  # noqa: E402
 from src.identity_keys.clock import FakeClock  # noqa: E402
-from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair  # noqa: E402
+from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair, generate_ml_dsa_keypair  # noqa: E402
 from src.identity_keys.db import create_db_engine, create_session_factory  # noqa: E402
 from src.identity_keys.errors import IntegrityError as DomainIntegrityError  # noqa: E402
 from src.identity_keys.key_lifecycle import EnvelopeEncryptionService  # noqa: E402
@@ -111,7 +111,7 @@ def main() -> int:
         ).allowed
         results.append(("4. Revocation & Secure Re-Enrollment", "PASS"))
 
-        bpub, bpriv = generate_ed25519_keypair()
+        bpub, bpriv = generate_ml_dsa_keypair()
         bpath = tmp_path / "demo.tbv"
         bkp.create_backup(admin_ctx, bpath, signing_privkey=bpriv, passphrase="demo-passphrase")
         raw = bytearray(bpath.read_bytes())

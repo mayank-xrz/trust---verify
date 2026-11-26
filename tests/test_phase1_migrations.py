@@ -7,12 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError as SAIntegrityError
 from sqlalchemy.exc import OperationalError
-
-from alembic import command
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

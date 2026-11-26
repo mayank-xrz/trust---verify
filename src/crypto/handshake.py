@@ -15,6 +15,7 @@ Design:
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import json
 import secrets
@@ -40,6 +41,21 @@ def _best_effort_zeroize(buf: Optional[bytearray]) -> None:
             buf[i] = 0
 
 
+def _zeroize_bytes(buf: Optional[bytes]) -> None:
+    """Overwrite an immutable ``bytes`` payload in place (CPython best effort).
+
+    PQClean/pqcrypto only accepts ``bytes`` for secret keys, so the only way to
+    remove the transient copy is to write zeros into its backing buffer before it
+    is released to the allocator.
+    """
+    if not isinstance(buf, bytes) or not buf:
+        return
+    try:
+        ctypes.memset(id(buf) + bytes.__basicsize__ - 1, 0, len(buf))
+    except Exception:
+        pass
+
+
 def _hkdf_derive(ikm: bytes, salt: bytes, info: bytes, length: int = 32) -> bytes:
     return HKDF(
         algorithm=hashes.SHA256(),
@@ -59,6 +75,19 @@ class SessionKeys:
     peer_identity: str
     peer_device: str
 
+    def zeroize(self) -> None:
+        """Scrub directional keys and the resumption secret in place."""
+        for name in ("tx_key", "rx_key", "resumption_secret"):
+            value = getattr(self, name, b"")
+            _zeroize_bytes(value)
+            setattr(self, name, b"")
+
+    def __del__(self) -> None:
+        try:
+            self.zeroize()
+        except Exception:
+            pass
+
 
 class EphemeralHandshakeSession:
     """Holds one side of an in-progress handshake; wipes ephemeral secrets on completion."""
@@ -71,6 +100,7 @@ class EphemeralHandshakeSession:
         self._mlkem_priv: Optional[bytearray] = None
         self._x25519_pub_bytes: Optional[bytes] = None
         self._mlkem_pub_bytes: Optional[bytes] = None
+        self._session_id: Optional[str] = None
 
     def has_ephemeral_secrets(self) -> bool:
         return self._x25519_priv is not None or self._mlkem_priv is not None
@@ -90,11 +120,13 @@ class EphemeralHandshakeSession:
         mlkem_pub, mlkem_priv = kem_keygen(ml_kem_768)
         self._mlkem_pub_bytes = mlkem_pub
         self._mlkem_priv = bytearray(mlkem_priv)
+        _zeroize_bytes(mlkem_priv)
 
+        self._session_id = "sess-" + secrets.token_hex(16)
         hello = {
             "responder_identity": self.identity,
             "responder_device": self.device,
-            "session_id": "sess-" + secrets.token_hex(16),
+            "session_id": self._session_id,
             "x25519_pub": base64.b64encode(self._x25519_pub_bytes).decode("ascii"),
             "mlkem_pub": base64.b64encode(self._mlkem_pub_bytes).decode("ascii"),
         }
@@ -150,6 +182,8 @@ class EphemeralHandshakeSession:
             resumption_secret = _hkdf_derive(bytes(ikm), transcript_hash_bytes, b"track4/v1/resumption-secret")
         finally:
             _best_effort_zeroize(ikm)
+            _zeroize_bytes(x25519_ss)
+            _zeroize_bytes(mlkem_ss)
             del eph_x25519_priv
             self._wipe_ephemerals()
 
@@ -196,13 +230,38 @@ class EphemeralHandshakeSession:
             self._wipe_ephemerals()
             raise HandshakeError("Initiator transcript ML-DSA-65 signature invalid")
 
+        # Bind responder identity, device, session_id, and ephemeral public keys to our own hello
+        expected_x25519_b64 = (
+            base64.b64encode(self._x25519_pub_bytes).decode("ascii")
+            if self._x25519_pub_bytes is not None
+            else ""
+        )
+        expected_mlkem_b64 = (
+            base64.b64encode(self._mlkem_pub_bytes).decode("ascii")
+            if self._mlkem_pub_bytes is not None
+            else ""
+        )
+        if (
+            transcript.get("session_id") != self._session_id
+            or transcript.get("responder_identity") != self.identity
+            or transcript.get("responder_device") != self.device
+            or transcript.get("resp_x25519_pub") != expected_x25519_b64
+            or transcript.get("resp_mlkem_pub") != expected_mlkem_b64
+        ):
+            self._wipe_ephemerals()
+            raise HandshakeError("Initiator transcript does not match responder identity or ephemeral offer")
+
         init_x25519_pub = X25519PublicKey.from_public_bytes(
             base64.b64decode(transcript["init_x25519_pub"], validate=True)
         )
         mlkem_ct = base64.b64decode(transcript["mlkem_ct"], validate=True)
 
         x25519_ss = self._x25519_priv.exchange(init_x25519_pub)
-        mlkem_ss = kem_decaps(ml_kem_768, bytes(self._mlkem_priv), mlkem_ct)
+        mlkem_priv_bytes = bytes(self._mlkem_priv)
+        try:
+            mlkem_ss = kem_decaps(ml_kem_768, mlkem_priv_bytes, mlkem_ct)
+        finally:
+            _zeroize_bytes(mlkem_priv_bytes)
 
         ikm = bytearray(transcript_hash_bytes + x25519_ss + mlkem_ss)
         try:
@@ -212,6 +271,8 @@ class EphemeralHandshakeSession:
             resumption_secret = _hkdf_derive(bytes(ikm), transcript_hash_bytes, b"track4/v1/resumption-secret")
         finally:
             _best_effort_zeroize(ikm)
+            _zeroize_bytes(x25519_ss)
+            _zeroize_bytes(mlkem_ss)
             self._wipe_ephemerals()
 
         return SessionKeys(

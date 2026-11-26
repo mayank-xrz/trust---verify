@@ -6,11 +6,11 @@ import uuid
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.audit.verifier import AuditLogVerifier
 from src.identity_keys.api import create_app
@@ -307,3 +307,171 @@ def test_actor_spoofing_ignored_and_audit_outbox_injection_proof(env) -> None:
     ver = AuditLogVerifier().verify_file(env["log_path"])
     assert ver.is_valid is True
     assert ver.total_records == delivered
+
+
+# --- P0-1: enrollment authorization (account-takeover regression) -----------------
+
+_ADMIN_TOKEN = "test-admin-enroll-token"
+
+
+def _enrollment_api(env, monkeypatch, admin_token: str | None = _ADMIN_TOKEN):
+    if admin_token is None:
+        monkeypatch.delenv("ADMIN_ENROLL_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("ADMIN_ENROLL_TOKEN", admin_token)
+    app = create_app(node_id="node-a", database_url=env["db_url"], clock=env["clock"])
+    return app, TestClient(app)
+
+
+def _start_body(user_id: str, kind: str = "first") -> str:
+    return f"/api/v1/enroll/start?user_id={user_id}&kind={kind}"
+
+
+def _enroll_payload(start: dict[str, str], label: str = "p0-1-device") -> dict[str, str]:
+    pub, priv = generate_ed25519_keypair()
+    pop = ed25519_sign(priv, start["nonce"].encode("utf-8"))
+    return {
+        "enrollment_id": start["enrollment_id"],
+        "nonce": start["nonce"],
+        "label": label,
+        "public_key_b64": b64e(pub),
+        "proof_of_possession_b64": b64e(pop),
+    }
+
+
+def test_enroll_start_requires_owner_bearer_or_admin(env, monkeypatch) -> None:
+    app, client = _enrollment_api(env, monkeypatch)
+    alice, bob = env["users"]["alice"], env["users"]["bob"]
+    alice_tok = app.state.token_authority.issue(alice, "alice-device")
+    bob_tok = app.state.token_authority.issue(bob, "bob-device")
+    admin = {"X-Admin-Enroll-Token": _ADMIN_TOKEN}
+
+    # Unauthenticated callers cannot start enrollment for anyone.
+    assert client.post(_start_body(alice)).status_code == 401
+
+    # A valid bearer token for a different user is forbidden.
+    assert (
+        client.post(_start_body(alice), headers={"Authorization": f"Bearer {bob_tok}"}).status_code
+        == 403
+    )
+
+    # The target user's own bearer token is accepted.
+    assert (
+        client.post(_start_body(alice), headers={"Authorization": f"Bearer {alice_tok}"}).status_code
+        == 200
+    )
+
+    # Admin enrollment token is accepted and the actor is audited.
+    assert client.post(_start_body(alice), headers=admin).status_code == 200
+    with tx_session(env["sf"]) as session:
+        started = [
+            e.payload
+            for e in session.execute(select(AuditOutbox)).scalars().all()
+            if e.payload.get("action") == "enrollment.started"
+        ]
+    assert any(
+        e["actor_id"] == "admin-enroll-token"
+        and e["metadata"].get("target_user_id") == alice
+        and e["metadata"].get("actor_is_admin") is True
+        for e in started
+    )
+
+    # Recovery enrollment is admin-only.
+    assert (
+        client.post(_start_body(alice, "recovery"), headers={"Authorization": f"Bearer {alice_tok}"}).status_code
+        == 403
+    )
+    assert client.post(_start_body(alice, "recovery"), headers=admin).status_code == 200
+
+
+def test_enroll_start_admin_token_fails_closed(env, monkeypatch) -> None:
+    _, client = _enrollment_api(env, monkeypatch)
+    alice = env["users"]["alice"]
+
+    # Wrong token is rejected.
+    assert (
+        client.post(_start_body(alice), headers={"X-Admin-Enroll-Token": "wrong"}).status_code
+        == 401
+    )
+
+    # Unset env means the admin path is disabled entirely (fail closed).
+    _, unset_client = _enrollment_api(env, monkeypatch, admin_token=None)
+    assert (
+        unset_client.post(_start_body(alice), headers={"X-Admin-Enroll-Token": _ADMIN_TOKEN}).status_code
+        == 401
+    )
+
+
+def test_enroll_completion_requires_owner_bearer_or_admin(env, monkeypatch) -> None:
+    app, client = _enrollment_api(env, monkeypatch)
+    alice, bob = env["users"]["alice"], env["users"]["bob"]
+    alice_tok = app.state.token_authority.issue(alice, "alice-device")
+    bob_tok = app.state.token_authority.issue(bob, "bob-device")
+    admin = {"X-Admin-Enroll-Token": _ADMIN_TOKEN}
+
+    start = client.post(_start_body(alice), headers=admin).json()
+    payload = _enroll_payload(start)
+
+    # Unauthenticated completion is rejected.
+    assert client.post("/api/v1/enroll", json=payload).status_code == 401
+    # Cross-user completion is rejected.
+    assert (
+        client.post("/api/v1/enroll", json=payload, headers={"Authorization": f"Bearer {bob_tok}"}).status_code
+        == 403
+    )
+    # Owner completion succeeds.
+    assert (
+        client.post("/api/v1/enroll", json=payload, headers={"Authorization": f"Bearer {alice_tok}"}).status_code
+        == 200
+    )
+
+    # Admin can complete an enrollment it started.
+    admin_start = client.post(_start_body(alice), headers=admin).json()
+    assert client.post("/api/v1/enroll", json=_enroll_payload(admin_start), headers=admin).status_code == 200
+
+    # A recovery enrollment cannot be completed with a normal user token.
+    recovery_start = client.post(_start_body(alice, "recovery"), headers=admin).json()
+    recovery_payload = _enroll_payload(recovery_start, label="recovery-device")
+    assert (
+        client.post(
+            "/api/v1/enroll",
+            json=recovery_payload,
+            headers={"Authorization": f"Bearer {alice_tok}"},
+        ).status_code
+        == 403
+    )
+    assert client.post("/api/v1/enroll", json=recovery_payload, headers=admin).status_code == 200
+
+
+def test_unauthenticated_enrollment_takeover_is_blocked(env, monkeypatch) -> None:
+    """The audit PoC: attacker starts enrollment for a victim and installs their key."""
+    _, client = _enrollment_api(env, monkeypatch)
+    victim = env["users"]["alice"]
+
+    with tx_session(env["sf"]) as session:
+        before = len(
+            session.execute(select(Device).where(Device.user_id == victim)).scalars().all()
+        )
+
+    pub, priv = generate_ed25519_keypair()
+    # Step 1 of the PoC: obtain a victim enrollment nonce. Must fail.
+    start_resp = client.post(_start_body(victim))
+    assert start_resp.status_code == 401
+    assert "enrollment_id" not in start_resp.json()
+
+    # Step 2 of the PoC cannot be reached without a valid enrollment id. Even a
+    # forged payload with an attacker signature is rejected before the service.
+    forged = {
+        "enrollment_id": str(uuid.uuid4()),
+        "nonce": "00" * 32,
+        "label": "attacker-phone",
+        "public_key_b64": b64e(pub),
+        "proof_of_possession_b64": b64e(ed25519_sign(priv, b"00" * 32)),
+    }
+    assert client.post("/api/v1/enroll", json=forged).status_code == 401
+
+    with tx_session(env["sf"]) as session:
+        after = len(
+            session.execute(select(Device).where(Device.user_id == victim)).scalars().all()
+        )
+    assert after == before

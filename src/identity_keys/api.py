@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
+from hmac import compare_digest
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -102,6 +104,22 @@ class AdminApprovalRequest(BaseModel):
     ttl_seconds: int = 600
 
 
+@dataclass(frozen=True)
+class EnrollmentCaller:
+    """Authenticated actor allowed to drive an enrollment."""
+
+    actor_id: str
+    is_admin: bool
+
+
+def _admin_enroll_token_valid(provided: str | None) -> bool:
+    """Constant-time admin enrollment token check; fails closed when env is unset."""
+    expected = os.environ.get("ADMIN_ENROLL_TOKEN", "").strip()
+    if not expected or not provided:
+        return False
+    return compare_digest(provided.strip(), expected)
+
+
 def create_app(
     *,
     node_id: str | None = None,
@@ -135,12 +153,13 @@ def create_app(
         resolved_clock,
         node_id=resolved_node,
         stale_after_ms=int(os.environ.get("STALE_AFTER_MS", "2000")),
+        heartbeat_interval_ms=int(os.environ.get("HEARTBEAT_INTERVAL_MS", "0")),
+        audit_emitter=emitter,
     )
     reenroll_svc = ReenrollmentService(session_factory, resolved_clock, emitter)
 
     app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})")
     app.state.engine = engine
-    app.state.session_factory = session_factory
     app.state.token_authority = token_auth
     app.state.identity_svc = identity_svc
     app.state.authz_svc = authz_svc
@@ -149,6 +168,16 @@ def create_app(
     app.state.revocation_svc = revocation_svc
     app.state.sync_mgr = sync_mgr
     app.state.reenroll_svc = reenroll_svc
+
+    @app.on_event("startup")
+    def _start_sync_heartbeat() -> None:
+        # Periodic independent poll so a node converges even when push
+        # broadcasts are blocked.  Disabled when HEARTBEAT_INTERVAL_MS <= 0.
+        sync_mgr.start_heartbeat()
+
+    @app.on_event("shutdown")
+    def _stop_sync_heartbeat() -> None:
+        sync_mgr.stop_heartbeat()
 
     def require_actor(authorization: str | None = Header(default=None)) -> ActorContext:
         if not authorization or not authorization.startswith("Bearer "):
@@ -159,8 +188,39 @@ def create_app(
         except NotAuthorized as exc:
             raise HTTPException(status_code=401, detail=exc.reason_code) from exc
 
+    def authenticate_enrollment_caller(
+        *,
+        authorization: str | None,
+        admin_enroll_token: str | None,
+    ) -> EnrollmentCaller:
+        """Authenticate the enrollment caller, fail closed.
+
+        An explicitly supplied admin token is always validated, so a wrong/empty
+        value is a 401 even if a bearer token is also present.  When
+        ``ADMIN_ENROLL_TOKEN`` is unset the admin path is disabled entirely.
+        """
+        if admin_enroll_token is not None:
+            if not _admin_enroll_token_valid(admin_enroll_token):
+                raise HTTPException(status_code=401, detail="INVALID_ADMIN_ENROLL_TOKEN")
+            return EnrollmentCaller(actor_id="admin-enroll-token", is_admin=True)
+        if not authorization:
+            raise HTTPException(status_code=401, detail="ENROLL_AUTH_REQUIRED")
+        actor = require_actor(authorization)
+        return EnrollmentCaller(actor_id=actor.user_id, is_admin=False)
+
+    def assert_enrollment_target(caller: EnrollmentCaller, target_user_id: str) -> None:
+        if not caller.is_admin and caller.actor_id != target_user_id:
+            raise HTTPException(status_code=403, detail="ENROLL_USER_MISMATCH")
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
+        from sqlalchemy import text
+
+        try:
+            with session_factory() as session:
+                session.execute(text("SELECT 1"))
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Database unavailable") from exc
         return {"status": "ok", "node_id": resolved_node}
 
     @app.get("/node/status")
@@ -173,14 +233,52 @@ def create_app(
         }
 
     @app.post("/api/v1/enroll/start")
-    def start_enroll(user_id: str, kind: str = "first") -> dict[str, str]:
+    def start_enroll(
+        user_id: str,
+        kind: str = "first",
+        authorization: str | None = Header(default=None),
+        x_admin_enroll_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        caller = authenticate_enrollment_caller(
+            authorization=authorization,
+            admin_enroll_token=x_admin_enroll_token,
+        )
+        assert_enrollment_target(caller, user_id)
+        if kind not in ("first", "recovery", "re_enroll"):
+            raise HTTPException(status_code=400, detail="INVALID_ENROLLMENT_KIND")
+        if kind in ("recovery", "re_enroll") and not caller.is_admin:
+            raise HTTPException(status_code=403, detail="RECOVERY_REQUIRES_ADMIN")
+        # The persisted enum predates the API spelling; keep one canonical value.
+        stored_kind = "re_enroll" if kind == "recovery" else kind
         try:
-            return identity_svc.start_enrollment(user_id=user_id, kind=kind)
+            return identity_svc.start_enrollment(
+                user_id=user_id,
+                kind=stored_kind,
+                initiated_by=caller.actor_id,
+                initiated_by_admin=caller.is_admin,
+            )
         except IdentityKeysError as exc:
             raise HTTPException(status_code=400, detail=exc.reason_code) from exc
 
     @app.post("/api/v1/enroll")
-    def enroll(req: EnrollRequest) -> dict[str, Any]:
+    def enroll(
+        req: EnrollRequest,
+        authorization: str | None = Header(default=None),
+        x_admin_enroll_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        caller = authenticate_enrollment_caller(
+            authorization=authorization,
+            admin_enroll_token=x_admin_enroll_token,
+        )
+        try:
+            target_user_id, enrollment_kind = identity_svc.get_enrollment_target(
+                req.enrollment_id
+            )
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=404, detail=exc.reason_code) from exc
+        assert_enrollment_target(caller, target_user_id)
+        if enrollment_kind in ("recovery", "re_enroll") and not caller.is_admin:
+            raise HTTPException(status_code=403, detail="RECOVERY_REQUIRES_ADMIN")
         try:
             return identity_svc.enroll_device(
                 enrollment_id=req.enrollment_id,
@@ -189,6 +287,7 @@ def create_app(
                 public_key_b64=req.public_key_b64,
                 proof_of_possession_b64=req.proof_of_possession_b64,
                 public_key_alg=req.public_key_alg,
+                initiated_by=caller.actor_id,
             )
         except IdentityKeysError as exc:
             raise HTTPException(status_code=403, detail=exc.reason_code) from exc

@@ -176,3 +176,31 @@ def test_nonce_uniqueness() -> None:
             assert n2 not in seen
             seen.add(n1)
             seen.add(n2)
+
+
+@pytest.mark.parametrize(("elapsed", "expires"), [(29.999, False), (30.0, True), (30.001, True)])
+def test_final_chunk_obeys_deadline(tmp_path, runtime_identities, elapsed, expires):
+    alice_pk, alice_sk = runtime_identities["alice"]
+    key = b"D" * 32
+    payload = b"example file"
+    now = [0.0]
+    receiver = ChunkReceiver(
+        local_identity="bob",
+        local_device="dev-b",
+        replay_cache=PersistentReplayCache(tmp_path / "replay.db"),
+        clock=lambda: now[0],
+    )
+    chunks = chunk_and_seal(
+        sender_identity="alice", sender_device="dev-a",
+        recipient_identity="bob", recipient_device="dev-b",
+        session_id="deadline", session_key=key, signing_secret_key=alice_sk,
+        plaintext=payload, chunk_size=6,
+    )
+    assert receiver.ingest_chunk(chunks[0], session_key=key, sender_public_key=alice_pk) is None
+    now[0] = elapsed
+    result = receiver.ingest_chunk(chunks[1], session_key=key, sender_public_key=alice_pk)
+    assert result == (None if expires else payload)
+    assert receiver.pending_count() == 0
+    if expires:
+        assert receiver.failure_reports[-1]["reason"] == "delivery_timeout"
+        assert receiver.failure_reports[-1]["missing_chunks"] == [1]

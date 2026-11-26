@@ -13,6 +13,7 @@ Design choices:
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import math
 import time
@@ -31,6 +32,22 @@ from .replay_cache import PersistentReplayCache
 
 DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0
 DEFAULT_MAX_ACTIVE_MESSAGES = 64
+
+
+def _zeroize_bytes(buf: Optional[bytes]) -> None:
+    """Overwrite an immutable ``bytes`` payload in place (CPython best effort)."""
+    if not isinstance(buf, bytes) or not buf:
+        return
+    try:
+        ctypes.memset(id(buf) + bytes.__basicsize__ - 1, 0, len(buf))
+    except Exception:
+        pass
+
+
+def _zeroize_parts(parts: List[bytes]) -> None:
+    for part in parts:
+        _zeroize_bytes(part)
+    parts.clear()
 
 
 class DeliveryError(Exception):
@@ -100,6 +117,8 @@ def chunk_and_seal(
             nonce=nonce,
             whole_message_hash=whole_hash,
         )
+        if chunk_bytes is not plaintext:
+            _zeroize_bytes(chunk_bytes)
         envelopes.append(env)
     return envelopes
 
@@ -131,6 +150,10 @@ class ChunkReceiver:
     def _record_failure(self, report: Dict[str, Any]) -> None:
         self.failure_reports.append(report)
 
+    def pending_count(self) -> int:
+        """Number of messages currently buffered awaiting more chunks."""
+        return len(self._buffers)
+
     def ingest_chunk(
         self,
         envelope: Dict[str, Any],
@@ -161,7 +184,37 @@ class ChunkReceiver:
             self._buffers.pop(msg_id, None)
             raise DeliveryInvalidError("Invalid chunk index or count")
 
+        # A 1-byte minimum chunk size means chunk_count can never exceed the
+        # 20 MB payload limit; reject absurd counts before allocating state.
+        if chunk_count > MAX_FILE_SIZE_BYTES:
+            emit_crypto_event(
+                self.audit_logger,
+                actor=sender_id or "unknown",
+                source_service=sender_id or "unknown",
+                target_service=f"{self.local_identity}/{self.local_device}",
+                action="delivery_failed_invalid",
+                outcome="failed",
+                session_id=session_id,
+                message_id=msg_id,
+                reason="chunk_count_exceeds_limit",
+                extra={"chunk_count": chunk_count},
+            )
+            self._buffers.pop(msg_id, None)
+            self._record_failure(
+                {
+                    "action": "delivery_failed_invalid",
+                    "message_id": msg_id,
+                    "chunk_index": chunk_index,
+                    "reason": "chunk_count_exceeds_limit",
+                }
+            )
+            raise DeliveryInvalidError("Chunk count exceeds payload limit")
+
         buf = self._buffers.get(msg_id)
+        now = self.clock()
+        if buf is not None and now - buf["created_at"] >= self.timeout_seconds:
+            self._expire_message(msg_id)
+            return None
         if buf is None:
             if len(self._buffers) >= self.max_active_messages:
                 oldest_mid = min(self._buffers, key=lambda k: self._buffers[k]["created_at"])
@@ -188,7 +241,7 @@ class ChunkReceiver:
                     }
                 )
             buf = {
-                "created_at": self.clock(),
+                "created_at": now,
                 "sender_identity": sender_id,
                 "session_id": session_id,
                 "chunk_count": chunk_count,
@@ -197,6 +250,45 @@ class ChunkReceiver:
                 "duplicates_logged": set(),
             }
             self._buffers[msg_id] = buf
+
+        # All chunks for one message must agree on sender, session, count, and
+        # whole-message hash.  Mixing chunks from different messages/senders
+        # under one message_id must fail closed before any decryption.
+        expected_meta = (
+            buf["sender_identity"],
+            buf["session_id"],
+            buf["chunk_count"],
+            buf["whole_message_hash"],
+        )
+        actual_meta = (
+            sender_id,
+            session_id,
+            chunk_count,
+            str(envelope.get("whole_message_hash", "")),
+        )
+        if expected_meta != actual_meta:
+            self._buffers.pop(msg_id, None)
+            emit_crypto_event(
+                self.audit_logger,
+                actor=sender_id or "unknown",
+                source_service=sender_id or "unknown",
+                target_service=f"{self.local_identity}/{self.local_device}",
+                action="delivery_failed_invalid",
+                outcome="failed",
+                session_id=session_id,
+                message_id=msg_id,
+                reason="chunk_metadata_mismatch",
+                extra={"chunk_index": chunk_index},
+            )
+            self._record_failure(
+                {
+                    "action": "delivery_failed_invalid",
+                    "message_id": msg_id,
+                    "chunk_index": chunk_index,
+                    "reason": "chunk_metadata_mismatch",
+                }
+            )
+            raise DeliveryInvalidError("Chunk metadata mismatch for message")
 
         if chunk_index in buf["chunks"]:
             if chunk_index not in buf["duplicates_logged"]:
@@ -242,6 +334,7 @@ class ChunkReceiver:
                 plaintext_parts.append(part)
             except (DeliveryInvalidError, EnvelopeError, Exception) as exc:
                 self._buffers.pop(msg_id, None)
+                _zeroize_parts(plaintext_parts)
                 reason = getattr(exc, "reason", "chunk_verification_failed")
                 emit_crypto_event(
                     self.audit_logger,
@@ -265,9 +358,12 @@ class ChunkReceiver:
                 )
                 raise DeliveryInvalidError(f"Delivery failed at chunk {idx}: {reason}") from exc
 
-        reassembled = b"".join(plaintext_parts)
+        # A single-item bytes join can return the same object we are about to wipe.
+        reassembled = bytes(bytearray(plaintext_parts[0])) if len(plaintext_parts) == 1 else b"".join(plaintext_parts)
+        _zeroize_parts(plaintext_parts)
         if len(reassembled) > MAX_FILE_SIZE_BYTES:
             self._buffers.pop(msg_id, None)
+            _zeroize_bytes(reassembled)
             emit_crypto_event(
                 self.audit_logger,
                 actor=sender_id,
@@ -284,6 +380,7 @@ class ChunkReceiver:
         expected_whole = buf["whole_message_hash"]
         if hashlib.sha256(reassembled).hexdigest() != expected_whole:
             self._buffers.pop(msg_id, None)
+            _zeroize_bytes(reassembled)
             emit_crypto_event(
                 self.audit_logger,
                 actor=sender_id,
@@ -315,28 +412,28 @@ class ChunkReceiver:
         expired_ids = [
             mid for mid, buf in self._buffers.items() if (now - buf["created_at"]) >= self.timeout_seconds
         ]
-        reports: List[Dict[str, Any]] = []
-        for mid in expired_ids:
-            buf = self._buffers.pop(mid)
-            missing = sorted(set(range(buf["chunk_count"])) - set(buf["chunks"].keys()))
-            emit_crypto_event(
-                self.audit_logger,
-                actor=buf["sender_identity"],
-                source_service=buf["sender_identity"],
-                target_service=f"{self.local_identity}/{self.local_device}",
-                action="delivery_failed_incomplete",
-                outcome="failed",
-                session_id=buf["session_id"],
-                message_id=mid,
-                reason="delivery_timeout",
-                extra={"missing_chunks": ",".join(str(x) for x in missing)},
-            )
-            report = {
-                "action": "delivery_failed_incomplete",
-                "message_id": mid,
-                "missing_chunks": missing,
-                "reason": "delivery_timeout",
-            }
-            self._record_failure(report)
-            reports.append(report)
-        return reports
+        return [self._expire_message(mid) for mid in expired_ids]
+
+    def _expire_message(self, mid: str) -> Dict[str, Any]:
+        buf = self._buffers.pop(mid)
+        missing = sorted(set(range(buf["chunk_count"])) - set(buf["chunks"].keys()))
+        emit_crypto_event(
+            self.audit_logger,
+            actor=buf["sender_identity"],
+            source_service=buf["sender_identity"],
+            target_service=f"{self.local_identity}/{self.local_device}",
+            action="delivery_failed_incomplete",
+            outcome="failed",
+            session_id=buf["session_id"],
+            message_id=mid,
+            reason="delivery_timeout",
+            extra={"missing_chunks": ",".join(str(x) for x in missing)},
+        )
+        report = {
+            "action": "delivery_failed_incomplete",
+            "message_id": mid,
+            "missing_chunks": missing,
+            "reason": "delivery_timeout",
+        }
+        self._record_failure(report)
+        return report

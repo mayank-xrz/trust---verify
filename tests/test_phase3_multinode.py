@@ -5,10 +5,10 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
+from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
-from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.clock import FakeClock
@@ -40,6 +40,9 @@ def test_three_nodes_status_and_consistent_authorization(tmp_path: Path, monkeyp
     # Share deterministic token signing seed across all 3 nodes
     _, seed_priv = generate_ed25519_keypair()
     monkeypatch.setenv("TOKEN_SIGNING_SEED_B64", b64e(seed_priv))
+    # Enrollment is admin-gated (P0-1); this multi-node test uses the admin path.
+    monkeypatch.setenv("ADMIN_ENROLL_TOKEN", "multi-node-admin-token")
+    admin_headers = {"X-Admin-Enroll-Token": "multi-node-admin-token"}
 
     clients = {
         nid: TestClient(create_app(node_id=nid, database_url=db_url, clock=clock))
@@ -54,10 +57,13 @@ def test_three_nodes_status_and_consistent_authorization(tmp_path: Path, monkeyp
 
     # Enroll device on node-a, verify on node-b, authorize on all 3 nodes
     pub, priv = generate_ed25519_keypair()
-    start = clients["node-a"].post(f"/api/v1/enroll/start?user_id={users['alice']}").json()
+    start = clients["node-a"].post(
+        f"/api/v1/enroll/start?user_id={users['alice']}", headers=admin_headers
+    ).json()
     pop = ed25519_sign(priv, start["nonce"].encode("utf-8"))
     dev = clients["node-a"].post(
         "/api/v1/enroll",
+        headers=admin_headers,
         json={
             "enrollment_id": start["enrollment_id"],
             "nonce": start["nonce"],

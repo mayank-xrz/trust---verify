@@ -770,7 +770,7 @@ def render_dashboard_html() -> str:
           <div class="stat-card"><div class="stat-label">F1 Score</div><div class="stat-value">--</div><div class="stat-meta">Run benchmark to measure</div></div>
           <div class="stat-card"><div class="stat-label">Precision / Recall</div><div class="stat-value">--</div><div class="stat-meta">Labelled scenario set</div></div>
           <div class="stat-card"><div class="stat-label">Median Time to Alert</div><div class="stat-value">--</div><div class="stat-meta">In-memory deterministic eval</div></div>
-          <div class="stat-card"><div class="stat-label">False Alerts / 1k</div><div class="stat-value">--</div><div class="stat-meta">Benign routine traffic</div></div>
+          <div class="stat-card"><div class="stat-label">False Alerts / 1k Benign Events</div><div class="stat-value">--</div><div class="stat-meta">Benign routine traffic</div></div>
         </div>
 
         <div class="grid-2">
@@ -1750,8 +1750,8 @@ async function refreshState() {
       document.getElementById('eval-metrics-box').innerHTML = `
         <div class="stat-card"><div class="stat-label">F1 Score</div><div class="stat-value" style="color:var(--green-text);">${esc(m.f1_score)}</div><div class="stat-meta">Target &ge; 0.90</div></div>
         <div class="stat-card"><div class="stat-label">Precision / Recall</div><div class="stat-value">${esc(m.precision)} / ${esc(m.recall)}</div><div class="stat-meta">550 labelled events</div></div>
-        <div class="stat-card"><div class="stat-label">Median Alert Latency</div><div class="stat-value">${esc(m.mtta_ms)} ms</div><div class="stat-meta">Zero AI/ML engine</div></div>
-        <div class="stat-card"><div class="stat-label">False Alerts / 1k</div><div class="stat-value">${esc(m.false_alerts_per_1k)}</div><div class="stat-meta">Routine traffic</div></div>
+        <div class="stat-card"><div class="stat-label">Median Alert Latency</div><div class="stat-value">${esc(m.median_time_to_alert_ms)} ms</div><div class="stat-meta">Zero AI/ML engine</div></div>
+        <div class="stat-card"><div class="stat-label">False Alerts / 1k Benign Events</div><div class="stat-value">${esc(m.false_alerts_per_1k)}</div><div class="stat-meta">Routine traffic</div></div>
       `;
     }
   } catch (e) {

@@ -61,7 +61,7 @@ services:
         FROM python:3.11-slim
         WORKDIR /app
         COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
+        RUN pip install --no-cache-dir -r requirements.txt
         EXPOSE 8101
         CMD ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
     container_name: tbv-node-a
@@ -92,7 +92,7 @@ services:
         FROM python:3.11-slim
         WORKDIR /app
         COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
+        RUN pip install --no-cache-dir -r requirements.txt
         EXPOSE 8102
         CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
     container_name: tbv-node-b
@@ -107,6 +107,8 @@ services:
       MAX_CACHE_STALENESS_MS: 5000
     depends_on:
       postgres:
+        condition: service_healthy
+      node-a:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8102/healthz')"]
@@ -123,7 +125,7 @@ services:
         FROM python:3.11-slim
         WORKDIR /app
         COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
+        RUN pip install --no-cache-dir -r requirements.txt
         EXPOSE 8103
         CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
     container_name: tbv-node-c
@@ -138,6 +140,8 @@ services:
       MAX_CACHE_STALENESS_MS: 5000
     depends_on:
       postgres:
+        condition: service_healthy
+      node-a:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8103/healthz')"]

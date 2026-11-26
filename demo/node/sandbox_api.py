@@ -1115,9 +1115,7 @@ class SandboxController:
                 "status": "SUCCESS",
                 "metadata": {"role": "admin" if is_approved_admin else "worker"},
             }
-            t0 = time.perf_counter()
             alerts = eng.evaluate_event(ev)
-            latencies.append((time.perf_counter() - t0) * 1000.0)
             evals.append({"is_attack": False, "detected": len(alerts) > 0})
 
         # 50 malicious events (unauthorized privilege gain & replay/tamper)
@@ -1142,7 +1140,7 @@ class SandboxController:
 
         metrics = compute_f1_mtta(evals, latencies).to_dict()
         self.last_eval_metrics = metrics
-        self._mark("routine_suspicious", metrics["f1_score"] >= 0.90, f"F1={metrics['f1_score']}, MTTA={metrics['mtta_ms']}ms, FP/1k={metrics['false_alerts_per_1k']}")
+        self._mark("routine_suspicious", metrics["f1_score"] >= 0.90, f"F1={metrics['f1_score']}, median time to alert={metrics['median_time_to_alert_ms']}ms, FP/1k benign={metrics['false_alerts_per_1k']}")
         return {"ok": True, "metrics": metrics}
 
     def run_file_share_check(self, payload: FileSharePayload) -> Dict[str, Any]:

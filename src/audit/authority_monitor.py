@@ -82,6 +82,7 @@ class AuthorityMonitor:
             str(self.state_dir / "authority_audit.log"),
         )
         self.verifier = AuditLogVerifier()
+        self.anchor_path = self.state_dir / ".authority_audit_anchor.json"
         self.new_authority_window_sec = new_authority_window_sec
         self.clock = clock
         self.db_path = self.state_dir / "authority_monitor.db"
@@ -139,9 +140,19 @@ class AuthorityMonitor:
         raw = json.dumps(state, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         return hashlib.sha256(raw).hexdigest()
 
+    def _save_anchor(self) -> None:
+        if Path(self.audit_logger.log_file_path).exists():
+            self.verifier.save_anchor(self.audit_logger.log_file_path, self.anchor_path)
+
+    def _log_and_anchor(self, **kwargs: Any) -> Any:
+        rec = self.audit_logger.log_event(**kwargs)
+        self._save_anchor()
+        return rec
+
     def verify_log_integrity(self) -> Dict[str, Any]:
         """Verify SHA-256 hash chain integrity of the audit log; fail closed on tampering."""
-        res = self.verifier.verify_file(self.audit_logger.log_file_path)
+        anchor = self.anchor_path if self.anchor_path.exists() else None
+        res = self.verifier.verify_file(self.audit_logger.log_file_path, anchor_path=anchor)
         if not res.is_valid:
             raise LogIntegrityError(
                 f"Audit log integrity check failed: {res.first_error}"
@@ -176,7 +187,7 @@ class AuthorityMonitor:
                 """,
                 (user_id, role, granted_by, now),
             )
-        rec = self.audit_logger.log_event(
+        rec = self._log_and_anchor(
             service=self.node_id,
             action="AUTHORITY_GRANTED",
             subject=user_id,
@@ -233,7 +244,7 @@ class AuthorityMonitor:
             "description": description,
             **(metadata or {}),
         }
-        rec = self.audit_logger.log_event(
+        rec = self._log_and_anchor(
             service=self.node_id,
             action="AUTHORITY_THREAT_DETECTED",
             subject=user_id,
@@ -326,7 +337,7 @@ class AuthorityMonitor:
 
         if grant["status"] != "active":
             case_label = "SUSPENDED_AUTHORITY_CONSOLE_ATTEMPT"
-            rec = self.audit_logger.log_event(
+            rec = self._log_and_anchor(
                 service=self.node_id,
                 action="AUTHORITY_MUTATION_BLOCKED_AND_REVERTED",
                 subject=user_id,
@@ -396,7 +407,7 @@ class AuthorityMonitor:
                     (user_id, action, case_label, now),
                 )
 
-            rec = self.audit_logger.log_event(
+            rec = self._log_and_anchor(
                 service=self.node_id,
                 action="NEW_ADMIN_SUSPICIOUS_CONSOLE_CHANGE" if not prior_threat else "AUTHORITY_MUTATION_BLOCKED_AND_REVERTED",
                 subject=user_id,
@@ -451,7 +462,7 @@ class AuthorityMonitor:
                 (user_id, action, now),
             )
 
-        rec = self.audit_logger.log_event(
+        rec = self._log_and_anchor(
             service=self.node_id,
             action="CONSOLE_ACTION_APPLIED",
             subject=user_id,

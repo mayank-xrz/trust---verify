@@ -12,9 +12,9 @@ import tarfile
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 
-from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.backup import (
@@ -30,6 +30,8 @@ from src.identity_keys.crypto import (
     canonical_json_bytes,
     ed25519_sign,
     generate_ed25519_keypair,
+    generate_ml_dsa_keypair,
+    ml_dsa_sign,
     sha256_hex,
 )
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session
@@ -67,7 +69,7 @@ def bkp_env(tmp_path: Path, monkeypatch):
         plaintext=b"secret-backup-payload-123",
         key_set_id="data-bkp",
     )
-    bkp_pub, bkp_priv = generate_ed25519_keypair()
+    bkp_pub, bkp_priv = generate_ml_dsa_keypair()
     bkp_svc = BackupService(sf, clock, emitter, "node-a")
     admin_ctx = ActorContext(users["carol"], "carol-dev", "jti-carol")
     return {
@@ -162,7 +164,7 @@ def test_randomized_200_byte_flips_and_tamper_vectors(bkp_env, tmp_path: Path) -
             pinned_pubkey=bkp_env["bkp_pub"],
             passphrase="wrong-passphrase",
         )
-    wrong_pub, _ = generate_ed25519_keypair()
+    wrong_pub, _ = generate_ml_dsa_keypair()
     with pytest.raises(DomainIntegrityError, match="signature"):
         bkp_env["bkp_svc"].restore_backup(
             bkp_env["admin_ctx"],
@@ -202,7 +204,7 @@ def test_tar_path_traversal_symlink_and_unknown_schema_rejected(bkp_env, tmp_pat
     aad = header_bytes + canonical_json_bytes(manifest_core)
     nonce, ct = aes_gcm_wrap(_scrypt_key(bkp_env["passphrase"], salt), tar_gz, aad)
     manifest = {**manifest_core, "ciphertext_sha256": sha256_hex(ct)}
-    sig = ed25519_sign(bkp_env["bkp_priv"], canonical_json_bytes(manifest))
+    sig = ml_dsa_sign(bkp_env["bkp_priv"], canonical_json_bytes(manifest))
     env_bytes = canonical_json_bytes({"header": header, "nonce_b64": b64e(nonce), "manifest": manifest, "manifest_sig_b64": b64e(sig)})
     evil_path = tmp_path / "traversal.tbv"
     evil_path.write_bytes(BACKUP_MAGIC + struct.pack(">I", len(env_bytes)) + env_bytes + ct)

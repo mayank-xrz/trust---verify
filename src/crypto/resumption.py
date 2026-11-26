@@ -2,12 +2,17 @@
 
 Ticket fields:
 - session_id
-- peer_identity
+- peer_identity (plaintext, for audit)
+- peer_identity_hash (SHA-256 of the bound peer identity)
 - peer_device
 - original_transcript_hash
 - expiry
 - resumption_key_id
-- mac (HMAC-SHA256 under the session's resumption_secret)
+- signature (ML-DSA-65 over the canonical ticket body)
+
+The store persists an ML-DSA-65 ticket/PoP signing keypair in its SQLite
+database so tickets remain verifiable across restarts and across store
+instances sharing the same database.
 """
 
 from __future__ import annotations
@@ -23,11 +28,20 @@ from typing import Callable, Dict, Optional, Tuple
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
 
+from ._pqcrypto_compat import sig_keygen, sig_sign, sig_verify
 from .events import emit_crypto_event
 from .handshake import SessionKeys
+
+TICKET_DOMAIN = b"track4/v1/ticket\x00"
+POP_DOMAIN = b"track4/v1/resume-pop\x00"
+
+
+def _peer_identity_hash(peer_identity: str) -> str:
+    return hashlib.sha256(peer_identity.encode("utf-8")).hexdigest()
 
 
 class ResumptionError(Exception):
@@ -76,6 +90,28 @@ class PersistentResumptionStore:
                 )
                 """
             )
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS resumption_signing_keys (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    public_key BLOB NOT NULL,
+                    secret_key BLOB NOT NULL
+                )
+                """
+            )
+            row = db.execute(
+                "SELECT public_key, secret_key FROM resumption_signing_keys WHERE id=1"
+            ).fetchone()
+            if row is None:
+                public_key, secret_key = sig_keygen(ml_dsa_65)
+                db.execute(
+                    "INSERT INTO resumption_signing_keys (id, public_key, secret_key) VALUES (1, ?, ?)",
+                    (public_key, secret_key),
+                )
+            else:
+                public_key, secret_key = row
+        self._signing_public_key = bytes(public_key)
+        self._signing_secret_key = bytes(secret_key)
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=5.0)
@@ -87,6 +123,7 @@ class PersistentResumptionStore:
         body = {
             "session_id": ticket["session_id"],
             "peer_identity": ticket["peer_identity"],
+            "peer_identity_hash": ticket["peer_identity_hash"],
             "peer_device": ticket["peer_device"],
             "original_transcript_hash": ticket["original_transcript_hash"],
             "expiry": ticket["expiry"],
@@ -110,17 +147,18 @@ class PersistentResumptionStore:
         ticket: Dict[str, object] = {
             "session_id": session_id,
             "peer_identity": peer_identity,
+            "peer_identity_hash": _peer_identity_hash(peer_identity),
             "peer_device": peer_device,
             "original_transcript_hash": original_transcript_hash,
             "expiry": expiry,
             "resumption_key_id": resumption_key_id,
         }
-        mac = hmac.new(
-            resumption_secret,
-            b"track4/v1/ticket\x00" + self._canonical_ticket_body(ticket),
-            hashlib.sha256,
-        ).hexdigest()
-        ticket["mac"] = mac
+        signature = sig_sign(
+            ml_dsa_65,
+            self._signing_secret_key,
+            TICKET_DOMAIN + self._canonical_ticket_body(ticket),
+        )
+        ticket["signature"] = signature.hex()
 
         with self._connect() as db:
             db.execute(
@@ -141,15 +179,25 @@ class PersistentResumptionStore:
             )
         return ticket
 
-    @staticmethod
     def create_proof_of_possession(
+        self,
         resumption_secret: bytes,
         fresh_nonce: bytes,
         new_transcript_hash: str,
     ) -> str:
-        """Compute proof of possession over fresh nonce and new handshake transcript."""
-        msg = b"track4/v1/resume-pop\x00" + fresh_nonce + new_transcript_hash.encode("utf-8")
-        return hmac.new(resumption_secret, msg, hashlib.sha256).hexdigest()
+        """ML-DSA-65 proof of possession over the fresh nonce and new transcript.
+
+        The signed message also binds a SHA-256 digest of the shared resumption
+        secret, so a caller that does not know the secret cannot produce a
+        proof that this store will accept.
+        """
+        msg = (
+            POP_DOMAIN
+            + hashlib.sha256(resumption_secret).digest()
+            + fresh_nonce
+            + new_transcript_hash.encode("utf-8")
+        )
+        return sig_sign(ml_dsa_65, self._signing_secret_key, msg).hex()
 
     def resume(
         self,
@@ -181,12 +229,21 @@ class PersistentResumptionStore:
 
             rk_id, bound_id, bound_dev, orig_th, res_secret, expiry, used = row
 
-            # 1. Peer binding check BEFORE any key derivation
+            # 1. Peer binding check BEFORE any key derivation.  The signed
+            #    peer_identity_hash is compared in constant time as well as the
+            #    plaintext fields.
+            bound_hash = _peer_identity_hash(str(bound_id))
+            presented_hash = ticket.get("peer_identity_hash")
+            hash_ok = (
+                isinstance(presented_hash, str)
+                and hmac.compare_digest(presented_hash, bound_hash)
+            )
             if (
                 presented_identity != bound_id
                 or presented_device != bound_dev
                 or ticket.get("peer_identity") != bound_id
                 or ticket.get("peer_device") != bound_dev
+                or not hash_ok
             ):
                 emit_crypto_event(
                     self.audit_logger,
@@ -231,18 +288,36 @@ class PersistentResumptionStore:
                 )
                 raise ResumptionReplayedError(f"Resumption ticket already used for session {session_id}")
 
-            # 4. Verify ticket MAC
-            expected_mac = hmac.new(
-                res_secret,
-                b"track4/v1/ticket\x00" + self._canonical_ticket_body(ticket),
-                hashlib.sha256,
-            ).hexdigest()
-            if not hmac.compare_digest(str(ticket.get("mac", "")), expected_mac):
-                raise ResumptionError("Resumption ticket MAC invalid")
+            # 4. Verify the ML-DSA-65 ticket signature over the canonical body
+            try:
+                ticket_body = self._canonical_ticket_body(ticket)
+            except KeyError as exc:
+                raise ResumptionError(f"Resumption ticket malformed: missing {exc}") from exc
+            try:
+                ticket_sig = bytes.fromhex(str(ticket.get("signature", "")))
+            except ValueError as exc:
+                raise ResumptionError("Resumption ticket signature invalid") from exc
+            if not sig_verify(
+                ml_dsa_65,
+                self._signing_public_key,
+                TICKET_DOMAIN + ticket_body,
+                ticket_sig,
+            ):
+                raise ResumptionError("Resumption ticket signature invalid")
 
-            # 5. Verify Proof of Possession over fresh nonce + new transcript
-            expected_pop = self.create_proof_of_possession(res_secret, fresh_nonce, new_transcript_hash)
-            if not hmac.compare_digest(proof_of_possession, expected_pop):
+            # 5. Verify the ML-DSA-65 Proof of Possession over fresh nonce +
+            #    new transcript, bound to the shared resumption secret.
+            pop_msg = (
+                POP_DOMAIN
+                + hashlib.sha256(res_secret).digest()
+                + fresh_nonce
+                + new_transcript_hash.encode("utf-8")
+            )
+            try:
+                pop_sig = bytes.fromhex(str(proof_of_possession))
+            except ValueError as exc:
+                raise ResumptionError("Resumption proof of possession invalid") from exc
+            if not sig_verify(ml_dsa_65, self._signing_public_key, pop_msg, pop_sig):
                 raise ResumptionError("Resumption proof of possession invalid")
 
             # 6. Mark ticket used atomically before deriving new keys

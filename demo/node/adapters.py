@@ -188,6 +188,7 @@ class PersonBIdentityAdapter:
                 grace_period_seconds=self.grace_period_sec,
                 wal_manager=self.wal,
             )
+            self._replay_wal()
             self.revocation = RevocationCoordinator(node_id=self.node_id)
             self.KeyStateEnum = KeyStateEnum
             self.is_mock = False
@@ -197,6 +198,56 @@ class PersonBIdentityAdapter:
             self.revocation = _InMemoryRevocationStub(self.node_id)
             self.KeyStateEnum = type("KeyStateEnum", (), {"ACTIVE": "active", "GRACE_PERIOD": "grace", "REVOKED": "revoked"})
             self.is_mock = True
+
+    def _replay_wal(self) -> None:
+        """Restore committed KeyManager state from WAL on node restart."""
+        if not self.wal:
+            return
+        from src.identity.key_manager import KeyRecord, KeyStateEnum
+
+        pending_rotations: Dict[str, Dict[str, Any]] = {}
+        for entry in self.wal.read_valid_entries():
+            op = entry.get("op")
+            payload = entry.get("payload") or {}
+            if op == "ENROLL_KEY":
+                rec = KeyRecord.from_dict(payload)
+                self.key_manager.keys[rec.key_id] = rec
+                self.key_manager.active_key_id = rec.key_id
+                if rec.key_id not in self.key_manager.key_history:
+                    self.key_manager.key_history.append(rec.key_id)
+            elif op == "ROTATE_KEY_BEGIN":
+                new_rec_data = payload.get("new_key_record")
+                if new_rec_data:
+                    pending_rotations[new_rec_data["key_id"]] = payload
+            elif op == "ROTATE_KEY_COMMIT":
+                new_id = payload.get("active_key_id")
+                old_id = payload.get("retired_key_id")
+                if new_id and new_id in pending_rotations:
+                    rot_payload = pending_rotations.pop(new_id)
+                    new_rec = KeyRecord.from_dict(rot_payload["new_key_record"])
+                    self.key_manager.keys[new_rec.key_id] = new_rec
+                    self.key_manager.active_key_id = new_rec.key_id
+                    if new_rec.key_id not in self.key_manager.key_history:
+                        self.key_manager.key_history.append(new_rec.key_id)
+                if old_id and old_id in self.key_manager.keys:
+                    old_rec = self.key_manager.keys[old_id]
+                    if old_rec.state == KeyStateEnum.ACTIVE:
+                        old_rec.state = KeyStateEnum.GRACE_PERIOD
+            elif op == "ENFORCE_CUTOFFS":
+                for kid in payload.get("expired_key_ids", []):
+                    rec = self.key_manager.keys.get(kid)
+                    if rec:
+                        rec.state = KeyStateEnum.EXPIRED
+                        rec.private_key_b64 = ""
+            elif op == "REVOKE_KEY":
+                kid = payload.get("key_id")
+                rec = self.key_manager.keys.get(kid) if kid else None
+                if rec:
+                    rec.state = KeyStateEnum.REVOKED
+                    rec.revocation_reason = payload.get("reason")
+                    rec.private_key_b64 = ""
+                    if self.key_manager.active_key_id == kid:
+                        self.key_manager.active_key_id = None
 
 
 class _InMemoryKeyManagerStub:
@@ -462,10 +513,11 @@ class NodeAdapters:
         self.identity = PersonBIdentityAdapter(node_id=node_id, data_dir=data_dir, grace_period_sec=grace_period_sec)
         self.audit = PersonCAuditDetectorAdapter(node_id=node_id, data_dir=data_dir, signer=self.crypto.sig)
 
-        # Seed initial key
-        init_pub, init_priv = self.crypto.kem.generate_keypair()
-        self.identity.key_manager.enroll_initial_key(
-            algorithm=getattr(self.crypto.kem, "algorithm_name", "ML-KEM-768"),
-            public_key=init_pub,
-            private_key=init_priv,
-        )
+        # Seed initial key only if no persisted key state was recovered from WAL
+        if not getattr(self.identity.key_manager, "keys", None):
+            init_pub, init_priv = self.crypto.kem.generate_keypair()
+            self.identity.key_manager.enroll_initial_key(
+                algorithm=getattr(self.crypto.kem, "algorithm_name", "ML-KEM-768"),
+                public_key=init_pub,
+                private_key=init_priv,
+            )

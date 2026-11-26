@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -11,8 +13,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .audit_outbox import AuditEmitter
+from .authority import KeyAuthority
 from .clock import Clock
-from .crypto import aes_gcm_unwrap, aes_gcm_wrap, b64d
+from .crypto import aes_gcm_unwrap, aes_gcm_wrap, b64d, canonical_json_bytes
 from .db import tx_session
 from .errors import (
     Conflict,
@@ -25,7 +28,7 @@ from .errors import (
 from .errors import (
     IntegrityError as DomainIntegrityError,
 )
-from .models import KeyVersion, Permission, Resource, RolePermission, UserRole
+from .models import KeyVersion, Permission, Resource, RolePermission, RotationCutoff, UserRole
 from .tokens import ActorContext
 
 _LEGAL_TRANSITIONS: dict[str, set[str]] = {
@@ -185,6 +188,103 @@ def is_key_acceptable(
         return False, "KEY_UNAVAILABLE"
 
     return False, "UNKNOWN_KEY_PURPOSE"
+
+
+def build_rotation_cutoff_body(
+    *,
+    key_set_id: str,
+    key_version_id: str,
+    version: int,
+    scope: str,
+    grace_until: datetime,
+    signed_at: datetime,
+    key_authority_id: str,
+) -> dict[str, str]:
+    """Canonical signed body for a rotation grace cutoff."""
+    return {
+        "key_set_id": key_set_id,
+        "key_version_id": key_version_id,
+        "version": int(version),
+        "scope": scope,
+        "grace_until": _as_utc(grace_until).isoformat(),
+        "signed_at": _as_utc(signed_at).isoformat(),
+        "key_authority_id": key_authority_id,
+    }
+
+
+def create_rotation_cutoff(
+    session: Session,
+    *,
+    key_set_id: str,
+    key_version_id: str,
+    version: int,
+    scope: str,
+    grace_until: datetime,
+    signed_at: datetime,
+) -> RotationCutoff:
+    """Sign and persist the authoritative grace cutoff for a key version."""
+    authority = KeyAuthority()
+    body = build_rotation_cutoff_body(
+        key_set_id=key_set_id,
+        key_version_id=key_version_id,
+        version=version,
+        scope=scope,
+        grace_until=grace_until,
+        signed_at=signed_at,
+        key_authority_id="primary",
+    )
+    body_json = canonical_json_bytes(body)
+    signature, signer_key_id = authority.sign(body_json)
+    cutoff = RotationCutoff(
+        cutoff_id=str(uuid.uuid4()),
+        key_set_id=key_set_id,
+        key_version_id=key_version_id,
+        version=int(version),
+        scope=scope,
+        grace_until=grace_until,
+        signed_at=signed_at,
+        key_authority_id="primary",
+        signer_key_id=signer_key_id,
+        body_json=body_json.decode("utf-8"),
+        signature=signature,
+    )
+    session.add(cutoff)
+    return cutoff
+
+
+def verify_rotation_cutoff(session: Session, key_version: KeyVersion) -> tuple[bool, str]:
+    """Verify the signed cutoff before accepting a GRACE key. Fail closed."""
+    cutoff = session.execute(
+        select(RotationCutoff).where(RotationCutoff.key_version_id == key_version.key_version_id)
+    ).scalar_one_or_none()
+    if cutoff is None:
+        return False, "KEY_CUTOFF_UNSIGNED"
+    try:
+        authority = KeyAuthority()
+        if not authority.verify(
+            cutoff.body_json.encode("utf-8"), cutoff.signature, cutoff.signer_key_id
+        ):
+            return False, "KEY_CUTOFF_INVALID"
+        body = json.loads(cutoff.body_json)
+        expected = build_rotation_cutoff_body(
+            key_set_id=key_version.key_set_id,
+            key_version_id=key_version.key_version_id,
+            version=key_version.version,
+            scope=key_version.scope,
+            grace_until=cutoff.grace_until,
+            signed_at=cutoff.signed_at,
+            key_authority_id=cutoff.key_authority_id,
+        )
+        if body != expected:
+            return False, "KEY_CUTOFF_MISMATCH"
+        if key_version.grace_until is None or _as_utc(cutoff.grace_until) != _as_utc(
+            key_version.grace_until
+        ):
+            return False, "KEY_CUTOFF_MISMATCH"
+    except Exception:
+        return False, "KEY_CUTOFF_INVALID"
+    return True, "KEY_CUTOFF_VALID"
+
 
 
 class EnvelopeEncryptionService:
