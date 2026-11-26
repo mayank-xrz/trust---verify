@@ -75,6 +75,8 @@ def run_scenario(
         _, seed_priv = generate_ed25519_keypair()
         os.environ["TOKEN_SIGNING_SEED_B64"] = b64e(seed_priv)
         os.environ["CLUSTER_SYNC_SECRET"] = "bench-sync-secret"
+        os.environ["ADMIN_ENROLL_TOKEN"] = "bench-admin-token"
+        admin_headers = {"X-Admin-Enroll-Token": "bench-admin-token"}
 
         clock = SystemClock()
         clients = {
@@ -89,12 +91,15 @@ def run_scenario(
 
         for i in range(m_runs):
             pub, priv = generate_ed25519_keypair()
-            st = clients["node-a"].post(f"/api/v1/enroll/start?user_id={users['alice']}").json()
+            st = clients["node-a"].post(
+                f"/api/v1/enroll/start?user_id={users['alice']}", headers=admin_headers
+            ).json()
             pop = ed25519_sign(priv, st["nonce"].encode())
             dev = (
                 clients["node-a"]
                 .post(
                     "/api/v1/enroll",
+                    headers=admin_headers,
                     json={
                         "enrollment_id": st["enrollment_id"],
                         "nonce": st["nonce"],

@@ -1,324 +1,607 @@
-"""Performance & Overhead Benchmark Suite (P4-14).
+"""Reproducible performance measurements for the shipped paths.
 
-Runs reproducible benchmarks against the cryptographic, identity, and detection layers:
-- ML-KEM & ML-DSA Envelope sign+encrypt and verify+decrypt latency (p50, p95, p99 in ms) and throughput (ops/sec) over 500 iterations
-- Peak memory overhead (MB) using tracemalloc
-- Cross-node revocation propagation latency (ms) from /keys/revoke call to all peer nodes rejecting the key
-- Explainable detection engine evaluation throughput
-- Outputs a clean Markdown summary table and saves benchmark_results.json
+Methodology (P0-3 / P2-3):
+- 50 warm-up iterations per benchmark, then 3 independent measured runs.
+- Each run reports p50/p95/p99 latency and throughput; the table reports the
+  median across the 3 runs.
+- Memory uses ``resource.getrusage(RUSAGE_SELF).ru_maxrss`` (RSS) in addition
+  to ``tracemalloc`` for Python allocations.
+- The envelope and ML-KEM/ML-DSA paths are the shipped ``src/crypto`` code.
+- Revocation uses the shipped DB-backed ``src/identity_keys/revocation.py`` via
+  ``scripts/measure_revocation.py`` (TestClient + SQLite, 5 ms probe).
+- Detector accuracy is reported only for the **synthetic** labelled set from
+  ``scripts/eval_detector.py`` and is labelled as such.
+
+Outputs:
+- ``reports/measurements.json`` — machine-readable results + provenance.
+- ``docs/MEASUREMENTS.md`` — human-readable source of truth.
+- The marked block in ``README.md`` is regenerated from the same results.
+
+Run:
+    .venv/bin/python scripts/benchmark.py
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import platform
+import resource
+import subprocess
 import sys
 import time
 import tracemalloc
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Callable, Dict, List
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-from demo.node.crypto_provider import MLDSASignature, MLKEMKeyExchange, SecureMessaging  # noqa: E402
+from scripts.eval_detector import run_evaluation  # noqa: E402
+from src.crypto.envelope import open_envelope, seal_envelope  # noqa: E402
+from src.crypto.primitives import (  # noqa: E402
+    decapsulate,
+    encapsulate,
+    kem_keypair,
+    sign,
+    signing_keypair,
+    verify,
+)
 from src.detector.rules import ContextRuleEngine  # noqa: E402
-from src.identity.revocation import RevocationCoordinator  # noqa: E402
+
+WARMUP = 50
+RUNS = 3
+README_START = "<!-- BENCHMARK:START -->"
+README_END = "<!-- BENCHMARK:END -->"
 
 
 def percentile(data: List[float], p: float) -> float:
-    """Calculates the p-th percentile from a list of float values."""
     if not data:
         return 0.0
-    sorted_data = sorted(data)
-    k = (len(sorted_data) - 1) * (p / 100.0)
+    ordered = sorted(data)
+    k = (len(ordered) - 1) * (p / 100.0)
     f = int(k)
     c = f + 1
-    if c < len(sorted_data):
-        return sorted_data[f] + (k - f) * (sorted_data[c] - sorted_data[f])
-    return sorted_data[f]
+    if c < len(ordered):
+        return ordered[f] + (k - f) * (ordered[c] - ordered[f])
+    return ordered[f]
 
 
-def benchmark_envelope_operations(iterations: int = 500) -> Dict[str, Any]:
-    """Measures envelope sign+encrypt (pack) and verify+decrypt (unpack) over 500 iterations."""
-    alice = SecureMessaging("node-alice")
-    bob = SecureMessaging("node-bob")
-    signer = MLDSASignature()
-    pub, priv = signer.generate_keypair()
-    shared_key = b"BENCHMARK_SHARED_SECRET_32BYTES!"
-    payload = b'{"operation": "SECURE_TRANSFER", "amount": 5000, "token": "USD", "memo": "PQC Protected"}'
+def _median(values: List[float]) -> float:
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 0:
+        return 0.0
+    mid = n // 2
+    if n % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
 
-    pack_latencies: List[float] = []
-    unpack_latencies: List[float] = []
-    roundtrip_latencies: List[float] = []
 
-    print(f"▶ Running envelope sign+encrypt and verify+decrypt benchmark ({iterations} iterations)...")
-    for _ in range(iterations):
-        # Sign + Encrypt
-        t0 = time.perf_counter()
-        envelope = alice.pack_envelope("node-alice", "node-bob", payload, shared_key, signer)
-        t_pack = (time.perf_counter() - t0) * 1000.0
-        pack_latencies.append(t_pack)
+def _rss_mb() -> float:
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # macOS reports bytes; Linux reports KiB.
+    if sys.platform == "darwin":
+        return usage / (1024.0 * 1024.0)
+    return usage / 1024.0
 
-        # Verify + Decrypt
-        t1 = time.perf_counter()
-        _decrypted = bob.unpack_envelope(envelope, shared_key, signer, pub)
-        t_unpack = (time.perf_counter() - t1) * 1000.0
-        unpack_latencies.append(t_unpack)
 
-        roundtrip_latencies.append(t_pack + t_unpack)
+def _cpu_name() -> str:
+    if sys.platform == "darwin":
+        try:
+            return subprocess.check_output(
+                ["sysctl", "-n", "machdep.cpu.brand_string"], text=True
+            ).strip()
+        except Exception:
+            pass
+    return platform.processor() or "unknown"
 
-    total_time_s = sum(roundtrip_latencies) / 1000.0
-    throughput = iterations / total_time_s if total_time_s > 0 else 0.0
 
-    results = {
-        "iterations": iterations,
-        "sign_encrypt": {
-            "p50_ms": round(percentile(pack_latencies, 50), 2),
-            "p95_ms": round(percentile(pack_latencies, 95), 2),
-            "p99_ms": round(percentile(pack_latencies, 99), 2),
-            "mean_ms": round(sum(pack_latencies) / len(pack_latencies), 2),
-        },
-        "verify_decrypt": {
-            "p50_ms": round(percentile(unpack_latencies, 50), 2),
-            "p95_ms": round(percentile(unpack_latencies, 95), 2),
-            "p99_ms": round(percentile(unpack_latencies, 99), 2),
-            "mean_ms": round(sum(unpack_latencies) / len(unpack_latencies), 2),
-        },
-        "roundtrip": {
-            "p50_ms": round(percentile(roundtrip_latencies, 50), 2),
-            "p95_ms": round(percentile(roundtrip_latencies, 95), 2),
-            "p99_ms": round(percentile(roundtrip_latencies, 99), 2),
-            "mean_ms": round(sum(roundtrip_latencies) / len(roundtrip_latencies), 2),
-            "throughput_ops_sec": round(throughput, 1),
-        },
+def _git_commit() -> str:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True
+        ).strip()
+    except Exception:
+        return "unknown"
+
+
+def _node_version() -> str:
+    try:
+        return subprocess.check_output(["node", "--version"], text=True).strip()
+    except Exception:
+        return "unavailable"
+
+
+def provenance() -> Dict[str, Any]:
+    return {
+        "date_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "commit": _git_commit(),
+        "os": platform.platform(),
+        "cpu": _cpu_name(),
+        "python": sys.version.split()[0],
+        "node": _node_version(),
+        "command": ".venv/bin/python scripts/benchmark.py",
+        "warmup_iterations": WARMUP,
+        "measured_runs": RUNS,
+        "statistic": "median of per-run p50/p95/p99 and throughput",
     }
-    return results
 
 
-def benchmark_kem_operations(iterations: int = 100) -> Dict[str, Any]:
-    """Measures ML-KEM-768 key exchange latency and throughput."""
-    kem = MLKEMKeyExchange()
-    latencies: List[float] = []
+def _summarise(latencies: List[float], iterations: int, elapsed_s: float) -> Dict[str, float]:
+    return {
+        "p50_ms": round(percentile(latencies, 50), 4),
+        "p95_ms": round(percentile(latencies, 95), 4),
+        "p99_ms": round(percentile(latencies, 99), 4),
+        "mean_ms": round(sum(latencies) / len(latencies), 4),
+        "throughput_ops_sec": round(iterations / elapsed_s, 2) if elapsed_s > 0 else 0.0,
+    }
 
-    print(f"▶ Running ML-KEM-768 key exchange benchmark ({iterations} iterations)...")
-    for _ in range(iterations):
-        t0 = time.perf_counter()
-        pub, priv = kem.generate_keypair()
-        ct, secret = kem.encapsulate(pub)
-        _dec_secret = kem.decapsulate(ct, priv)
-        latencies.append((time.perf_counter() - t0) * 1000.0)
 
-    total_time_s = sum(latencies) / 1000.0
-    throughput = iterations / total_time_s if total_time_s > 0 else 0.0
+def measure_operation(
+    name: str,
+    operation: Callable[[], Any],
+    iterations: int,
+    *,
+    warmup: int = WARMUP,
+    runs: int = RUNS,
+) -> Dict[str, Any]:
+    """Warm up, then measure ``iterations`` across ``runs`` and take medians."""
+    print(f"▶ {name}: warmup={warmup}, runs={runs}, iterations={iterations}")
+    for _ in range(warmup):
+        operation()
+
+    run_summaries: List[Dict[str, float]] = []
+    for _ in range(runs):
+        latencies: List[float] = []
+        started = time.perf_counter()
+        for _ in range(iterations):
+            t0 = time.perf_counter()
+            operation()
+            latencies.append((time.perf_counter() - t0) * 1000.0)
+        elapsed = time.perf_counter() - started
+        run_summaries.append(_summarise(latencies, iterations, elapsed))
 
     return {
-        "algorithm": getattr(kem, "algorithm_name", "ML-KEM-768"),
-        "iterations": iterations,
-        "p50_ms": round(percentile(latencies, 50), 2),
-        "p95_ms": round(percentile(latencies, 95), 2),
-        "p99_ms": round(percentile(latencies, 99), 2),
-        "mean_ms": round(sum(latencies) / len(latencies), 2),
-        "throughput_ops_sec": round(throughput, 1),
+        "iterations_per_run": iterations,
+        "warmup_iterations": warmup,
+        "runs": runs,
+        "p50_ms": round(_median([r["p50_ms"] for r in run_summaries]), 4),
+        "p95_ms": round(_median([r["p95_ms"] for r in run_summaries]), 4),
+        "p99_ms": round(_median([r["p99_ms"] for r in run_summaries]), 4),
+        "mean_ms": round(_median([r["mean_ms"] for r in run_summaries]), 4),
+        "throughput_ops_sec": round(_median([r["throughput_ops_sec"] for r in run_summaries]), 2),
+        "per_run": run_summaries,
     }
 
 
-def benchmark_sig_operations(iterations: int = 100) -> Dict[str, Any]:
-    """Measures ML-DSA-65 digital signature and verification latency."""
-    sig = MLDSASignature()
-    pub, priv = sig.generate_keypair()
-    msg = b"BENCHMARK_TRANSACTION_PAYLOAD_FOR_MEASUREMENT"
-    latencies: List[float] = []
+def benchmark_envelope(iterations: int = 200) -> Dict[str, Any]:
+    """Seal and open the shipped ``src/crypto/envelope.py`` path."""
+    signing_pub, signing_sk = signing_keypair()
+    session_key = os.urandom(32)
+    payload = b'{"operation":"SECURE_TRANSFER","amount":5000,"currency":"USD"}'
+    counter = 0
 
-    print(f"▶ Running ML-DSA-65 signature benchmark ({iterations} iterations)...")
-    for _ in range(iterations):
-        t0 = time.perf_counter()
-        signature = sig.sign(msg, priv)
-        _valid = sig.verify(msg, signature, pub)
-        latencies.append((time.perf_counter() - t0) * 1000.0)
-
-    total_time_s = sum(latencies) / 1000.0
-    throughput = iterations / total_time_s if total_time_s > 0 else 0.0
-
-    return {
-        "algorithm": getattr(sig, "algorithm_name", "ML-DSA-65"),
-        "iterations": iterations,
-        "p50_ms": round(percentile(latencies, 50), 2),
-        "p95_ms": round(percentile(latencies, 95), 2),
-        "p99_ms": round(percentile(latencies, 99), 2),
-        "mean_ms": round(sum(latencies) / len(latencies), 2),
-        "throughput_ops_sec": round(throughput, 1),
-    }
-
-
-def benchmark_revocation_propagation(iterations: int = 50) -> Dict[str, Any]:
-    """Measures cross-node revocation propagation latency from creation to rejection on all peer nodes."""
-    signer = MLDSASignature()
-    pub, priv = signer.generate_keypair()
-    cluster_nodes = ["node-a", "node-b", "node-c"]
-    latencies: List[float] = []
-
-    print(f"▶ Running cross-node revocation propagation benchmark ({iterations} iterations)...")
-    for i in range(iterations):
-        authority = RevocationCoordinator("key-authority")
-        peer_nodes = [RevocationCoordinator(nid) for nid in cluster_nodes]
-        for coord in [authority] + peer_nodes:
-            coord.register_cluster_nodes(["key-authority"] + cluster_nodes)
-
-        t0 = time.perf_counter()
-        rev_event = authority.create_revocation(
-            key_id=f"key-rev-{i}",
-            target_node_id="node-b",
-            reason="COMPROMISED",
-            signer=signer,
+    def make_envelope() -> Dict[str, Any]:
+        nonlocal counter
+        counter += 1
+        return seal_envelope(
+            sender_identity="node-a",
+            sender_device="dev-a",
+            recipient_identity="node-b",
+            recipient_device="dev-b",
+            session_id="bench-session",
+            session_key=session_key,
+            signing_secret_key=signing_sk,
+            plaintext=payload,
+            counter=counter,
+            message_id=f"bench-msg-{counter}",
         )
 
-        # Broadcast and verify rejection on all cluster nodes
-        for node in peer_nodes:
-            node.receive_revocation(rev_event, from_node_id="key-authority")
-            authority.acknowledge_revocation(rev_event.revocation_id, node.node_id)
-            # Assert node rejects the key
-            assert node.is_revoked(rev_event.key_id) is True
+    seal_result = measure_operation("envelope seal (ML-DSA-65 + AES-256-GCM)", make_envelope, iterations)
 
-        latencies.append((time.perf_counter() - t0) * 1000.0)
+    # Build one envelope per iteration and measure open separately.
+    print(f"▶ envelope open (verify + decrypt): warmup={WARMUP}, runs={RUNS}, iterations={iterations}")
+    envelopes = [make_envelope() for _ in range(WARMUP + RUNS * iterations)]
+    idx = 0
+    for _ in range(WARMUP):
+        open_envelope(
+            envelopes[idx],
+            local_identity="node-b",
+            local_device="dev-b",
+            session_key=session_key,
+            sender_public_key=signing_pub,
+            check_replay=False,
+        )
+        idx += 1
+
+    open_runs: List[Dict[str, float]] = []
+    roundtrip_runs: List[Dict[str, float]] = []
+    for _ in range(RUNS):
+        open_lat: List[float] = []
+        roundtrip_lat: List[float] = []
+        started = time.perf_counter()
+        for _ in range(iterations):
+            envelope = envelopes[idx]
+            idx += 1
+            t0 = time.perf_counter()
+            open_envelope(
+                envelope,
+                local_identity="node-b",
+                local_device="dev-b",
+                session_key=session_key,
+                sender_public_key=signing_pub,
+                check_replay=False,
+            )
+            dt = (time.perf_counter() - t0) * 1000.0
+            open_lat.append(dt)
+            roundtrip_lat.append(dt)
+        elapsed = time.perf_counter() - started
+        open_runs.append(_summarise(open_lat, iterations, elapsed))
+        roundtrip_runs.append(_summarise(roundtrip_lat, iterations, elapsed))
+
+    def med(runs: List[Dict[str, float]], key: str) -> float:
+        return round(_median([r[key] for r in runs]), 4)
 
     return {
-        "cluster_size": len(cluster_nodes) + 1,
-        "iterations": iterations,
-        "p50_ms": round(percentile(latencies, 50), 2),
-        "p95_ms": round(percentile(latencies, 95), 2),
-        "p99_ms": round(percentile(latencies, 99), 2),
-        "mean_ms": round(sum(latencies) / len(latencies), 2),
+        "path": "src/crypto/envelope.py",
+        "seal": seal_result,
+        "open": {
+            "iterations_per_run": iterations,
+            "warmup_iterations": WARMUP,
+            "runs": RUNS,
+            "p50_ms": med(open_runs, "p50_ms"),
+            "p95_ms": med(open_runs, "p95_ms"),
+            "p99_ms": med(open_runs, "p99_ms"),
+            "mean_ms": med(open_runs, "mean_ms"),
+            "throughput_ops_sec": med(open_runs, "throughput_ops_sec"),
+            "per_run": open_runs,
+        },
     }
 
 
-def benchmark_detection_engine(iterations: int = 5000) -> Dict[str, Any]:
-    """Measures explainable detection engine event evaluation throughput."""
-    engine = ContextRuleEngine()
-    event = {
-        "event_id": "bench-evt-001",
-        "timestamp_ns": time.time_ns(),
-        "subject": "service-worker",
-        "service": "node-1",
-        "resource": "/api/v1/message",
-        "action": "PROCESS",
+def benchmark_kem(iterations: int = 200) -> Dict[str, Any]:
+    def exchange() -> None:
+        public_key, secret_key = kem_keypair()
+        ciphertext, _secret = encapsulate(public_key)
+        decapsulate(secret_key, ciphertext)
+
+    result = measure_operation("ML-KEM-768 keygen+encaps+decaps", exchange, iterations)
+    result["path"] = "src/crypto/primitives.py (pqcrypto ML-KEM-768)"
+    return result
+
+
+def benchmark_signature(iterations: int = 200) -> Dict[str, Any]:
+    public_key, secret_key = signing_keypair()
+    transcript = {"operation": "BENCHMARK_TRANSACTION_PAYLOAD", "amount": 5000}
+
+    def sign_and_verify() -> None:
+        signature = sign(secret_key, "track4/v1/bench", transcript)
+        verify(public_key, "track4/v1/bench", transcript, signature)
+
+    result = measure_operation("ML-DSA-65 sign+verify", sign_and_verify, iterations)
+    result["path"] = "src/crypto/primitives.py (pqcrypto ML-DSA-65)"
+    return result
+
+
+def benchmark_detector(iterations: int = 5000) -> Dict[str, Any]:
+    """Throughput of the deterministic rule engine on routine events."""
+    base = 1_700_000_000.0
+
+    def build_events() -> List[Dict[str, Any]]:
+        return [
+            {
+                "event_id": f"bench-{i}",
+                "timestamp_ns": int((base + i) * 1_000_000_000),
+                "subject": f"user-{i % 25}",
+                "service": "api-gateway",
+                "resource": f"/items/{i}",
+                "action": "GET_ITEM",
+                "status": "SUCCESS",
+                "metadata": {"role": "user"},
+            }
+            for i in range(iterations)
+        ]
+
+    print(f"▶ detector rule evaluation: warmup={WARMUP}, runs={RUNS}, iterations={iterations}")
+    warm_event = {
+        "event_id": "bench-warm",
+        "timestamp_ns": int(base * 1_000_000_000),
+        "subject": "user-0",
+        "service": "api-gateway",
+        "resource": "/items/0",
+        "action": "GET_ITEM",
         "status": "SUCCESS",
-        "metadata": {"role": "worker"},
+        "metadata": {"role": "user"},
     }
+    for _ in range(WARMUP):
+        ContextRuleEngine().evaluate_event(warm_event)
 
-    t0 = time.perf_counter()
-    for _ in range(iterations):
-        engine.evaluate_event(event)
-    total_time = time.perf_counter() - t0
-    events_sec = iterations / total_time if total_time > 0 else 0.0
+    run_summaries: List[Dict[str, float]] = []
+    for _ in range(RUNS):
+        engine = ContextRuleEngine()
+        events = build_events()
+        started = time.perf_counter()
+        for event in events:
+            engine.evaluate_event(event)
+        elapsed = time.perf_counter() - started
+        run_summaries.append(
+            {
+                "throughput_events_sec": round(iterations / elapsed, 2) if elapsed else 0.0,
+                "latency_per_event_us": round(elapsed / iterations * 1e6, 4),
+            }
+        )
 
     return {
-        "iterations": iterations,
-        "total_time_s": round(total_time, 4),
-        "throughput_events_sec": round(events_sec, 1),
-        "latency_per_event_us": round((total_time / iterations) * 1e6, 2),
+        "path": "src/detector/rules.py",
+        "iterations_per_run": iterations,
+        "warmup_iterations": WARMUP,
+        "runs": RUNS,
+        "throughput_events_sec": round(
+            _median([r["throughput_events_sec"] for r in run_summaries]), 2
+        ),
+        "latency_per_event_us": round(
+            _median([r["latency_per_event_us"] for r in run_summaries]), 4
+        ),
+        "per_run": run_summaries,
     }
 
 
-def measure_peak_memory_mb() -> Dict[str, float]:
-    """Measures baseline and peak memory overhead (in MB) using tracemalloc."""
+def benchmark_revocation(m_runs: int = 20) -> Dict[str, Any]:
+    """Shipped DB-backed revocation path via scripts/measure_revocation.py."""
+    from scripts.measure_revocation import run_scenario
+
+    print(f"▶ shipped DB revocation propagation (TestClient/SQLite, M={m_runs})")
+    result = run_scenario(
+        name="push_plus_pull",
+        m_runs=m_runs,
+        push_sync=True,
+        pull_interval_ms=250,
+        seed=42,
+    )
+    overall = result["overall_last_node"]
+    return {
+        "path": "src/identity_keys/revocation.py",
+        "method": (
+            "Single-coordinator time.monotonic_ns() from commit to the last of 3 nodes "
+            "denying with DEVICE_REVOKED; 5 ms parallel probe; TestClient + SQLite on one host."
+        ),
+        "m_runs": m_runs,
+        "cluster_nodes": 3,
+        "p50_ms": overall["median_ms"],
+        "p95_ms": overall["p95_ms"],
+        "p99_ms": overall["p99_ms"],
+        "min_ms": overall["min_ms"],
+        "max_ms": overall["max_ms"],
+        "per_node": result["per_node"],
+    }
+
+
+def measure_memory(iterations: int = 200) -> Dict[str, Any]:
+    """RSS high-water and tracemalloc peak for the envelope path."""
+    signing_pub, signing_sk = signing_keypair()
+    session_key = os.urandom(32)
+    payload = b"MEMORY_BENCHMARK_PAYLOAD"
+    rss_before = _rss_mb()
     tracemalloc.start()
     tracemalloc.reset_peak()
-
-    # Instantiate full cryptographic multi-node cluster
-    kem = MLKEMKeyExchange()
-    sig = MLDSASignature()
-    kem.generate_keypair()
-    sig.generate_keypair()
-
-    alice = SecureMessaging("node-a")
-    bob = SecureMessaging("node-b")
-
-    # Run multi-node envelope operations
-    for _ in range(200):
-        envelope = alice.pack_envelope("node-a", "node-b", b"MEMORY_BENCHMARK_PAYLOAD", b"K" * 32, sig)
-        bob.unpack_envelope(envelope, b"K" * 32, sig, sig._public_key)
-
-    current_b, peak_b = tracemalloc.get_traced_memory()
+    for i in range(iterations):
+        envelope = seal_envelope(
+            sender_identity="node-a",
+            sender_device="dev-a",
+            recipient_identity="node-b",
+            recipient_device="dev-b",
+            session_id="mem-session",
+            session_key=session_key,
+            signing_secret_key=signing_sk,
+            plaintext=payload,
+            counter=i,
+            message_id=f"mem-{i}",
+        )
+        open_envelope(
+            envelope,
+            local_identity="node-b",
+            local_device="dev-b",
+            session_key=session_key,
+            sender_public_key=signing_pub,
+            check_replay=False,
+        )
+    _current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-
-    current_mb = current_b / (1024.0 * 1024.0)
-    peak_mb = peak_b / (1024.0 * 1024.0)
+    rss_after = _rss_mb()
     return {
-        "current_mb": round(current_mb, 3),
-        "peak_mb": round(peak_mb, 3),
-        "peak_kb": round(peak_b / 1024.0, 1),
+        "method": "resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc peak",
+        "iterations": iterations,
+        "rss_before_mb": round(rss_before, 3),
+        "rss_after_mb": round(rss_after, 3),
+        "rss_delta_mb": round(max(0.0, rss_after - rss_before), 3),
+        "tracemalloc_peak_mb": round(peak / (1024.0 * 1024.0), 3),
+        "note": "RSS is a process high-water mark and includes imports; delta may be 0 after allocator reuse.",
     }
 
 
-def print_markdown_table(results: Dict[str, Any]):
-    """Prints a clean, judge-ready Markdown summary table."""
+def _fmt(value: float) -> str:
+    return f"{value:.2f}"
+
+
+def render_markdown(results: Dict[str, Any]) -> str:
+    prov = results["provenance"]
     env = results["envelope"]
     kem = results["kem"]
-    sig = results["sig"]
+    sig = results["signature"]
     rev = results["revocation"]
     det = results["detector"]
+    ev = results["detector_eval"]
     mem = results["memory"]
+    cm = ev["confusion_matrix"]
+    return f"""{README_START}
+<!-- generated by scripts/benchmark.py; do not edit by hand -->
+## Performance & detection measurements
 
-    md_table = f"""
-### 📊 Benchmark Summary Table
+Single source of truth: [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) and
+[`reports/measurements.json`](reports/measurements.json). Method: {prov['warmup_iterations']}
+warm-up iterations, {prov['measured_runs']} measured runs, median of per-run
+p50/p95/p99 and throughput. Measured {prov['date_utc']} on {prov['cpu']},
+{prov['os']}, Python {prov['python']}, Node {prov['node']}, commit
+`{prov['commit']}`. Run `.venv/bin/python scripts/benchmark.py` to reproduce.
 
-| Layer / Component | Benchmark Metric | p50 Latency | p95 Latency | p99 Latency | Throughput | Peak Overhead |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Envelope Sign + Encrypt** | ML-DSA sign + AES-256-GCM (500 ops) | {env['sign_encrypt']['p50_ms']} ms | {env['sign_encrypt']['p95_ms']} ms | {env['sign_encrypt']['p99_ms']} ms | - | - |
-| **Envelope Verify + Decrypt** | ML-DSA verify + AES-256-GCM (500 ops) | {env['verify_decrypt']['p50_ms']} ms | {env['verify_decrypt']['p95_ms']} ms | {env['verify_decrypt']['p99_ms']} ms | - | - |
-| **Envelope End-to-End** | Full roundtrip message transfer | {env['roundtrip']['p50_ms']} ms | {env['roundtrip']['p95_ms']} ms | {env['roundtrip']['p99_ms']} ms | **{env['roundtrip']['throughput_ops_sec']} ops/sec** | - |
-| **PQC Key Exchange** | ML-KEM-768 Ephemeral Exchange | {kem['p50_ms']} ms | {kem['p95_ms']} ms | {kem['p99_ms']} ms | {kem['throughput_ops_sec']} ops/sec | - |
-| **PQC Digital Signature** | ML-DSA-65 Sign & Verify | {sig['p50_ms']} ms | {sig['p95_ms']} ms | {sig['p99_ms']} ms | {sig['throughput_ops_sec']} ops/sec | - |
-| **Revocation Broadcast** | Cross-node propagation to 3 peers | {rev['p50_ms']} ms | {rev['p95_ms']} ms | {rev['p99_ms']} ms | (Mean: {rev['mean_ms']} ms) | - |
-| **Detection Rule Engine** | Deterministic Context Evaluation | - | - | - | **{det['throughput_events_sec']:,} events/sec** | {det['latency_per_event_us']} µs/eval |
-| **Memory Footprint** | Active cluster memory overhead | - | - | - | - | **{mem['peak_mb']} MB ({mem['peak_kb']} KB)** |
+| Component | Path | p50 | p95 | p99 | Throughput |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | {_fmt(env['seal']['p50_ms'])} ms | {_fmt(env['seal']['p95_ms'])} ms | {_fmt(env['seal']['p99_ms'])} ms | {_fmt(env['seal']['throughput_ops_sec'])} ops/s |
+| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | {_fmt(env['open']['p50_ms'])} ms | {_fmt(env['open']['p95_ms'])} ms | {_fmt(env['open']['p99_ms'])} ms | {_fmt(env['open']['throughput_ops_sec'])} ops/s |
+| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | {_fmt(kem['p50_ms'])} ms | {_fmt(kem['p95_ms'])} ms | {_fmt(kem['p99_ms'])} ms | {_fmt(kem['throughput_ops_sec'])} ops/s |
+| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | {_fmt(sig['p50_ms'])} ms | {_fmt(sig['p95_ms'])} ms | {_fmt(sig['p99_ms'])} ms | {_fmt(sig['throughput_ops_sec'])} ops/s |
+| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | {_fmt(rev['p50_ms'])} ms | {_fmt(rev['p95_ms'])} ms | {_fmt(rev['p99_ms'])} ms | M={rev['m_runs']} |
+| Detector rule evaluation | `src/detector/rules.py` | — | — | — | {_fmt(det['throughput_events_sec'])} events/s |
+
+**Detector accuracy is synthetic only.** The {ev['events']}-event labelled set
+is hand-built for rule regression tests, not a production corpus. Confusion
+matrix: TP={cm['tp']}, FP={cm['fp']}, TN={cm['tn']}, FN={cm['fn']}; precision
+{ev['precision']:.2f}, recall {ev['recall']:.2f}, F1 {ev['f1']:.2f}, FP/1k
+{ev['false_positives_per_1k']:.2f}. See `scripts/eval_detector.py`.
+
+Memory: RSS high-water {_fmt(mem['rss_after_mb'])} MB
+(delta {_fmt(mem['rss_delta_mb'])} MB), tracemalloc peak
+{_fmt(mem['tracemalloc_peak_mb'])} MB for {mem['iterations']} seal/open
+operations. RSS includes imports and is a high-water mark.
+<!-- BENCHMARK:END -->"""
+
+
+def write_measurements(results: Dict[str, Any]) -> None:
+    reports = REPO_ROOT / "reports"
+    reports.mkdir(exist_ok=True)
+    (reports / "measurements.json").write_text(
+        json.dumps(results, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    prov = results["provenance"]
+    env = results["envelope"]
+    kem = results["kem"]
+    sig = results["signature"]
+    rev = results["revocation"]
+    det = results["detector"]
+    ev = results["detector_eval"]
+    mem = results["memory"]
+    cm = ev["confusion_matrix"]
+    md = f"""# Measurements
+
+This file is the single source of truth for performance numbers quoted in the
+README, brief, and reports. It is generated by `scripts/benchmark.py`; do not
+hand-edit the table.
+
+## Provenance
+
+- Date (UTC): {prov['date_utc']}
+- Commit: `{prov['commit']}`
+- Command: `{prov['command']}`
+- OS: {prov['os']}
+- CPU: {prov['cpu']}
+- Python: {prov['python']}
+- Node: {prov['node']}
+- Method: {prov['warmup_iterations']} warm-up iterations, {prov['measured_runs']}
+  measured runs, median of per-run p50/p95/p99 and throughput.
+
+## Shipped paths
+
+| Component | Path | p50 | p95 | p99 | Throughput |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | {_fmt(env['seal']['p50_ms'])} ms | {_fmt(env['seal']['p95_ms'])} ms | {_fmt(env['seal']['p99_ms'])} ms | {_fmt(env['seal']['throughput_ops_sec'])} ops/s |
+| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | {_fmt(env['open']['p50_ms'])} ms | {_fmt(env['open']['p95_ms'])} ms | {_fmt(env['open']['p99_ms'])} ms | {_fmt(env['open']['throughput_ops_sec'])} ops/s |
+| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | {_fmt(kem['p50_ms'])} ms | {_fmt(kem['p95_ms'])} ms | {_fmt(kem['p99_ms'])} ms | {_fmt(kem['throughput_ops_sec'])} ops/s |
+| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | {_fmt(sig['p50_ms'])} ms | {_fmt(sig['p95_ms'])} ms | {_fmt(sig['p99_ms'])} ms | {_fmt(sig['throughput_ops_sec'])} ops/s |
+| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | {_fmt(rev['p50_ms'])} ms | {_fmt(rev['p95_ms'])} ms | {_fmt(rev['p99_ms'])} ms | M={rev['m_runs']} |
+| Detector rule evaluation | `src/detector/rules.py` | — | — | — | {_fmt(det['throughput_events_sec'])} events/s |
+
+Revocation method: {rev['method']}
+
+## Detector evaluation (SYNTHETIC ONLY)
+
+The dataset is **synthetic** and hand-labelled; it is not a real-world corpus.
+Do not cite these numbers as production accuracy.
+
+| Truth \\ Prediction | Alert | Normal |
+| :--- | ---: | ---: |
+| Attack | {cm['tp']} (TP) | {cm['fn']} (FN) |
+| Normal | {cm['fp']} (FP) | {cm['tn']} (TN) |
+
+- Events: {ev['events']} (100 routine, 25 attack)
+- Precision: {ev['precision']:.4f}
+- Recall: {ev['recall']:.4f}
+- F1: {ev['f1']:.4f}
+- False positives per 1k: {ev['false_positives_per_1k']:.4f}
+- Mean per-event evaluation latency: {ev['mtta_ms']:.4f} ms
+
+## Memory
+
+- Method: {mem['method']}
+- RSS before: {_fmt(mem['rss_before_mb'])} MB
+- RSS high-water after: {_fmt(mem['rss_after_mb'])} MB
+- RSS delta: {_fmt(mem['rss_delta_mb'])} MB
+- tracemalloc peak: {_fmt(mem['tracemalloc_peak_mb'])} MB
+- Iterations: {mem['iterations']}
+- Note: {mem['note']}
 """
-    print(md_table)
+    (REPO_ROOT / "docs" / "MEASUREMENTS.md").write_text(md, encoding="utf-8")
 
 
-def main():
-    print("=" * 70)
-    print("🚀 TRUST-BUT-VERIFY PERFORMANCE & OVERHEAD BENCHMARK (P4-14)")
-    print("=" * 70)
+def update_readme(results: Dict[str, Any]) -> None:
+    readme = REPO_ROOT / "README.md"
+    text = readme.read_text(encoding="utf-8")
+    block = render_markdown(results)
+    start = text.find(README_START)
+    end = text.find(README_END)
+    if start == -1 or end == -1 or end < start:
+        print("README benchmark markers not found; skipping README update.")
+        return
+    updated = text[:start] + block + text[end + len(README_END) :]
+    readme.write_text(updated, encoding="utf-8")
 
-    # 1. Envelope operations over 500 iterations
-    envelope_res = benchmark_envelope_operations(iterations=500)
 
-    # 2. Key exchange & digital signature
-    kem_res = benchmark_kem_operations(iterations=50)
-    sig_res = benchmark_sig_operations(iterations=50)
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Measure the shipped paths.")
+    parser.add_argument("--quick", action="store_true", help="smaller iteration counts for a smoke run")
+    args = parser.parse_args()
+    scale = 0.2 if args.quick else 1.0
+    envelope_iterations = max(20, int(200 * scale))
+    prim_iterations = max(20, int(200 * scale))
+    detector_iterations = max(500, int(5000 * scale))
+    revocation_runs = 5 if args.quick else 20
 
-    # 3. Revocation propagation latency
-    rev_res = benchmark_revocation_propagation(iterations=50)
+    print("=" * 72)
+    print("TRUST-BUT-VERIFY MEASUREMENTS (shipped paths)")
+    print("=" * 72)
 
-    # 4. Detection engine
-    det_res = benchmark_detection_engine(iterations=5000)
-
-    # 5. Memory overhead
-    mem_res = measure_peak_memory_mb()
-
-    results = {
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "envelope": envelope_res,
-        "kem": kem_res,
-        "sig": sig_res,
-        "revocation": rev_res,
-        "detector": det_res,
-        "memory": mem_res,
+    rss_start = _rss_mb()
+    results: Dict[str, Any] = {
+        "provenance": provenance(),
+        "methodology": {
+            "warmup_iterations": WARMUP,
+            "measured_runs": RUNS,
+            "statistic": "median of per-run p50/p95/p99 and throughput",
+            "memory": "resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc",
+            "detector_accuracy": "synthetic labelled dataset only",
+        },
+        "envelope": benchmark_envelope(envelope_iterations),
+        "kem": benchmark_kem(prim_iterations),
+        "signature": benchmark_signature(prim_iterations),
+        "detector": benchmark_detector(detector_iterations),
+        "revocation": benchmark_revocation(revocation_runs),
+        "detector_eval": run_evaluation(),
+        "memory": measure_memory(envelope_iterations),
     }
+    results["rss_start_mb"] = round(rss_start, 3)
+    results["rss_end_mb"] = round(_rss_mb(), 3)
 
-    # Print summary table
-    print_markdown_table(results)
-
-    # Save to benchmark_results.json
-    output_path = os.path.join(REPO_ROOT, "benchmark_results.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
-
-    print(f"💾 Benchmark results saved to: {output_path}")
-    print("=" * 70)
+    write_measurements(results)
+    update_readme(results)
+    print(render_markdown(results))
+    print(f"Wrote {REPO_ROOT / 'reports' / 'measurements.json'}")
+    print(f"Wrote {REPO_ROOT / 'docs' / 'MEASUREMENTS.md'}")
+    print("=" * 72)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

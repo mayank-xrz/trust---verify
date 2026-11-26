@@ -162,30 +162,9 @@ placeholder domain.
 
 ## 📊 Performance & Detection Benchmarks
 
-Measured on a standard developer workstation (Apple Silicon / Linux x86_64) using `scripts/benchmark.py` and `tests/test_detector_eval.py`:
-
-### Cryptographic & Operational Metrics
-
-| Component / Layer | Metric | p50 Latency | p95 Latency | p99 Latency | Throughput | Overhead |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Envelope Sign + Encrypt** | ML-DSA sign + AES-256-GCM | 21.05 ms | 21.32 ms | 21.48 ms | — | — |
-| **Envelope Verify + Decrypt**| ML-DSA verify + AES-256-GCM | 21.14 ms | 21.38 ms | 21.52 ms | — | — |
-| **Envelope Full Roundtrip**  | Sign, Encrypt, Deliver, Verify, Decrypt | 42.19 ms | 42.70 ms | 43.00 ms | **23.7 ops/sec** | — |
-| **ML-KEM-768 Exchange**      | Ephemeral Key Agreement | 59.70 ms | 59.96 ms | 60.10 ms | 16.7 ops/sec | NIST FIPS 203 |
-| **ML-DSA-65 Sign & Verify**  | Post-Quantum Digital Signature | 42.09 ms | 42.33 ms | 42.50 ms | 23.7 ops/sec | NIST FIPS 204 |
-| **Revocation Propagation**   | Broadcast from Authority to 3 Nodes | 26.78 ms | 27.56 ms | 28.10 ms | (Mean: 27.06 ms) | 100% Cluster Ack |
-| **Detection Rule Engine**    | Context-Aware Policy Evaluation | — | — | — | **591,986 events/sec** | 1.69 $\mu$s/eval |
-| **Cluster Memory Footprint** | Active Multi-Node RAM Overhead | — | — | — | — | **0.018 MB (18.9 KB)** |
-
-### Explainable Detector Accuracy Metrics
-
-| Metric | Target | Measured Result | Evaluation Condition |
-| :--- | :--- | :--- | :--- |
-| **F1 Score** | $\ge 0.90$ | **0.96** | Tested against 500 ground-truth attack/benign scenarios |
-| **Precision** | $\ge 0.90$ | **0.95** | Replay, privilege escalation, lateral movement, swap attacks |
-| **Recall** | $\ge 0.90$ | **0.97** | Zero missed high-severity policy violations |
-| **Mean Time to Alert (MTTA)**| $< 50\text{ ms}$ | **0.002 ms ($1.69\,\mu\text{s}$)** | Deterministic in-memory evaluation |
-| **False Positive Rate** | $< 1 / 1,000$ | **0.4 per 1,000 events** | Routine worker activity with legitimate privileges |
+<!-- BENCHMARK:START -->
+<!-- Run `.venv/bin/python scripts/benchmark.py` to regenerate this block. -->
+<!-- BENCHMARK:END -->
 
 ---
 
