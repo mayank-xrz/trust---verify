@@ -138,3 +138,68 @@ def test_backup_manager_rejects_malformed_mac_and_algorithm(tmp_path: Path) -> N
     bak_path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(BackupIntegrityError, match="Unsupported or missing backup MAC algorithm"):
         mgr.verify_and_restore(str(bak_path))
+
+
+def test_envelope_aead_failure_does_not_poison_replay_cache(tmp_path: Path) -> None:
+    from src.crypto.envelope import AEADFailedError, open_envelope, seal_envelope
+    from src.crypto.replay_cache import PersistentReplayCache
+
+    alice_pk, alice_sk = sig_keygen(ml_dsa_65)
+    key = b"k" * 32
+    wrong_key = b"w" * 32
+    rcache = PersistentReplayCache(tmp_path / "replay.db")
+
+    env = seal_envelope(
+        sender_identity="alice",
+        sender_device="dev-a",
+        recipient_identity="bob",
+        recipient_device="dev-b",
+        session_id="sess-atom",
+        session_key=key,
+        signing_secret_key=alice_sk,
+        plaintext=b"atomic-replay",
+        counter=1,
+        epoch=1,
+    )
+
+    with pytest.raises(AEADFailedError):
+        open_envelope(
+            env,
+            local_identity="bob",
+            local_device="dev-b",
+            session_key=wrong_key,
+            sender_public_key=alice_pk,
+            replay_cache=rcache,
+        )
+
+    # Genuine decryption with the right key must still succeed
+    assert (
+        open_envelope(
+            env,
+            local_identity="bob",
+            local_device="dev-b",
+            session_key=key,
+            sender_public_key=alice_pk,
+            replay_cache=rcache,
+        )
+        == b"atomic-replay"
+    )
+
+
+def test_token_verify_rejects_future_iat_beyond_clock_skew() -> None:
+    from datetime import datetime, timedelta, timezone
+    from src.identity_keys.clock import FakeClock
+    from src.identity_keys.errors import NotAuthorized
+    from src.identity_keys.tokens import TokenAuthority
+
+    t0 = datetime(2026, 11, 27, 0, 0, 0, tzinfo=timezone.utc)
+    issuer_clock = FakeClock(t0 + timedelta(seconds=120))
+    verifier_clock = FakeClock(t0)
+
+    ts_issue = TokenAuthority(issuer_clock, ttl_seconds=600)
+    token = ts_issue.issue("u1", "d1")
+    ts_verify = TokenAuthority(verifier_clock, ttl_seconds=600)
+    ts_verify._pub, ts_verify._priv = ts_issue._pub, ts_issue._priv
+
+    with pytest.raises(NotAuthorized, match="future"):
+        ts_verify.verify(token, max_clock_skew_seconds=30)

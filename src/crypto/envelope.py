@@ -309,44 +309,9 @@ def open_envelope(
         )
         raise SignatureInvalidError("ML-DSA-65 signature verification failed")
 
-    # 3. Replay & sliding counter window check
-    if check_replay and replay_cache is not None:
-        try:
-            replay_cache.check_and_record(
-                sender_identity=sender_id,
-                recipient_identity=recipient_id,
-                session_id=session_id,
-                message_id=message_id,
-                counter=int(envelope["counter"]),
-            )
-        except CounterOutOfWindowError:
-            emit_crypto_event(
-                audit_logger,
-                actor=sender_id,
-                source_service=sender_id,
-                target_service=f"{local_identity}/{local_device}",
-                action="counter_out_of_window",
-                outcome="rejected",
-                session_id=session_id,
-                message_id=message_id,
-                reason="counter_out_of_window",
-            )
-            raise
-        except ReplayRejectedError:
-            emit_crypto_event(
-                audit_logger,
-                actor=sender_id,
-                source_service=sender_id,
-                target_service=f"{local_identity}/{local_device}",
-                action="replay_rejected",
-                outcome="rejected",
-                session_id=session_id,
-                message_id=message_id,
-                reason="replay_rejected",
-            )
-            raise
-
-    # 4. AAD header match + Key-Committing AEAD verification + Decryption
+    # 3. AAD header match + Key-Committing AEAD verification + Decryption
+    #    (performed BEFORE mutating the replay cache so unauthenticated/corrupt
+    #    packets cannot burn counters or poison replay state).
     if aad_bytes != expected_aad:
         emit_crypto_event(
             audit_logger,
@@ -385,6 +350,43 @@ def open_envelope(
             reason="aead_failed",
         )
         raise AEADFailedError("AES-256-GCM decryption failed") from exc
+
+    # 4. Replay & sliding counter window check (atomic after AEAD authentication)
+    if check_replay and replay_cache is not None:
+        try:
+            replay_cache.check_and_record(
+                sender_identity=sender_id,
+                recipient_identity=recipient_id,
+                session_id=session_id,
+                message_id=message_id,
+                counter=int(envelope["counter"]),
+            )
+        except CounterOutOfWindowError:
+            emit_crypto_event(
+                audit_logger,
+                actor=sender_id,
+                source_service=sender_id,
+                target_service=f"{local_identity}/{local_device}",
+                action="counter_out_of_window",
+                outcome="rejected",
+                session_id=session_id,
+                message_id=message_id,
+                reason="counter_out_of_window",
+            )
+            raise
+        except ReplayRejectedError:
+            emit_crypto_event(
+                audit_logger,
+                actor=sender_id,
+                source_service=sender_id,
+                target_service=f"{local_identity}/{local_device}",
+                action="replay_rejected",
+                outcome="rejected",
+                session_id=session_id,
+                message_id=message_id,
+                reason="replay_rejected",
+            )
+            raise
 
     emit_crypto_event(
         audit_logger,

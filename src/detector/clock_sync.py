@@ -6,7 +6,9 @@ import dataclasses
 import enum
 import heapq
 import time
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Optional
+
+_REAL_TIME_TIME = time.time
 
 
 class SkewStatus(str, enum.Enum):
@@ -66,9 +68,15 @@ class ClockSyncBuffer:
         """Alias for :meth:`advance_watermark` (monotonic)."""
         return self.advance_watermark(timestamp_ns)
 
+    def _elapsed_now(self) -> float:
+        # Use monotonic time in production so NTP jumps cannot affect hold delays,
+        # while honoring test monkeypatches on `time.time`.
+        return time.monotonic() if time.time is _REAL_TIME_TIME else time.time()
+
     def ingest(self, event_data: Dict[str, Any]) -> BufferedEvent:
         """Ingests an event, computes skew relative to local wall clock, and attaches uncertainty flags."""
         now_sec = time.time()
+        mono_sec = self._elapsed_now()
         event_ts_sec = event_data.get("timestamp_ns", 0) / 1_000_000_000.0
         skew_ms = abs(now_sec - event_ts_sec) * 1000.0
 
@@ -87,7 +95,7 @@ class ClockSyncBuffer:
 
         be = BufferedEvent(
             timestamp_ns=event_data.get("timestamp_ns", int(now_sec * 1_000_000_000)),
-            arrival_time_sec=now_sec,
+            arrival_time_sec=mono_sec,
             event_id=event_data.get("event_id", ""),
             data=event_data_copy,
             skew_status=status,
@@ -108,13 +116,14 @@ class ClockSyncBuffer:
         """
         ready = []
         now_sec = time.time()
+        mono_sec = self._elapsed_now()
         now_ns = int(now_sec * 1_000_000_000)
         effective_watermark = max(self.watermark, now_ns)
 
         while self._heap:
             oldest = self._heap[0]
             if not force_all:
-                if now_sec - oldest.arrival_time_sec < self.hold_window_seconds:
+                if mono_sec - oldest.arrival_time_sec < self.hold_window_seconds:
                     break
                 if oldest.timestamp_ns > effective_watermark:
                     # The heap is ordered by event time, so every remaining

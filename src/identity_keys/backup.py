@@ -525,7 +525,43 @@ class BackupService:
             if live_anchor is not None:
                 anchor_seq = max(live_anchor.revocation_commit_seq, live_seq)
             elif supplied_anchor is not None:
+                sig_hex = supplied_anchor.get("signature_hex") or supplied_anchor.get("signature")
+                if not sig_hex:
+                    self._audit_rejected(actor_ctx, manifest["backup_id"], "STEP9_ANCHOR_UNSIGNED")
+                    raise NotAuthorized(
+                        "Supplied trust anchor missing signature",
+                        reason_code="STEP9_ANCHOR_UNSIGNED",
+                    )
+                anchor_core = {
+                    k: v
+                    for k, v in supplied_anchor.items()
+                    if k not in ("signature_hex", "signature")
+                }
+                try:
+                    sig_bytes = bytes.fromhex(str(sig_hex))
+                except ValueError as exc:
+                    raise NotAuthorized(
+                        "Malformed supplied anchor signature",
+                        reason_code="STEP9_ANCHOR_INVALID",
+                    ) from exc
+                if not ml_dsa_verify(pinned_pubkey, canonical_json_bytes(anchor_core), sig_bytes):
+                    self._audit_rejected(actor_ctx, manifest["backup_id"], "STEP9_ANCHOR_INVALID")
+                    raise NotAuthorized(
+                        "Supplied trust anchor signature invalid",
+                        reason_code="STEP9_ANCHOR_INVALID",
+                    )
                 anchor_seq = int(supplied_anchor["revocation_commit_seq"])
+                if (
+                    int(manifest["revocation_head"]["commit_seq"]) == anchor_seq
+                    and supplied_anchor.get("revocation_head_hash")
+                    and manifest["revocation_head"].get("head_hash")
+                    != supplied_anchor["revocation_head_hash"]
+                ):
+                    self._audit_rejected(actor_ctx, manifest["backup_id"], "STEP9_HEAD_HASH_MISMATCH")
+                    raise Conflict(
+                        "Backup revocation head hash does not match supplied anchor",
+                        reason_code="STEP9_HEAD_HASH_MISMATCH",
+                    )
             elif live_revs:
                 anchor_seq = live_seq
 

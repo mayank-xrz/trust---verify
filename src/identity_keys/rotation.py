@@ -36,6 +36,7 @@ from .key_lifecycle import (
     wrap_key_material,
 )
 from .models import (
+    Device,
     KeySet,
     KeyVersion,
     NodeSyncState,
@@ -43,6 +44,7 @@ from .models import (
     Permission,
     RolePermission,
     Rotation,
+    User,
     UserRole,
 )
 from .tokens import ActorContext
@@ -270,6 +272,12 @@ class RotationService:
         return aes_gcm_unwrap(priv, nonce, ct, b"rotation-self-test") == test_dek
 
     def _require_rotate_permission(self, session: Session, actor_ctx: ActorContext) -> None:
+        user = session.get(User, actor_ctx.user_id)
+        if user is not None and user.status != "active":
+            raise NotAuthorized("User is not active", reason_code="USER_INACTIVE")
+        device = session.get(Device, actor_ctx.device_id)
+        if device is not None and (device.user_id != actor_ctx.user_id or device.status != "active"):
+            raise NotAuthorized("Device is not active", reason_code="DEVICE_REVOKED")
         has_perm = (
             session.execute(
                 select(Permission.name)
