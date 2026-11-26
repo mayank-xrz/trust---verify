@@ -8,8 +8,8 @@ import time
 
 from .primitives import CryptoError, b64, canonical, unb64
 
-MAX_TRANSFER = 8 * 1024 * 1024
-MAX_CHUNKS = 256
+MAX_TRANSFER = 20 * 1024 * 1024
+MAX_CHUNKS = 512
 
 
 def make_transfer(session, data, chunk_size=65536, max_transfer=MAX_TRANSFER):

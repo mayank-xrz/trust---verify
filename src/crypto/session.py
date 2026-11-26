@@ -77,8 +77,9 @@ def _check_protocol(value):
 class TrustRegistry:
     """Keys arrive only from an approved out-of-band enrollment operation."""
 
-    def __init__(self, state_path=None):
+    def __init__(self, state_path=None, max_devices_per_user: int = 1):
         self.state_path = Path(state_path) if state_path is not None else None
+        self.max_devices_per_user = max_devices_per_user
         self._keys = {}
         self._revoked_devices = set()
         self._revoked_identities = set()
@@ -122,6 +123,11 @@ class TrustRegistry:
         existing = self._keys.get((identity, device))
         if existing is not None and existing != public_key:
             raise CryptoError("identity key replacement requires explicit rotation")
+        active_devices = [dev for (ident, dev) in self._keys if ident == identity and dev != device]
+        if len(active_devices) >= self.max_devices_per_user:
+            raise CryptoError(
+                f"device limit exceeded: user '{identity}' already has active device '{active_devices[0]}' (max {self.max_devices_per_user})"
+            )
         self._keys[(identity, device)] = public_key
         self._save()
 

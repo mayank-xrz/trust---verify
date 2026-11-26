@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from src.audit.logger import AuditLogger
 from .envelope import AEADFailedError, EnvelopeError, open_envelope, seal_envelope
 from .events import emit_crypto_event
+from .policy import MAX_FILE_SIZE_BYTES
 from .replay_cache import PersistentReplayCache
 
 
@@ -71,6 +72,8 @@ def chunk_and_seal(
     """Split plaintext into chunks, derive unique per-chunk nonces, and seal envelopes."""
     if chunk_size < 1:
         raise ValueError("chunk_size must be >= 1")
+    if len(plaintext) > MAX_FILE_SIZE_BYTES:
+        raise DeliveryInvalidError(f"Payload exceeds 20 MB limit ({len(plaintext)} > {MAX_FILE_SIZE_BYTES})")
     msg_id = message_id or str(uuid.uuid4())
     whole_hash = hashlib.sha256(plaintext).hexdigest()
     chunk_count = max(1, math.ceil(len(plaintext) / chunk_size))
@@ -262,6 +265,21 @@ class ChunkReceiver:
                 raise DeliveryInvalidError(f"Delivery failed at chunk {idx}: {reason}") from exc
 
         reassembled = b"".join(plaintext_parts)
+        if len(reassembled) > MAX_FILE_SIZE_BYTES:
+            self._buffers.pop(msg_id, None)
+            emit_crypto_event(
+                self.audit_logger,
+                actor=sender_id,
+                source_service=sender_id,
+                target_service=f"{self.local_identity}/{self.local_device}",
+                action="delivery_failed_invalid",
+                outcome="failed",
+                session_id=session_id,
+                message_id=msg_id,
+                reason="file_too_large",
+                extra={"chunk_index": -1},
+            )
+            raise DeliveryInvalidError("Reassembled payload exceeds 20 MB limit")
         expected_whole = buf["whole_message_hash"]
         if hashlib.sha256(reassembled).hexdigest() != expected_whole:
             self._buffers.pop(msg_id, None)

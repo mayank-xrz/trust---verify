@@ -12,6 +12,8 @@ Merges the full Track 4 crypto lifecycle into one cohesive endpoint interface:
 """
 
 from __future__ import annotations
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,7 +25,15 @@ from src.audit.logger import AuditLogger
 from ._pqcrypto_compat import sig_keygen
 from .delivery import ChunkReceiver, DEFAULT_DELIVERY_TIMEOUT_SECONDS, chunk_and_seal
 from .envelope import EnvelopeError, open_envelope, seal_envelope
+from .events import emit_crypto_event
 from .handshake import EphemeralHandshakeSession, SessionKeys
+from .policy import (
+    DevicePolicyError,
+    FilePolicyError,
+    MAX_FILE_SIZE_BYTES,
+    SingleDeviceRegistry,
+    validate_shared_file,
+)
 from .replay_cache import PersistentReplayCache
 from .resumption import PersistentResumptionStore
 
@@ -71,6 +81,8 @@ class SecureCryptoSystem:
             audit_logger=self.audit_logger,
             timeout_seconds=delivery_timeout,
         )
+        self.device_registry = SingleDeviceRegistry(self.state_dir / "devices.db")
+        self.device_registry.register_device(identity, device)
         self._sessions: Dict[str, SessionKeys] = {}
         self._session_epochs: Dict[str, int] = {}
         self._outbound_counters: Dict[str, int] = {}
@@ -92,7 +104,23 @@ class SecureCryptoSystem:
         responder_hello: Dict[str, str],
         responder_public_key: bytes,
     ) -> Tuple[Dict[str, str], SessionKeys]:
-        """Initiator: verify hello, establish forward-secret session keys, wipe ephemerals."""
+        """Initiator: verify hello, enforce 1-device-per-user, establish session keys."""
+        resp_id = responder_hello.get("responder_identity", "")
+        resp_dev = responder_hello.get("responder_device", "")
+        try:
+            self.device_registry.register_device(resp_id, resp_dev)
+        except DevicePolicyError as exc:
+            emit_crypto_event(
+                self.audit_logger,
+                actor=resp_id or "unknown",
+                source_service=f"{resp_id}/{resp_dev}",
+                target_service=f"{self.identity}/{self.device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=responder_hello.get("session_id", ""),
+                reason=exc.reason,
+            )
+            raise
         hs = EphemeralHandshakeSession(self.identity, self.device, self._signing_secret_key)
         init_msg, keys = hs.initiate(responder_hello, responder_public_key)
         self._sessions[keys.session_id] = keys
@@ -105,8 +133,24 @@ class SecureCryptoSystem:
         init_msg: Dict[str, str],
         initiator_public_key: bytes,
     ) -> SessionKeys:
-        """Responder: verify initiator transcript, derive session keys, wipe ephemerals."""
+        """Responder: verify transcript, enforce 1-device-per-user, derive session keys."""
         sid = init_msg["session_id"]
+        init_id = init_msg.get("initiator_identity", "")
+        init_dev = init_msg.get("initiator_device", "")
+        try:
+            self.device_registry.register_device(init_id, init_dev)
+        except DevicePolicyError as exc:
+            emit_crypto_event(
+                self.audit_logger,
+                actor=init_id or "unknown",
+                source_service=f"{init_id}/{init_dev}",
+                target_service=f"{self.identity}/{self.device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=sid,
+                reason=exc.reason,
+            )
+            raise
         hs = self._pending_handshakes.pop(sid, None)
         if hs is None:
             raise ValueError(f"No pending handshake for session_id={sid}")
@@ -324,3 +368,82 @@ class SecureCryptoSystem:
         self._session_epochs[new_keys.session_id] = 1
         self._outbound_counters[new_keys.session_id] = 0
         return new_keys, rotated_ticket
+
+    # ------------------------------------------------------------------
+    # Policy-Enforced File Sharing (20 MB cap + Default Media Formats)
+    # ------------------------------------------------------------------
+    def share_file(
+        self,
+        session_id: str,
+        filename: str,
+        data: bytes,
+        *,
+        mime_type: Optional[str] = None,
+        chunk_size: int = 65536,
+    ) -> List[Dict[str, Any]]:
+        """Validate 20 MB cap, default media format/magic bytes, and encrypt into chunks."""
+        keys = self._sessions[session_id]
+        try:
+            self.device_registry.verify_device(keys.peer_identity, keys.peer_device)
+            meta = validate_shared_file(filename, data, mime_type=mime_type, max_bytes=MAX_FILE_SIZE_BYTES)
+        except (FilePolicyError, DevicePolicyError) as exc:
+            emit_crypto_event(
+                self.audit_logger,
+                actor=self.identity,
+                source_service=f"{self.identity}/{self.device}",
+                target_service=f"{keys.peer_identity}/{keys.peer_device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=session_id,
+                reason=exc.reason,
+            )
+            raise
+        header_bytes = json.dumps(meta, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        framed = len(header_bytes).to_bytes(4, "big") + header_bytes + bytes(data)
+        return self.encrypt_chunked(session_id, framed, chunk_size=chunk_size)
+
+    def receive_file_chunk(
+        self,
+        envelope: Dict[str, Any],
+        sender_public_key: bytes,
+    ) -> Optional[Tuple[Dict[str, Any], bytes]]:
+        """Decrypt file chunk and enforce 20 MB + format + single-device policy on reassembly."""
+        sender_id = str(envelope.get("sender_identity", ""))
+        sender_dev = str(envelope.get("sender_device", ""))
+        sid = str(envelope.get("session_id", ""))
+        msg_id = str(envelope.get("message_id", ""))
+        try:
+            self.device_registry.verify_device(sender_id, sender_dev)
+        except DevicePolicyError as exc:
+            emit_crypto_event(
+                self.audit_logger,
+                actor=sender_id or "unknown",
+                source_service=f"{sender_id}/{sender_dev}",
+                target_service=f"{self.identity}/{self.device}",
+                action="message_rejected",
+                outcome="rejected",
+                session_id=sid,
+                message_id=msg_id,
+                reason=exc.reason,
+            )
+            raise
+
+        framed = self.decrypt_chunk(envelope, sender_public_key)
+        if framed is None:
+            return None
+        if len(framed) < 4:
+            raise FilePolicyError("Malformed shared file framing")
+        hdr_len = int.from_bytes(framed[:4], "big")
+        if hdr_len <= 0 or 4 + hdr_len > len(framed):
+            raise FilePolicyError("Malformed shared file header")
+        meta = json.loads(framed[4 : 4 + hdr_len].decode("utf-8"))
+        file_bytes = framed[4 + hdr_len :]
+        verified = validate_shared_file(
+            str(meta.get("filename", "")),
+            file_bytes,
+            mime_type=meta.get("mime_type"),
+            max_bytes=MAX_FILE_SIZE_BYTES,
+        )
+        if verified["sha256"] != meta.get("sha256"):
+            raise FilePolicyError("Shared file SHA-256 mismatch")
+        return verified, file_bytes
