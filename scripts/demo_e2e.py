@@ -35,6 +35,9 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="tbv-e2e-") as tmp:
         tmp_path = Path(tmp)
         os.environ["WRAP_MASTER_KEY_B64"] = b64e(os.urandom(32))
+        # TokenAuthority fails closed without a shared signing seed; this local
+        # demo is single-process, so a fresh ephemeral seed is sufficient.
+        os.environ["TOKEN_SIGNING_SEED_B64"] = b64e(os.urandom(32))
         db_url = f"sqlite+pysqlite:///{tmp_path / 'demo.db'}"
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))

@@ -5,7 +5,10 @@ All keys are generated at runtime; no secrets are committed.
 
 from __future__ import annotations
 
+import base64
 import json
+import os
+import secrets
 from pathlib import Path
 from typing import Dict, List
 
@@ -14,6 +17,11 @@ from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
 from src.crypto._pqcrypto_compat import sig_keygen
+
+# TokenAuthority fails closed without a shared signing seed.  Tests generate a
+# fresh one at runtime; nothing is committed.  Set it before test modules import
+# src.identity_keys.api (which creates a module-level app).
+os.environ.setdefault("TOKEN_SIGNING_SEED_B64", base64.b64encode(secrets.token_bytes(32)).decode())
 
 
 @pytest.fixture

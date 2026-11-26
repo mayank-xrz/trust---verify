@@ -21,7 +21,6 @@ from .crypto import (
     canonical_json_bytes,
     ed25519_sign,
     ed25519_verify,
-    generate_ed25519_keypair,
     public_key_fingerprint,
 )
 from .db import tx_session
@@ -41,7 +40,7 @@ from .models import (
 from .revocation import RevocationReason, next_commit_seq
 from .rotation import crash_point
 from .services import transition_device_status
-from .tokens import ActorContext
+from .tokens import ActorContext, load_token_signing_keypair
 
 _DUMMY_SALT = b"tbv-dummy-salt-16"
 _SCRYPT_N = 16384
@@ -76,20 +75,7 @@ class ReenrollmentService:
         self.emitter = emitter
         self.max_active_devices = max_active_devices
         self.cooldown_seconds = cooldown_seconds
-        seed_b64 = os.environ.get("TOKEN_SIGNING_SEED_B64", "").strip()
-        if seed_b64:
-            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
-            priv = b64d(seed_b64)
-            pub = (
-                Ed25519PrivateKey.from_private_bytes(priv)
-                .public_key()
-                .public_bytes(Encoding.Raw, PublicFormat.Raw)
-            )
-            self._approval_pub, self._approval_priv = pub, priv
-        else:
-            self._approval_pub, self._approval_priv = generate_ed25519_keypair()
+        self._approval_pub, self._approval_priv = load_token_signing_keypair()
 
     def generate_recovery_codes(self, user_id: str, count: int = 10) -> list[str]:
         """Generate 10 128-bit one-time recovery codes, storing only salted scrypt verifiers."""

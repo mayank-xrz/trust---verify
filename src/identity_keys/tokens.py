@@ -15,9 +15,34 @@ from .crypto import (
     canonical_json_bytes,
     ed25519_sign,
     ed25519_verify,
-    generate_ed25519_keypair,
 )
-from .errors import NotAuthorized
+from .errors import NotAuthorized, StateUnavailable
+
+
+def load_token_signing_keypair() -> tuple[bytes, bytes]:
+    """Load the shared Ed25519 token-signing keypair from the environment.
+
+    Fails closed: a missing, malformed, or wrong-length seed is a configuration
+    error, not a reason to mint an ephemeral key that peers cannot verify.
+    """
+    seed_b64 = os.environ.get("TOKEN_SIGNING_SEED_B64", "").strip()
+    if not seed_b64:
+        raise StateUnavailable("TOKEN_SIGNING_SEED_B64 is required")
+    try:
+        priv = b64d(seed_b64)
+    except Exception as exc:
+        raise StateUnavailable("TOKEN_SIGNING_SEED_B64 is not valid base64") from exc
+    if len(priv) != 32:
+        raise StateUnavailable("TOKEN_SIGNING_SEED_B64 must decode to 32 bytes")
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    pub = (
+        Ed25519PrivateKey.from_private_bytes(priv)
+        .public_key()
+        .public_bytes(Encoding.Raw, PublicFormat.Raw)
+    )
+    return pub, priv
 
 
 @dataclass(frozen=True)
@@ -35,20 +60,7 @@ class TokenAuthority:
     def __init__(self, clock: Clock, ttl_seconds: int = 300) -> None:
         self.clock = clock
         self.ttl_seconds = ttl_seconds
-        seed_b64 = os.environ.get("TOKEN_SIGNING_SEED_B64", "").strip()
-        if seed_b64:
-            priv = b64d(seed_b64)
-            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-            from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
-            pub = (
-                Ed25519PrivateKey.from_private_bytes(priv)
-                .public_key()
-                .public_bytes(Encoding.Raw, PublicFormat.Raw)
-            )
-            self._pub, self._priv = pub, priv
-        else:
-            self._pub, self._priv = generate_ed25519_keypair()
+        self._pub, self._priv = load_token_signing_keypair()
 
     def issue(self, user_id: str, device_id: str) -> str:
         """Issue a signed bearer token containing user_id, device_id, exp, and jti."""

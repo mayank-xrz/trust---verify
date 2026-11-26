@@ -26,9 +26,14 @@ def start_node(node: str, mode: str) -> None:
     if mode == "docker":
         subprocess.run(["docker", "start", f"tbv-{node}"], check=True)
     else:
+        from scripts.local_secrets import ensure_local_secrets
+
         ports = {"node-a": "8101", "node-b": "8102", "node-c": "8103"}
         port = ports[node]
         env = os.environ.copy()
+        # Reuse the persisted local secrets so the restarted node can verify
+        # tokens issued by its peers.
+        env.update(ensure_local_secrets())
         env["NODE_ID"] = node
         env["NODE_PORT"] = port
         PID_DIR.mkdir(parents=True, exist_ok=True)

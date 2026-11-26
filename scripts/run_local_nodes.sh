@@ -2,6 +2,14 @@
 set -euo pipefail
 
 # Compose-free local mode: starts node-a, node-b, node-c via uvicorn against DATABASE_URL
+# The API fails closed without shared secrets, so load/generate ephemeral
+# local-only values (persisted in /tmp/tbv_local_env.json, mode 0600).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPO_ROOT"
+PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"
+eval "$("$PYTHON" -m scripts.local_secrets --shell)"
+export TOKEN_SIGNING_SEED_B64 WRAP_MASTER_KEY_B64 CLUSTER_SYNC_SECRET ADMIN_ENROLL_TOKEN
+
 mkdir -p /tmp/tbv_pids
 alembic upgrade head
 
