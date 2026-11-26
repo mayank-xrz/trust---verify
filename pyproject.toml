@@ -8,6 +8,10 @@ select = ["E", "F", "I", "W"]
 # intentionally left intact. Lint therefore does not duplicate the line-length check.
 ignore = ["E501"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["src", "scripts", "tests", "demo", "track4_service"]
+known-third-party = ["alembic"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true

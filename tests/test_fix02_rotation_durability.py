@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from sqlalchemy import select
-
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import select
+
 from scripts.seed_sandbox import seed_database
 from src.identity_keys import rotation as rotation_module
 from src.identity_keys.audit_outbox import AuditEmitter

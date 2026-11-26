@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
-
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
+
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.audit_outbox import AuditEmitter
