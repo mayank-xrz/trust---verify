@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from hmac import compare_digest
 from typing import Any
@@ -158,7 +159,15 @@ def create_app(
     )
     reenroll_svc = ReenrollmentService(session_factory, resolved_clock, emitter)
 
-    app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})")
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        sync_mgr.start_heartbeat()
+        try:
+            yield
+        finally:
+            sync_mgr.stop_heartbeat()
+
+    app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})", lifespan=lifespan)
     app.state.engine = engine
     app.state.token_authority = token_auth
     app.state.identity_svc = identity_svc
@@ -168,16 +177,6 @@ def create_app(
     app.state.revocation_svc = revocation_svc
     app.state.sync_mgr = sync_mgr
     app.state.reenroll_svc = reenroll_svc
-
-    @app.on_event("startup")
-    def _start_sync_heartbeat() -> None:
-        # Periodic independent poll so a node converges even when push
-        # broadcasts are blocked.  Disabled when HEARTBEAT_INTERVAL_MS <= 0.
-        sync_mgr.start_heartbeat()
-
-    @app.on_event("shutdown")
-    def _stop_sync_heartbeat() -> None:
-        sync_mgr.stop_heartbeat()
 
     def require_actor(authorization: str | None = Header(default=None)) -> ActorContext:
         if not authorization or not authorization.startswith("Bearer "):

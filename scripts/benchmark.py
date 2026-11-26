@@ -318,8 +318,9 @@ def main():
     # Print summary table
     print_markdown_table(results)
 
-    # Save to benchmark_results.json
-    output_path = os.path.join(REPO_ROOT, "benchmark_results.json")
+    reports_dir = os.path.join(REPO_ROOT, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    output_path = os.path.join(reports_dir, "benchmark_results.json")
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 

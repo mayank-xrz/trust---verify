@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -27,6 +29,7 @@ def create_db_engine(database_url: str | None = None) -> Engine:
     engine = create_engine(url, future=True, pool_pre_ping=True, connect_args=connect_args)
 
     if url.startswith("sqlite"):
+        sqlite3.register_adapter(datetime, lambda value: value.isoformat(" "))
 
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_conn, _connection_record) -> None:
