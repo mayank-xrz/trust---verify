@@ -11,11 +11,9 @@ import hmac
 import secrets
 from typing import Tuple, Optional
 
-try:
-    import oqs
-    OQS_AVAILABLE = True
-except ImportError:
-    OQS_AVAILABLE = False
+from ._oqs_guard import load_oqs_if_available
+
+oqs, OQS_AVAILABLE = load_oqs_if_available()
 
 
 # RFC 3526 2048-bit MODP Prime for secure mathematical fallback signature
