@@ -19,7 +19,7 @@ jobs:
           BLOCKED_PATTERN='(^|/)(([aA][gG][eE][nN][tT]|[cC][lL][aA][uU][dD][eE])\.[mM][dD]|\.cursorrules|\.env(\..*)?|.*\.key|.*\.pem)$|(^|/)(__pycache__|\.venv|dist|build)($|/)'
           
           # Check tracked files in repository
-          VIOLATIONS=$(git ls-files | grep -E "$BLOCKED_PATTERN" || true)
+          VIOLATIONS=$(git ls-files | grep -E "$BLOCKED_PATTERN" | grep -vE '(^|/)\.env\.example$' || true)
 
           if [ -n "$VIOLATIONS" ]; then
             echo "::error::Blocked files detected on main!"
