@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.sign import ml_dsa_65
 
+from src.audit.authority_monitor import AuthorityMonitor
 from src.audit.logger import AuditLogger
 from ._pqcrypto_compat import sig_keygen
 from .delivery import ChunkReceiver, DEFAULT_DELIVERY_TIMEOUT_SECONDS, chunk_and_seal
@@ -86,6 +87,11 @@ class SecureCryptoSystem:
         )
         self.device_registry = SingleDeviceRegistry(self.state_dir / "devices.db")
         self.device_registry.register_device(identity, device)
+        self.authority_monitor = AuthorityMonitor(
+            node_id=f"{identity}/{device}",
+            state_dir=self.state_dir / "authority",
+            audit_logger=self.audit_logger,
+        )
         self.threat_logs: List[Dict[str, Any]] = []
         if timezone is not None:
             self.device_registry.verify_access_timezone(identity, device, timezone)
@@ -139,6 +145,12 @@ class SecureCryptoSystem:
                 },
             )
             self.threat_logs.append({**(event or {}), **details})
+            self.authority_monitor.record_threat(
+                user_id=peer_identity,
+                case_label=details.get("threat", "ANOMALOUS_TIMEZONE_ACCESS"),
+                description=details.get("detail", str(exc)),
+                severity=details.get("severity", "HIGH"),
+            )
             raise
         except DevicePolicyError as exc:
             event = emit_crypto_event(
@@ -153,6 +165,12 @@ class SecureCryptoSystem:
                 reason=exc.reason,
             )
             self.threat_logs.append({**(event or {}), "threat": "DEVICE_POLICY_VIOLATION", "detail": str(exc)})
+            self.authority_monitor.record_threat(
+                user_id=peer_identity or "unknown",
+                case_label="DEVICE_POLICY_VIOLATION",
+                description=str(exc),
+                severity="HIGH",
+            )
             raise
 
     # ------------------------------------------------------------------
