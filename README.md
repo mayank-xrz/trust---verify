@@ -294,6 +294,7 @@ python3 -m src.node.operator_cli alerts
 
 The educational and protocol-risk documentation in `docs/` is derived from **Prof. Alfred Menezes's Cryptography 101** curriculum at the University of Waterloo (<https://cryptography101.ca/>), with attribution; any errors are the repository authors' own.
 
+* [Validation Guide](docs/VALIDATION.md) — how to reproduce the gates, what is and is not validated
 * [01 — Course Provenance & Attribution](docs/01-course-provenance.md)
 * [02 — Protocol-Level Quantum Risk & HNDL Prioritization](docs/02-protocol-risk.md)
 * [03 — 16-Module PQC Syllabus & Resource Index](docs/03-syllabus.md)
