@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import sys
@@ -258,17 +259,31 @@ def cmd_demo_resumption_binding() -> int:
         return 0 if (hijack_rejected and new_keys.peer_identity == "alice") else 1
 
 
-def cmd_verify_logs(path: str | None) -> int:
+def cmd_verify_logs(
+    path: str | None,
+    public_key_b64: str | None = None,
+    public_key_file: str | None = None,
+) -> int:
+    public_key = None
+    if public_key_b64:
+        public_key = base64.b64decode(public_key_b64, validate=True)
+    elif public_key_file:
+        raw = Path(public_key_file).read_bytes().strip()
+        try:
+            public_key = base64.b64decode(raw, validate=True)
+        except Exception:
+            public_key = raw
+
     if path is None:
         # Verify a freshly generated in-temp log if no path provided
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "verify.log"
             logger = AuditLogger("cli-verify", str(log_path))
             logger.log_event("crypto", "verify_check", "cli", "audit_log", status="SUCCESS")
-            res = AuditLogVerifier().verify_file(str(log_path))
+            res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(str(log_path))
             print(json.dumps(res.to_dict(), indent=2))
             return 0 if res.is_valid else 1
-    res = AuditLogVerifier().verify_file(path)
+    res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(path)
     print(json.dumps(res.to_dict(), indent=2))
     return 0 if res.is_valid else 1
 
@@ -332,6 +347,8 @@ def main(argv: List[str] | None = None) -> int:
     sub.add_parser("demo-resumption-binding")
     vp = sub.add_parser("verify-logs")
     vp.add_argument("--path", default=None)
+    vp.add_argument("--public-key", default=None, help="base64 ML-DSA-65 public key")
+    vp.add_argument("--public-key-file", default=None)
     sub.add_parser("doc-check")
 
     args = parser.parse_args(argv)
@@ -344,7 +361,7 @@ def main(argv: List[str] | None = None) -> int:
     if args.command == "demo-resumption-binding":
         return cmd_demo_resumption_binding()
     if args.command == "verify-logs":
-        return cmd_verify_logs(args.path)
+        return cmd_verify_logs(args.path, args.public_key, args.public_key_file)
     if args.command == "doc-check":
         return cmd_doc_check()
     return 1
