@@ -62,7 +62,15 @@ pip install -r requirements.txt
 
 # Full test suite
 python3 -m pytest tests/ -v
+make demo
 ```
+
+Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18
+and Node.js 26.13.1. The full suite passed 250 tests, and the local HTTP demo
+passed all 12 checklist objectives. The demo uses localhost ports 8001–8003
+and 8005. The remaining Python 3.11 test warning comes from Starlette's
+deprecated AnyIO `BlockingPortal` alias. On Python 3.15, FastAPI and Starlette
+also warn about their use of `asyncio.iscoroutinefunction`.
 
 Make shortcuts: `make setup` (pip install), `make test`, `make chaos`, `make bench`, `make demo`, `make up` / `make down` (Docker sandbox), `make clean`.
 
