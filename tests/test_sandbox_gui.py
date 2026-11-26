@@ -21,17 +21,32 @@ def test_dashboard_html_and_state(tmp_path: Path) -> None:
     client = _client(tmp_path)
     html_res = client.get("/")
     assert html_res.status_code == 200
-    assert "Trust, But Verify" in html_res.text
-    assert "Test Files &amp; Pytest Runner" in html_res.text
-    assert "PQC Messaging &amp; File Guard" in html_res.text
-    assert "Keys, Devices &amp; Authority" in html_res.text
-    assert "Detector &amp; Practice Logs" in html_res.text
+    assert "Trust, But Verify Sign In" in html_res.text
+    assert "Test Files &amp; Suites" in html_res.text
+    assert "Secure Messaging" in html_res.text
+    assert "Devices &amp; Authority" in html_res.text
+    assert "Threat Detection" in html_res.text
+
+    login_res = client.post(
+        "/api/sandbox/auth/login",
+        json={"username": "admin", "role": "ADMIN"},
+    )
+    assert login_res.status_code == 200
+    login_data = login_res.json()
+    assert login_data["ok"] is True
+    assert login_data["role"] == "ADMIN"
+    assert login_data["token"].startswith("tbv.")
+
+    logout_res = client.post("/api/sandbox/auth/logout", json={"token": login_data["token"]})
+    assert logout_res.status_code == 200
+    assert logout_res.json()["logged_out"] is True
 
     state = client.get("/api/sandbox/state").json()
     assert state["checklist_total"] == 12
     assert "pqcrypto" in state["crypto"]["provider"]
     assert state["policy_state"]["max_devices_per_user"] == 1
     assert state["policy_state"]["max_file_size_mb"] == 20.0
+    assert isinstance(state["message_ledger"], list)
 
 
 def test_pqc_v1_and_v2_paranoid_transfer(tmp_path: Path) -> None:

@@ -1,773 +1,1165 @@
-"""Self-contained Security Operations & Track 4 Interactive Workbench UI."""
+"""Self-contained Security Operations & Track 4 Workbench UI (Light Blue/White SaaS Layout)."""
 
 from __future__ import annotations
 
 
 def render_dashboard_html() -> str:
-    """Return the full Track 4 Trust, But Verify interactive workbench HTML."""
+    """Return the Track 4 Trust, But Verify workbench HTML with login landing and sidebar navigation."""
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Trust, But Verify — Track 4 PQC &amp; Zero-Trust Workbench</title>
+<title>Trust, But Verify — Post-Quantum Zero-Trust Security Console</title>
 <style>
   :root {
-    --bg: #060a11;
-    --panel: #0e1522;
-    --panel-2: #151f31;
-    --border: #24324a;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --cyan: #38bdf8;
-    --emerald: #10b981;
-    --red: #ef4444;
-    --amber: #f59e0b;
-    --purple: #a78bfa;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --bg-page: #f4f7fb;
+    --bg-card: #ffffff;
+    --bg-sidebar: #ffffff;
+    --bg-subtle: #f8fafc;
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+    --blue: #2563eb;
+    --blue-hover: #1d4ed8;
+    --blue-soft: #eff6ff;
+    --blue-border: #bfdbfe;
+    --blue-text: #1e40af;
+    --green-soft: #dcfce7;
+    --green-text: #166534;
+    --amber-soft: #fef3c7;
+    --amber-text: #92400e;
+    --red-soft: #fee2e2;
+    --red-text: #991b1b;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   }
+
   * { box-sizing: border-box; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: var(--sans); font-size: 14px; line-height: 1.5;
+    margin: 0;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
-  a { color: var(--cyan); text-decoration: none; }
+
+  a { color: var(--blue); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  header {
-    background: linear-gradient(180deg, #10192b 0%, #090e18 100%);
-    border-bottom: 1px solid var(--border);
-    padding: 13px 24px;
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px;
-    position: sticky; top: 0; z-index: 30;
-  }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .logo {
-    width: 40px; height: 40px; border-radius: 10px;
-    background: linear-gradient(135deg, #0ea5e9, #10b981);
-    display: grid; place-items: center; font-weight: 800; color: #041019; font-size: 15px;
-    box-shadow: 0 0 18px rgba(14,165,233,0.28);
-  }
-  .brand h1 { margin: 0; font-size: 16.5px; letter-spacing: -0.01em; }
-  .brand p { margin: 0; font-size: 12px; color: var(--muted); }
-  .badges { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-  .badge {
-    font-family: var(--mono); font-size: 11px; padding: 4px 9px;
-    border-radius: 999px; border: 1px solid var(--border); background: var(--panel-2);
-    color: var(--text); white-space: nowrap;
-  }
-  .badge.ok { border-color: rgba(16,185,129,0.45); color: #6ee7b7; background: rgba(16,185,129,0.1); }
-  .badge.warn { border-color: rgba(245,158,11,0.45); color: #fcd34d; background: rgba(245,158,11,0.1); }
-  .badge.bad { border-color: rgba(239,68,68,0.55); color: #fca5a5; background: rgba(239,68,68,0.12); }
-  .badge.info { border-color: rgba(56,189,248,0.45); color: #7dd3fc; background: rgba(56,189,248,0.1); }
-  .badge.purple { border-color: rgba(167,139,250,0.45); color: #ddd6fe; background: rgba(167,139,250,0.12); }
+  :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
-  .container { max-width: 1440px; margin: 0 auto; padding: 18px 24px 48px; }
-  .tabs {
-    display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;
-    border-bottom: 1px solid var(--border); padding-bottom: 12px;
+  /* ── Login Landing Screen ── */
+  .login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: radial-gradient(circle at top left, #dbeafe 0%, #f4f7fb 45%, #f8fafc 100%);
   }
-  .tab-btn {
-    background: var(--panel); border: 1px solid var(--border); color: var(--muted);
-    padding: 8px 13px; border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 600;
-    transition: all .15s ease;
+  .login-card {
+    width: 100%;
+    max-width: 470px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 28px;
+    box-shadow: var(--shadow-md);
   }
-  .tab-btn:hover { color: var(--text); border-color: #384c6e; }
-  .tab-btn.active {
-    background: rgba(56,189,248,0.14); color: var(--cyan); border-color: rgba(56,189,248,0.55);
+  .brand-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .shield-box {
+    width: 38px; height: 38px; border-radius: 10px;
+    background: var(--blue); color: #fff;
+    display: grid; place-items: center; flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.28);
   }
-  .tab-panel { display: none; }
-  .tab-panel.active { display: block; }
-
-  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
-  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-  @media (max-width: 980px) { .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; } }
-
-  .card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 16px;
+  .login-card h1 { margin: 0; font-size: 18px; font-weight: 700; color: var(--text-primary); }
+  .login-sub { font-size: 12.5px; color: var(--text-muted); margin: 0; }
+  .info-banner {
+    background: var(--blue-soft);
+    border: 1px solid var(--blue-border);
+    color: var(--blue-text);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 12.5px;
+    margin-bottom: 16px;
   }
-  .card h2, .card h3 { margin: 0 0 10px; font-size: 15px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 12px; }
-
-  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-  button.act {
-    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
-    padding: 7px 12px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-weight: 600;
-    transition: transform .05s, border-color .15s, background .15s;
+  .quick-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 10px;
   }
-  button.act:hover { border-color: var(--cyan); background: #1c273c; }
-  button.act:active { transform: translateY(1px); }
-  button.act:disabled { opacity: 0.6; cursor: wait; }
-  button.act.primary { background: #0284c7; border-color: #38bdf8; color: #fff; }
-  button.act.primary:hover { background: #0369a1; }
-  button.act.success { background: rgba(16,185,129,0.16); border-color: rgba(16,185,129,0.5); color: #6ee7b7; }
-  button.act.danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.5); color: #fca5a5; }
-  button.act.warn { background: rgba(245,158,11,0.15); border-color: rgba(245,158,11,0.5); color: #fcd34d; }
-  button.act.purple { background: rgba(167,139,250,0.16); border-color: rgba(167,139,250,0.5); color: #ddd6fe; }
-
-  input, select, textarea {
-    background: #080d16; border: 1px solid var(--border); color: var(--text);
-    padding: 8px 10px; border-radius: 7px; font-size: 13px; width: 100%;
-    font-family: inherit;
-  }
-  input[type="checkbox"] { width: auto; }
-  textarea { font-family: var(--mono); font-size: 11.5px; min-height: 92px; resize: vertical; }
-  .field { margin-bottom: 10px; }
-  .field label { display: block; font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
-  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-  @media (max-width: 720px) { .row-2, .row-3 { grid-template-columns: 1fr; } }
-
-  .mono { font-family: var(--mono); font-size: 12px; }
-  .kv { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); font-size: 12.5px; }
-  .kv:last-child { border-bottom: none; }
-  .kv span:first-child { color: var(--muted); }
-
-  .verdict-box {
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
-    margin-bottom: 10px; background: var(--panel-2);
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
-  }
-  .verdict-box.ok { border-color: rgba(16,185,129,0.55); background: rgba(16,185,129,0.09); }
-  .verdict-box.blocked { border-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.1); }
-  .verdict-box.bad { border-color: rgba(239,68,68,0.55); background: rgba(239,68,68,0.1); }
-  .verdict-title { font-weight: 700; font-size: 13px; }
-  .verdict-sub { font-size: 12px; color: var(--muted); font-family: var(--mono); }
-
-  .dropzone {
-    border: 2px dashed #33486b; border-radius: 10px; padding: 18px;
-    background: #080d16; text-align: center; cursor: pointer;
+  .quick-acct {
+    text-align: left;
+    background: var(--bg-subtle);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 9px 11px;
+    cursor: pointer;
     transition: border-color .15s, background .15s;
   }
-  .dropzone.drag { border-color: var(--cyan); background: rgba(56,189,248,0.08); }
+  .quick-acct:hover { border-color: var(--blue); background: var(--blue-soft); }
+  .quick-acct strong { display: block; font-size: 12.5px; color: var(--text-primary); }
+  .quick-acct span { font-size: 11px; color: var(--text-muted); }
+
+  /* ── App Shell (Sidebar + Main) ── */
+  .app-shell { display: none; min-height: 100vh; }
+  .app-shell.visible { display: flex; }
+
+  .sidebar {
+    width: 252px;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 18px 14px 14px;
+    flex-shrink: 0;
+    z-index: 40;
+  }
+  .sidebar-brand {
+    display: flex; align-items: center; gap: 10px;
+    padding: 2px 6px 16px; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-wordmark {
+    font-size: 14px; font-weight: 800; letter-spacing: 0.04em;
+    color: var(--blue); text-transform: uppercase;
+  }
+  .sidebar-tagline { font-size: 11px; color: var(--text-muted); }
+
+  .sidebar-nav { flex: 1; overflow-y: auto; padding-top: 8px; }
+  .nav-group {
+    font-size: 10.5px; font-weight: 700; color: #94a3b8;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    padding: 12px 10px 4px;
+  }
+  .nav-btn {
+    width: 100%;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8.5px 11px; margin-bottom: 2px;
+    border: none; border-radius: 8px; background: transparent;
+    color: var(--text-secondary); font-size: 13.5px; font-weight: 500;
+    cursor: pointer; text-align: left; font-family: inherit;
+    transition: background .12s, color .12s;
+  }
+  .nav-btn:hover { background: #f1f5f9; color: var(--text-primary); }
+  .nav-btn.active { background: var(--blue); color: #ffffff; font-weight: 600; }
+  .nav-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .nav-btn.hidden-role { display: none; }
+
+  .sidebar-footer {
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+    margin-top: 10px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .user-row { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--blue); color: #fff;
+    font-size: 12px; font-weight: 700; display: grid; place-items: center; flex-shrink: 0;
+  }
+  .user-meta { flex: 1; min-width: 0; }
+  .user-name { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .user-email { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Main Column & Sticky White Navbar ── */
+  .main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 64px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    position: sticky; top: 0; z-index: 30;
+  }
+  .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .topbar-title { margin: 0; font-size: 17px; font-weight: 700; color: var(--text-primary); white-space: nowrap; }
+  .menu-toggle {
+    display: none; border: 1px solid var(--border); background: #fff;
+    border-radius: 8px; padding: 6px 9px; cursor: pointer; color: var(--text-secondary);
+  }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; }
+  .search-wrap { position: relative; }
+  .search-box {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--bg-subtle); border: 1px solid var(--border);
+    border-radius: 9px; padding: 6px 12px; width: 270px;
+  }
+  .search-box:focus-within { background: #fff; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+  .search-box input {
+    border: none; background: transparent; padding: 2px 0; font-size: 13px;
+    width: 100%; outline: none; color: var(--text-primary);
+  }
+  .search-dropdown {
+    position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+    background: #fff; border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow-md); max-height: 280px; overflow: auto;
+    display: none; z-index: 50;
+  }
+  .search-dropdown.open { display: block; }
+  .search-hit {
+    padding: 9px 12px; border-bottom: 1px solid #f1f5f9; cursor: pointer; display: block; width: 100%;
+    text-align: left; border-left: none; border-right: none; border-top: none; background: #fff; font-family: inherit;
+  }
+  .search-hit:hover { background: var(--blue-soft); }
+  .search-hit strong { display: block; font-size: 12.5px; color: var(--text-primary); }
+  .search-hit span { font-size: 11.5px; color: var(--text-muted); }
+
+  /* ── Page Container & Clean Cards ── */
+  .page-body { padding: 22px 26px 48px; max-width: 1380px; width: 100%; margin: 0 auto; }
+  .view-panel { display: none; }
+  .view-panel.active { display: block; }
+
+  .page-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 18px;
+  }
+  .page-head h2 { margin: 0; font-size: 18px; font-weight: 700; }
+  .page-head p { margin: 2px 0 0; font-size: 13px; color: var(--text-muted); }
+
+  .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  @media (max-width: 1020px) { .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+  @media (max-width: 960px) {
+    .sidebar { position: fixed; left: -270px; transition: left .2s ease; }
+    .sidebar.mobile-open { left: 0; box-shadow: var(--shadow-md); }
+    .menu-toggle { display: inline-flex; }
+    .search-box { width: 190px; }
+  }
+  @media (max-width: 680px) { .row-2, .row-3 { grid-template-columns: 1fr; } .search-wrap { display: none; } }
+
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow-sm);
+  }
+  .card h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .sub { margin: 0 0 14px; font-size: 12.5px; color: var(--text-muted); }
+
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-label { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+  .stat-value { font-size: 24px; font-weight: 800; color: var(--text-primary); margin: 4px 0 2px; line-height: 1.2; }
+  .stat-meta { font-size: 11.5px; color: var(--blue-text); font-weight: 500; }
+
+  /* ── Badges, Buttons & Form Controls ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+    background: #f1f5f9; color: var(--text-secondary); white-space: nowrap;
+  }
+  .badge.blue { background: var(--blue-soft); color: var(--blue-text); }
+  .badge.ok { background: var(--green-soft); color: var(--green-text); }
+  .badge.warn { background: var(--amber-soft); color: var(--amber-text); }
+  .badge.bad { background: var(--red-soft); color: var(--red-text); }
+
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  button.btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 8px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--border); background: #ffffff; color: var(--text-secondary);
+    cursor: pointer; font-family: inherit; transition: background .12s, border-color .12s, transform .05s;
+  }
+  button.btn:hover { background: #f8fafc; border-color: #cbd5e1; color: var(--text-primary); }
+  button.btn:active { transform: translateY(1px); }
+  button.btn:disabled { opacity: 0.6; cursor: wait; }
+  button.btn-primary { background: var(--blue); border-color: var(--blue); color: #ffffff; }
+  button.btn-primary:hover { background: var(--blue-hover); border-color: var(--blue-hover); color: #ffffff; }
+  button.btn-soft { background: var(--blue-soft); border-color: var(--blue-border); color: var(--blue-text); }
+  button.btn-soft:hover { background: #dbeafe; }
+  button.btn-danger { background: #fef2f2; border-color: #fecaca; color: var(--red-text); }
+  button.btn-danger:hover { background: #fee2e2; }
+  button.btn-warn { background: #fffbeb; border-color: #fde68a; color: var(--amber-text); }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 5px; }
+  input, select, textarea {
+    width: 100%; background: #ffffff; border: 1px solid #cbd5e1;
+    border-radius: 8px; padding: 8px 11px; font-size: 13px;
+    color: var(--text-primary); font-family: inherit;
+  }
+  input[type="checkbox"] { width: auto; }
+  input:focus, select:focus, textarea:focus { border-color: var(--blue); outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.12); }
+  textarea { font-family: var(--mono); font-size: 12px; min-height: 88px; resize: vertical; }
+
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .kv { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+  .kv:last-child { border-bottom: none; }
+  .kv span:first-child { color: var(--text-muted); }
+
+  .verdict-box {
+    border-radius: 9px; padding: 11px 14px; margin-bottom: 10px;
+    border: 1px solid var(--border); background: var(--bg-subtle);
+  }
+  .verdict-box.ok { border-color: #bbf7d0; background: #f0fdf4; color: var(--green-text); }
+  .verdict-box.blocked { border-color: #fde68a; background: #fffbeb; color: var(--amber-text); }
+  .verdict-box.bad { border-color: #fecaca; background: #fef2f2; color: var(--red-text); }
+  .verdict-title { font-weight: 700; font-size: 13px; }
+  .verdict-sub { font-size: 12px; opacity: 0.92; margin-top: 2px; }
+
+  .dropzone {
+    border: 2px dashed var(--blue-border); border-radius: 12px; padding: 22px;
+    background: var(--blue-soft); text-align: center; cursor: pointer;
+    transition: background .15s, border-color .15s;
+  }
+  .dropzone.drag { background: #dbeafe; border-color: var(--blue); }
   .file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
   .file-chip {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
-    padding: 3px 10px; font-family: var(--mono); font-size: 11px; color: #bae6fd;
+    background: #fff; border: 1px solid var(--blue-border); border-radius: 999px;
+    padding: 3px 10px; font-family: var(--mono); font-size: 11px; color: var(--blue-text);
   }
 
   .test-list {
     max-height: 220px; overflow: auto; border: 1px solid var(--border);
-    border-radius: 8px; background: #080d16; padding: 8px;
+    border-radius: 9px; background: var(--bg-subtle); padding: 8px;
   }
   .test-item {
-    display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    padding: 4px 6px; border-bottom: 1px dashed rgba(255,255,255,0.05); font-family: var(--mono); font-size: 11.5px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 6px; border-bottom: 1px solid #f1f5f9; font-family: var(--mono); font-size: 12px;
   }
   .test-item label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-
-  .arch-flow {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 12px 0;
-  }
-  @media (max-width: 900px) { .arch-flow { grid-template-columns: 1fr; } }
-  .arch-box {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 9px; padding: 12px;
-    border-top: 3px solid var(--cyan);
-  }
-  .arch-box.green { border-top-color: var(--emerald); }
-  .arch-box.amber { border-top-color: var(--amber); }
-  .arch-box.purple { border-top-color: var(--purple); }
-  .arch-box h4 { margin: 0 0 6px; font-size: 13px; }
-  .arch-box ul { margin: 0; padding-left: 16px; color: var(--muted); font-size: 12px; }
 
   .checklist-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   @media (max-width: 980px) { .checklist-grid { grid-template-columns: 1fr; } }
   .chk-item {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
-    display: flex; flex-direction: column; gap: 4px;
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px;
   }
-  .chk-item.pass { border-color: rgba(16,185,129,0.5); background: rgba(16,185,129,0.07); }
-  .chk-item.fail { border-color: rgba(239,68,68,0.55); background: rgba(239,68,68,0.08); }
-  .chk-top { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 12.5px; }
-  .chk-sum { font-size: 11.5px; color: var(--muted); font-family: var(--mono); }
+  .chk-item.pass { border-color: #bbf7d0; background: #f0fdf4; }
+  .chk-item.fail { border-color: #fecaca; background: #fef2f2; }
+  .chk-top { display: flex; justify-content: space-between; align-items: center; font-weight: 600; font-size: 12.5px; gap: 6px; }
+  .chk-sum { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; background: var(--panel-2); }
-  .hash-pill { font-family: var(--mono); color: #7dd3fc; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { color: var(--text-muted); font-weight: 600; background: var(--bg-subtle); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
 
+  details.raw-json { margin-top: 10px; }
+  details.raw-json summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--blue); }
   pre.console {
-    background: #05080f; border: 1px solid var(--border); border-radius: 8px;
-    padding: 12px; font-family: var(--mono); font-size: 11.5px; color: #cbd5e1;
-    max-height: 290px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0;
+    background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; font-family: var(--mono); font-size: 11.5px; color: #1e293b;
+    max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 8px 0 0;
   }
+
   .alert-card {
-    background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.35);
-    border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+    border: 1px solid #fecaca; background: #fef2f2;
+    border-radius: 9px; padding: 11px 13px; margin-bottom: 8px;
   }
-  .alert-card.CRITICAL { border-color: rgba(239,68,68,0.7); background: rgba(239,68,68,0.12); }
-  .alert-card.HIGH { border-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.09); }
+  .alert-card.HIGH { border-color: #fde68a; background: #fffbeb; }
+  .progress-track { height: 8px; background: #e2e8f0; border-radius: 999px; overflow: hidden; margin-top: 8px; }
+  .progress-fill { height: 100%; background: var(--blue); width: 0%; transition: width .3s ease; }
 
-  .score-bar {
-    height: 8px; background: #1e293b; border-radius: 999px; overflow: hidden; margin-top: 8px;
-  }
-  .score-fill { height: 100%; background: linear-gradient(90deg, #0ea5e9, #10b981); width: 0%; transition: width .3s ease; }
-
-  .dag-wrap {
-    background: #05080f; border: 1px solid var(--border); border-radius: 9px; padding: 10px; margin-top: 10px;
-  }
+  .dag-box { background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-top: 12px; }
   .cmd-line {
-    background: #05080f; border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px;
+    background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
     display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px;
   }
-  .cmd-line code { font-family: var(--mono); font-size: 11.5px; color: #7dd3fc; word-break: break-all; }
+  .cmd-line code { font-family: var(--mono); font-size: 11.5px; color: var(--blue-text); word-break: break-all; }
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <div class="logo">TBV</div>
-    <div>
-      <h1>Trust, But Verify &mdash; Track 4 PQC &amp; Zero-Trust Workbench</h1>
-      <p>NIST ML-KEM / ML-DSA / SLH-DSA &bull; Upload &amp; Verify Test Files &bull; 20 MiB &amp; 1-Device Policy &bull; Authority Rollback</p>
-    </div>
-  </div>
-  <div class="badges">
-    <span id="hdr-pqc" class="badge info">PQC: Loading...</span>
-    <span id="hdr-policy" class="badge ok">20 MiB | 1 Device/User</span>
-    <span id="hdr-aiml" class="badge ok">Zero AI/ML Rules</span>
-    <span id="hdr-chain" class="badge ok">Audit Chain: Checking</span>
-    <span id="hdr-score" class="badge warn">Checklist: 0/12</span>
-    <a class="badge" href="/docs" target="_blank">Swagger /docs</a>
-    <button class="act primary" id="btn-run-all" onclick="runAll12()">Run All 12 Scenarios</button>
-  </div>
-</header>
 
-<div class="container">
-  <div class="tabs">
-    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">1. Overview &amp; Checklist</button>
-    <button class="tab-btn" data-tab="tests" onclick="switchTab('tests')">2. Test Files &amp; Pytest Runner</button>
-    <button class="tab-btn" data-tab="messaging" onclick="switchTab('messaging')">3. PQC Messaging &amp; File Guard</button>
-    <button class="tab-btn" data-tab="lifecycle" onclick="switchTab('lifecycle')">4. Keys, Devices &amp; Authority</button>
-    <button class="tab-btn" data-tab="audit" onclick="switchTab('audit')">5. Audit Chain &amp; Adapter</button>
-    <button class="tab-btn" data-tab="detector" onclick="switchTab('detector')">6. Detector &amp; Practice Logs</button>
-    <button class="tab-btn" data-tab="threat" onclick="switchTab('threat')">7. Guide &amp; Threat Model</button>
-  </div>
-
-  <!-- TAB 1: OVERVIEW -->
-  <div id="tab-overview" class="tab-panel active">
-    <div class="verdict-box ok" style="margin-bottom:16px;">
+<!-- ── LOGIN LANDING SCREEN ── -->
+<section id="login-screen" class="login-screen" aria-label="Sign In">
+  <div class="login-card">
+    <div class="brand-row">
+      <div class="shield-box" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2L4 5.5V11.5C4 16.8 7.4 21.5 12 23C16.6 21.5 20 16.8 20 11.5V5.5L12 2Z" />
+          <path d="M9 12.2L11 14.2L15.5 9.7" />
+        </svg>
+      </div>
       <div>
-        <div class="verdict-title">Verify Your Own Test Files, Event CSVs, Audit Logs, or Repo Suites</div>
-        <div class="verdict-sub">Drop <code>events.csv</code> + <code>approvals.json</code> + <code>labels.csv</code>, <code>*.log</code> hash chains, <code>tests/test_*.py</code>, <code>track4_service.py</code>, or media files for instant verification.</div>
+        <h1>Trust, But Verify Sign In</h1>
+        <p class="login-sub">Post-Quantum Identity, Access Control &amp; Audit Console</p>
       </div>
-      <button class="act primary" onclick="switchTab('tests')">Open Test Files &amp; Verifier &rarr;</button>
     </div>
 
-    <div class="card" style="margin-bottom:16px;">
-      <h2>
-        <span>Zero-Trust System Planes &amp; Active Security Controls</span>
-        <span class="mono" id="uptime-lbl" style="color:var(--muted);">uptime: --</span>
-      </h2>
-      <div class="arch-flow">
-        <div class="arch-box">
-          <h4>Control &amp; Identity Plane</h4>
-          <ul>
-            <li>Atomic Rotation + Grace Cutoff</li>
-            <li>Cross-Node Revocation Broadcast</li>
-            <li>WAL Crash Recovery &amp; Re-Enroll</li>
-            <li>HMAC-SHA3-512 Backups</li>
-          </ul>
-        </div>
-        <div class="arch-box green">
-          <h4>Data &amp; PQC Agility Plane</h4>
-          <ul>
-            <li>v1: X25519 + ML-KEM-768 + ML-DSA-65</li>
-            <li>v2-paranoid: + ML-KEM-1024 + HQC-256 + SLH-DSA</li>
-            <li>20 MiB Cap &amp; Magic-Byte Media Guard</li>
-            <li>1-Device Lock + Timezone Anomaly Block</li>
-          </ul>
-        </div>
-        <div class="arch-box amber">
-          <h4>Audit &amp; Authority Guard</h4>
-          <ul>
-            <li>SHA-256 Continuous Hash Chain</li>
-            <li>Newline/JSON Escape Sanitizer</li>
-            <li>1-Byte Mutation Fail-Closed Check</li>
-            <li>Suspicious Admin Revert-to-Snapshot</li>
-          </ul>
-        </div>
-        <div class="arch-box purple">
-          <h4>Explainable Detector</h4>
-          <ul>
-            <li>Strict Microservice DAG Policy</li>
-            <li>Approved vs Unapproved Role Rules</li>
-            <li>&plusmn;2000ms Clock-Skew &amp; Offset Sync</li>
-            <li>Track-4 Adapter Interop Runner</li>
-          </ul>
-        </div>
-      </div>
-      <div class="grid-4" id="policy-overview-strip" style="margin-top:8px;"></div>
+    <div class="info-banner">
+      Choose an operator or resource-owner identity to enter the security console. Admin sessions unlock key rotation, cluster revocation, backup tamper recovery, and audit actions.
     </div>
 
-    <div class="grid-3" id="nodes-grid" style="margin-bottom:16px;"></div>
+    <form onsubmit="submitLoginForm(event)">
+      <div class="field">
+        <label for="login-username">Identity Username</label>
+        <input id="login-username" value="admin" required autocomplete="username" />
+      </div>
+      <div class="field">
+        <label for="login-role">Session Role Scope</label>
+        <select id="login-role">
+          <option value="ADMIN" selected>Security Admin (Full Cluster &amp; Recovery Controls)</option>
+          <option value="USER">Resource Owner (Messaging, Devices &amp; Audit Viewer)</option>
+        </select>
+      </div>
+      <button type="submit" id="btn-signin" class="btn btn-primary" style="width:100%;padding:10px 14px;">Sign In to Console</button>
+    </form>
 
-    <div class="card" style="margin-bottom:16px;">
-      <h2>
-        <span>Track 4 Challenge Checklist (Live Functional Verification)</span>
-        <span class="mono" id="chk-count-lbl">0 / 12 Verified</span>
-      </h2>
-      <div class="score-bar"><div class="score-fill" id="chk-bar"></div></div>
-      <div class="checklist-grid" id="checklist-grid" style="margin-top:12px;"></div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <div class="stat-label">Quick Sign-In Synthetic Identities</div>
+      <div class="quick-grid">
+        <button type="button" class="quick-acct" onclick="quickSignIn('admin', 'ADMIN')">
+          <strong>Security Admin</strong>
+          <span>ADMIN &middot; Full Controls</span>
+        </button>
+        <button type="button" class="quick-acct" onclick="quickSignIn('alice', 'USER')">
+          <strong>Alice (Owner)</strong>
+          <span>USER &middot; Device &amp; Messaging</span>
+        </button>
+        <button type="button" class="quick-acct" onclick="quickSignIn('bob', 'USER')">
+          <strong>Bob (Peer)</strong>
+          <span>USER &middot; Recipient Node-B</span>
+        </button>
+        <button type="button" class="quick-acct" onclick="quickSignIn('charlie', 'ADMIN')">
+          <strong>Auditor / Operator</strong>
+          <span>ADMIN &middot; Audit &amp; Tests</span>
+        </button>
+      </div>
     </div>
   </div>
+</section>
 
-  <!-- TAB 2: UNIVERSAL TEST FILES & PYTEST RUNNER -->
-  <div id="tab-tests" class="tab-panel">
-    <div class="grid-2" style="margin-bottom:16px;">
-      <div class="card">
-        <h2>Drop or Select Any Test Files to Verify Automatically</h2>
-        <p class="sub">Select one or multiple files at once &mdash; auto-detects and verifies:</p>
-        <ul style="color:var(--muted);padding-left:18px;font-size:12px;margin:0 0 10px;">
-          <li><strong>Practice / Event Logs:</strong> <code>events.csv</code> + optional <code>approvals.json</code> + optional <code>labels.csv</code> &rarr; role escalation, lateral movement, clock offsets &amp; label accuracy.</li>
-          <li><strong>Audit Logs &amp; Adapter State:</strong> <code>*.log</code> / <code>*.jsonl</code> / <code>state.json</code> &rarr; SHA-256 hash chain &amp; tamper detection.</li>
-          <li><strong>Repo Test Suites &amp; Adapter:</strong> <code>tests/test_*.py</code> &rarr; runs live <code>pytest</code>; <code>track4_service.py</code> &rarr; runs Track-4-Toolkit validator + ML-KEM-768 proof.</li>
-          <li><strong>JSON Schemas &amp; Media Files:</strong> envelopes, key states, approvals, images/PDFs/scripts (&le; 20 MiB + magic bytes).</li>
-        </ul>
-
-        <div id="bundle-dropzone" class="dropzone" onclick="document.getElementById('bundle-picker').click()">
-          <div style="font-weight:700;font-size:13.5px;">Click to Choose Test Files or Drag &amp; Drop Here</div>
-          <div class="mono" style="color:var(--muted);font-size:11.5px;margin-top:4px;">Supports multiple files at once (CSV, JSON, LOG, PY, PNG, PDF, SH...)</div>
-          <input id="bundle-picker" type="file" multiple style="display:none;" onchange="handleBundleFiles(this.files)" />
-        </div>
-        <div id="bundle-chips" class="file-chips"></div>
-        <div class="btn-row" style="margin-top:12px;">
-          <button class="act primary" id="btn-check-bundle" onclick="checkSelectedBundle()">Check Uploaded Test Files</button>
-          <button class="act" onclick="clearBundleFiles()">Clear Selection</button>
-        </div>
+<!-- ── MAIN DASHBOARD APP SHELL ── -->
+<div id="app-shell" class="app-shell">
+  <aside id="sidebar" class="sidebar" aria-label="Primary Navigation">
+    <div class="sidebar-brand">
+      <div class="shield-box" style="width:32px;height:32px;border-radius:8px;" aria-hidden="true">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M12 2L4 5.5V11.5C4 16.8 7.4 21.5 12 23C16.6 21.5 20 16.8 20 11.5V5.5L12 2Z" />
+          <path d="M9 12.2L11 14.2L15.5 9.7" />
+        </svg>
       </div>
-
-      <div class="card">
-        <h2>Repository Pytest Suites &amp; Track-4-Toolkit Runner</h2>
-        <p class="sub">Run verified test files from <code>tests/</code> or run the official <code>Track-4-Toolkit/validate.py</code> lost-device harness directly.</p>
-        <div class="btn-row" style="margin-bottom:8px;">
-          <button class="act primary" onclick="runSelectedTests(false)">Run Checked Suites (pytest)</button>
-          <button class="act success" onclick="runSelectedTests(true)">Run Track-4-Toolkit Validator</button>
-          <button class="act purple" onclick="runAllPytestSuites()">Run Full Pytest Suite</button>
-        </div>
-        <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center;">
-          <button class="act" onclick="toggleAllTests(true)">Select All</button>
-          <button class="act" onclick="toggleAllTests(false)">Select None</button>
-          <span id="repo-tests-meta" class="mono" style="color:var(--muted);">Loading test suites...</span>
-        </div>
-        <div id="repo-tests-list" class="test-list">Loading...</div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>
-        <span>File &amp; Test Suite Verification Results</span>
-        <span id="bundle-status-badge" class="badge info">Waiting for files or test run</span>
-      </h2>
-      <div id="bundle-verdict" class="verdict-box">
-        <div>
-          <div class="verdict-title">No files checked yet</div>
-          <div class="verdict-sub">Drop test files on the left or run a pytest / Track-4-Toolkit check on the right.</div>
-        </div>
-      </div>
-      <div id="bundle-results-wrap" style="overflow-x:auto;margin-bottom:12px;"></div>
-      <div id="bundle-triage-wrap" style="overflow-x:auto;margin-bottom:12px;"></div>
-      <pre class="console" id="bundle-raw-out" style="max-height:260px;">Detailed JSON, pytest output, or Track-4-Toolkit validator output will appear here.</pre>
-    </div>
-  </div>
-
-  <!-- TAB 3: PQC MESSAGING & FILE GUARD -->
-  <div id="tab-messaging" class="tab-panel">
-    <div class="grid-2">
       <div>
-        <div class="card" style="margin-bottom:16px;">
-          <h2>Encrypted Envelope &amp; Cryptographic Agility</h2>
-          <p class="sub">Test standard Track 4 hybrid handshakes (<code>v1</code>) or multi-family post-quantum defense (<code>v2-paranoid</code> combining lattice ML-KEM-1024, code-based HQC-256, and hash-based SLH-DSA).</p>
-          <div class="row-3">
-            <div class="field">
-              <label>Sender</label>
-              <input id="msg-sender" value="alice" />
+        <div class="sidebar-wordmark">TRUST, BUT VERIFY</div>
+        <div class="sidebar-tagline">Track 4 Zero-Trust PQC</div>
+      </div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-group">Main Menu</div>
+      <button class="nav-btn active" data-view="dashboard" onclick="goView('dashboard')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5L12 3l9 7.5V20a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-btn" data-view="tests" onclick="goView('tests')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        <span>Test Files &amp; Suites</span>
+      </button>
+      <button class="nav-btn" data-view="messaging" onclick="goView('messaging')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <span>Secure Messaging</span>
+      </button>
+      <button class="nav-btn" data-view="threats" onclick="goView('threats')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.3 3.9L2.8 17a2 2 0 001.7 3h15a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+        <span>Threat Detection</span>
+      </button>
+
+      <div class="nav-group">Security</div>
+      <button class="nav-btn" data-view="devices" onclick="goView('devices')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/></svg>
+        <span>Devices &amp; Authority</span>
+      </button>
+      <button class="nav-btn" data-admin="true" data-view="keys" onclick="goView('keys')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M21 2l-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/></svg>
+        <span>Key Management</span>
+      </button>
+      <button class="nav-btn" data-view="audit" onclick="goView('audit')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>
+        <span>Audit Logs</span>
+      </button>
+      <button class="nav-btn" data-admin="true" data-view="recovery" onclick="goView('recovery')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 103-6.7L3 8m0-5v5h5"/></svg>
+        <span>Backup &amp; Recovery</span>
+      </button>
+
+      <div class="nav-group">Platform</div>
+      <button class="nav-btn" data-view="adapter" onclick="goView('adapter')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 17l6-6-6-6M12 19h8"/></svg>
+        <span>Track-4 Adapter</span>
+      </button>
+      <button class="nav-btn" data-view="guide" onclick="goView('guide')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span>Threat Model &amp; Guide</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-row">
+        <div id="sb-avatar" class="avatar">AD</div>
+        <div class="user-meta">
+          <div id="sb-name" class="user-name">Security Admin</div>
+          <div id="sb-email" class="user-email">admin@tbv.local</div>
+        </div>
+        <button type="button" class="btn" style="padding:6px 8px;" title="Sign out" aria-label="Sign out" onclick="signOut()">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4m7 14l5-5-5-5m5 5H9"/></svg>
+        </button>
+      </div>
+      <button type="button" class="btn" style="width:100%;" onclick="openAccountSwitcher()">Switch Account</button>
+    </div>
+  </aside>
+
+  <div class="main-col">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" class="menu-toggle" aria-label="Toggle Menu" onclick="document.getElementById('sidebar').classList.toggle('mobile-open')">&#9776;</button>
+        <h2 id="topbar-title" class="topbar-title">Dashboard</h2>
+        <span id="hdr-role-badge" class="badge blue">ADMIN</span>
+        <span id="hdr-pqc" class="badge">ML-KEM-768 + ML-DSA-65</span>
+      </div>
+
+      <div class="topbar-right">
+        <div class="search-wrap" id="search-wrap">
+          <div class="search-box">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input id="global-search" placeholder="Search views, keys, logs, or tests..." autocomplete="off" oninput="onGlobalSearch()" onfocus="onGlobalSearch()" />
+          </div>
+          <div id="search-dropdown" class="search-dropdown"></div>
+        </div>
+        <button type="button" class="btn btn-primary" id="btn-run-all" onclick="runAll12()">Run All 12 Scenarios</button>
+        <button type="button" class="btn" onclick="refreshState()" title="Refresh cluster telemetry" aria-label="Refresh telemetry">Refresh</button>
+        <a class="btn" href="/docs" target="_blank">API Docs</a>
+      </div>
+    </header>
+
+    <main class="page-body">
+
+      <!-- VIEW 1: DASHBOARD -->
+      <section id="view-dashboard" class="view-panel active">
+        <div class="page-head">
+          <div>
+            <h2>Security Overview</h2>
+            <p>Real-time cluster posture across post-quantum transport, device locks, hash-chained audit logs, and deterministic detection.</p>
+          </div>
+          <button class="btn btn-soft" onclick="goView('tests')">Drop Test Files to Verify &rarr;</button>
+        </div>
+
+        <div class="grid-4">
+          <div class="stat-card">
+            <div class="stat-label">Cluster Nodes Online</div>
+            <div class="stat-value" id="kpi-nodes">3 / 3</div>
+            <div class="stat-meta" id="kpi-uptime">uptime: --</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Track 4 Objectives Verified</div>
+            <div class="stat-value" id="kpi-score">0 / 12</div>
+            <div class="stat-meta">Automated scenario suite</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Audit Hash Chain</div>
+            <div class="stat-value" id="kpi-chain">VALID</div>
+            <div class="stat-meta" id="kpi-records">0 records</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Security Guardrails</div>
+            <div class="stat-value" id="kpi-policy">20 MiB / 1 Dev</div>
+            <div class="stat-meta">Zero AI/ML deterministic rules</div>
+          </div>
+        </div>
+
+        <div class="grid-3" id="nodes-grid"></div>
+
+        <div class="card">
+          <h3>
+            <span>Track 4 Verification Checklist</span>
+            <span class="mono" id="chk-count-lbl">0 / 12 Verified</span>
+          </h3>
+          <div class="progress-track"><div id="chk-bar" class="progress-fill"></div></div>
+          <div id="checklist-grid" class="checklist-grid" style="margin-top:14px;"></div>
+        </div>
+      </section>
+
+      <!-- VIEW 2: TEST FILES & SUITES -->
+      <section id="view-tests" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Test Files &amp; Automated Suites</h2>
+            <p>Drop your own <code>events.csv</code> + <code>approvals.json</code> + <code>labels.csv</code>, exported <code>*.log</code> hash chains, <code>track4_service.py</code>, or run repo <code>pytest</code> suites.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Upload or Drop Test Files</h3>
+            <p class="sub">Supports multi-file upload: CSV logs, approval JSONs, audit chains, JSON schemas, media/documents (&le; 20 MiB), and repo <code>.py</code> test files.</p>
+            <div id="bundle-dropzone" class="dropzone" onclick="document.getElementById('bundle-picker').click()">
+              <strong style="color:var(--blue-text);font-size:14px;">Click to Choose Test Files or Drag &amp; Drop Here</strong>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Multiple files supported (e.g. events.csv + approvals.json + labels.csv)</div>
+              <input id="bundle-picker" type="file" multiple style="display:none;" onchange="handleBundleFiles(this.files)" />
             </div>
-            <div class="field">
-              <label>Recipient</label>
-              <select id="msg-recipient">
-                <option value="bob" selected>bob (node-b)</option>
-                <option value="charlie">charlie (node-c)</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>PQC Security Profile</label>
-              <select id="msg-profile">
-                <option value="v1" selected>track4/v1 (ML-KEM-768 + ML-DSA-65)</option>
-                <option value="v2-paranoid">track4/v2-paranoid (ML-KEM-1024 + HQC-256 + SLH-DSA)</option>
-              </select>
+            <div id="bundle-chips" class="file-chips"></div>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="checkSelectedBundle()">Check Uploaded Files</button>
+              <button class="btn" onclick="clearBundleFiles()">Clear</button>
             </div>
           </div>
-          <div class="field">
-            <label>Confidential Payload Message</label>
-            <input id="msg-input" value="Approve wire #8841: $25,000 Treasury -> Escrow-B" />
-          </div>
-          <div class="btn-row">
-            <button class="act primary" onclick="sendTransfer()">Send PQC Envelope</button>
-            <button class="act danger" onclick="apiCall('/api/sandbox/attack/replay', {}, 'msg-out', 'msg-verdict')">Simulate Replay Attack</button>
-            <button class="act danger" onclick="apiCall('/api/sandbox/attack/recipient-swap', {}, 'msg-out', 'msg-verdict')">Simulate Recipient Swap</button>
-          </div>
-          <div class="btn-row">
-            <button class="act warn" onclick="apiCall('/api/sandbox/attack/forward-secrecy', {}, 'msg-out', 'msg-verdict')">Verify Forward Secrecy</button>
-            <button class="act warn" onclick="apiCall('/api/sandbox/attack/session-resumption', {}, 'msg-out', 'msg-verdict')">Test Session Hijack</button>
-            <button class="act success" onclick="apiCall('/api/sandbox/attack/loss-reorder', {}, 'msg-out', 'msg-verdict')">Test Loss &amp; Reordering</button>
+
+          <div class="card">
+            <h3>Repository Pytest &amp; Track-4-Toolkit Runner</h3>
+            <p class="sub">Run official repository verification suites directly from the console.</p>
+            <div class="btn-row" style="margin-top:0;margin-bottom:10px;">
+              <button class="btn btn-primary" onclick="runSelectedTests(false)">Run Selected Suites</button>
+              <button class="btn btn-soft" onclick="runSelectedTests(true)">Run Track-4-Toolkit Validator</button>
+              <button class="btn" onclick="runAllPytestSuites()">Run Full Suite</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+              <button class="btn" style="padding:4px 9px;font-size:12px;" onclick="toggleAllTests(true)">Select All</button>
+              <button class="btn" style="padding:4px 9px;font-size:12px;" onclick="toggleAllTests(false)">None</button>
+              <span id="repo-tests-meta" class="mono" style="color:var(--text-muted);">Loading suites...</span>
+            </div>
+            <div id="repo-tests-list" class="test-list">Loading...</div>
           </div>
         </div>
 
         <div class="card">
-          <h2>Zero-Trust File Sharing Policy Guard (Max 20 MiB + Magic Bytes)</h2>
-          <p class="sub">Validates extension allowlist, MIME match, file header magic bytes, and 20 MiB cap, then seals chunks through <code>SecureCryptoSystem</code>.</p>
-          <div class="field">
-            <label>Upload a Shared Media/Document File (Images, Audio, Video, PDF, TXT, CSV, JSON, MD &le; 20 MiB)</label>
-            <input id="file-picker" type="file" />
+          <h3>
+            <span>Verification Results</span>
+            <span id="bundle-status-badge" class="badge blue">Ready</span>
+          </h3>
+          <div id="bundle-verdict" class="verdict-box">
+            <div class="verdict-title">No files checked yet</div>
+            <div class="verdict-sub">Upload files on the left or run a suite on the right to see results.</div>
           </div>
-          <div class="btn-row">
-            <button class="act primary" onclick="uploadAndVerifyFile()">Encrypt &amp; Verify Selected File</button>
-            <button class="act success" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'valid_png'}, 'msg-out', 'msg-verdict')">Preset: Valid PNG</button>
-            <button class="act success" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'valid_pdf'}, 'msg-out', 'msg-verdict')">Preset: Valid PDF</button>
-          </div>
-          <div class="btn-row">
-            <button class="act danger" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'spoofed_exe'}, 'msg-out', 'msg-verdict')">Attack: Spoofed EXE as .png</button>
-            <button class="act danger" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'disallowed_sh'}, 'msg-out', 'msg-verdict')">Attack: Disallowed .sh Script</button>
-            <button class="act danger" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'oversized_21mb'}, 'msg-out', 'msg-verdict')">Attack: &gt;20 MiB Payload</button>
-          </div>
+          <div id="bundle-results-wrap" style="overflow-x:auto;margin-bottom:10px;"></div>
+          <div id="bundle-triage-wrap" style="overflow-x:auto;margin-bottom:10px;"></div>
+          <details class="raw-json">
+            <summary>View Technical Output &amp; Raw Logs</summary>
+            <pre class="console" id="bundle-raw-out">Detailed pytest / validator output will appear here.</pre>
+          </details>
         </div>
-      </div>
+      </section>
 
-      <div class="card">
-        <h2>Cryptographic Verification Inspector</h2>
-        <div id="msg-verdict" class="verdict-box">
+      <!-- VIEW 3: SECURE MESSAGING & FILE GUARD -->
+      <section id="view-messaging" class="view-panel">
+        <div class="page-head">
           <div>
-            <div class="verdict-title">Ready for PQC Messaging or File Guard Check</div>
-            <div class="verdict-sub">Select a profile, upload a file, or trigger an attack on the left.</div>
+            <h2>Secure Messaging &amp; File Sharing</h2>
+            <p>Post-quantum encrypted transport with recipient binding, forward secrecy, and 20 MiB media magic-byte enforcement.</p>
+          </div>
+          <div class="btn-row" style="margin-top:0;">
+            <button class="btn btn-primary" onclick="runMessagingSuite()">Run Delivery &amp; Attack Checks</button>
           </div>
         </div>
-        <pre class="console" style="max-height:460px;" id="msg-out">Click any action on the left to execute live PQC operations, file magic-byte enforcement, or MITM attack checks.</pre>
-      </div>
-    </div>
-  </div>
 
-  <!-- TAB 4: KEY LIFECYCLE, DEVICES & AUTHORITY -->
-  <div id="tab-lifecycle" class="tab-panel">
-    <div class="grid-2" style="margin-bottom:16px;">
-      <div class="card">
-        <h2>Atomic Rotation, Revocation Broadcast &amp; Recovery</h2>
-        <p class="sub">Rotate keys with configurable grace window, enforce hard cutoffs on all 3 nodes, revoke + measure propagation latency, or test WAL crash recovery &amp; HMAC-SHA3-512 backups.</p>
-        <div class="field">
-          <label>Grace Period Seconds (e.g. 3.0s for live testing)</label>
-          <input id="grace-sec" type="number" step="0.5" min="0.5" max="30" value="3.0" />
-        </div>
-        <div class="btn-row">
-          <button class="act primary" onclick="apiCall('/api/sandbox/lifecycle/rotate', {grace_seconds: parseFloat(document.getElementById('grace-sec').value || '3')}, 'life-out', 'life-verdict')">1. Rotate Key (Start Grace)</button>
-          <button class="act warn" onclick="apiCall('/api/sandbox/lifecycle/test-old-key', {}, 'life-out', 'life-verdict')">2. Test Old Key (All 3 Nodes)</button>
-          <button class="act danger" onclick="apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'revoke'}, 'life-out', 'life-verdict')">3. Revoke Alice Key</button>
-          <button class="act success" onclick="apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'reenroll'}, 'life-out', 'life-verdict')">4. Re-Enroll New Device</button>
-        </div>
-        <div class="btn-row" style="margin-top:10px;">
-          <button class="act warn" onclick="apiCall('/api/sandbox/resilience/crash-recovery', {}, 'life-out', 'life-verdict')">Simulate WAL Crash Recovery</button>
-          <button class="act success" onclick="apiCall('/api/sandbox/resilience/backup', {tamper: false}, 'life-out', 'life-verdict')">Verify Signed Backup</button>
-          <button class="act danger" onclick="apiCall('/api/sandbox/resilience/backup', {tamper: true}, 'life-out', 'life-verdict')">Corrupt 1 Byte &amp; Restore</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>1-Device Lock, Timezone Guard &amp; Authority Rollback</h2>
-        <p class="sub">Enforces 1 device/user (<code>SingleDeviceRegistry</code>), rejects cross-timezone login jumps (<code>TimezoneMismatchError</code>), and auto-reverts suspicious admin console edits (<code>AuthorityMonitor</code>).</p>
-        <div class="row-3">
-          <div class="field">
-            <label>User Identity</label>
-            <input id="pol-user" value="alice" />
+        <div class="grid-4">
+          <div class="stat-card">
+            <div class="stat-label">Encrypted Envelopes</div>
+            <div class="stat-value" id="msg-kpi-count">0</div>
+            <div class="stat-meta">Signed &amp; AEAD sealed</div>
           </div>
-          <div class="field">
-            <label>Device ID</label>
-            <input id="pol-dev" value="dev-alice-laptop-01" />
+          <div class="stat-card">
+            <div class="stat-label">Ephemeral Keys Wiped</div>
+            <div class="stat-value" id="msg-kpi-wiped">0</div>
+            <div class="stat-meta">Forward secrecy active</div>
           </div>
-          <div class="field">
-            <label>Request Timezone</label>
-            <select id="pol-tz">
-              <option value="Asia/Kolkata" selected>Asia/Kolkata (Home)</option>
-              <option value="America/New_York">America/New_York (Anomalous Jump)</option>
-              <option value="Europe/London">Europe/London (Anomalous Jump)</option>
-            </select>
+          <div class="stat-card">
+            <div class="stat-label">Active Crypto Suites</div>
+            <div class="stat-value">v1 / v2</div>
+            <div class="stat-meta">ML-KEM-768 &amp; HQC-256 agility</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Shared File Policy</div>
+            <div class="stat-value">20 MiB</div>
+            <div class="stat-meta">Media + magic-byte guard</div>
           </div>
         </div>
-        <div class="btn-row">
-          <button class="act success" onclick="runDeviceTz('register_primary')">Bind Primary Device</button>
-          <button class="act danger" onclick="runSecondDevice()">Attack: Add 2nd Device</button>
-          <button class="act warn" onclick="runDeviceTz('timezone_check')">Test Timezone Access</button>
-          <button class="act" onclick="runDeviceTz('reset')">Reset Policy DB</button>
-        </div>
-        <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
-        <div class="row-2">
-          <div class="field">
-            <label>Suspicious Console Mutation Target</label>
-            <select id="auth-action">
-              <option value="DISABLE_AUDIT">DISABLE_AUDIT (audit_enabled=false)</option>
-              <option value="DISABLE_TIMEZONE_CHECK">DISABLE_TIMEZONE_CHECK</option>
-              <option value="MODIFY_SECURITY_POLICY">Raise Device Limit (max_devices=5)</option>
-              <option value="BYPASS_POLICY">Raise File Limit (100 MB)</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Elevated Role</label>
-            <select id="auth-role">
-              <option value="admin" selected>admin (monitored)</option>
-              <option value="security-operator">security-operator (monitored)</option>
-            </select>
-          </div>
-        </div>
-        <div class="btn-row">
-          <button class="act primary" onclick="runAuthority('grant')">Grant Elevated Authority</button>
-          <button class="act success" onclick="runAuthority('routine')">Routine Console Update</button>
-          <button class="act danger" onclick="runAuthority('suspicious')">Attempt Suspicious Mutation</button>
-        </div>
-      </div>
-    </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>Live Device, Authority &amp; Console Snapshot State</h2>
-        <div id="id-status-box" style="margin-bottom:10px;"></div>
-        <div id="policy-status-box"></div>
-      </div>
-      <div class="card">
-        <h2>Lifecycle &amp; Policy Output</h2>
-        <div id="life-verdict" class="verdict-box">
-          <div>
-            <div class="verdict-title">Ready for Key Lifecycle or Policy Enforcement Check</div>
-            <div class="verdict-sub">Active keys, device locks, and authority snapshots update live.</div>
-          </div>
-        </div>
-        <pre class="console" id="life-out">Trigger rotation, revocation, device/timezone checks, or suspicious console mutation tests.</pre>
-      </div>
-    </div>
-  </div>
-
-  <!-- TAB 5: AUDIT & TOOLKIT ADAPTER -->
-  <div id="tab-audit" class="tab-panel">
-    <div class="grid-2" style="margin-bottom:16px;">
-      <div class="card">
-        <h2>
-          <span>Cryptographic Audit Hash Chain</span>
-          <span id="audit-badge" class="badge ok">Checking...</span>
-        </h2>
-        <p class="sub">Continuous SHA-256 chaining (<code>H_i = SHA-256(H_{i-1} || canonical(E_i))</code>) with newline/JSON escape protection and uploaded log file verification.</p>
-        <div class="btn-row" style="margin-bottom:10px;">
-          <button class="act primary" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'verify'}, 'audit-out', 'audit-verdict')">Verify Cluster Chain</button>
-          <button class="act warn" onclick="apiCall('/api/sandbox/audit/injection', {}, 'audit-out', 'audit-verdict')">Test Newline/JSON Injection</button>
-          <button class="act danger" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'tamper'}, 'audit-out', 'audit-verdict')">Mutate 1 Byte</button>
-          <button class="act success" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'restore'}, 'audit-out', 'audit-verdict')">Restore Clean Chain</button>
-        </div>
-        <div class="field">
-          <label>Verify an Exported Audit Log or Adapter State File (<code>*.log</code>, <code>*.jsonl</code>, <code>state.json</code>)</label>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <input id="audit-file-picker" type="file" accept=".log,.jsonl,.json,.txt" />
-            <button class="act primary" style="white-space:nowrap;" onclick="uploadAuditLogFile()">Check Log File</button>
-          </div>
-        </div>
-        <div id="audit-verdict" class="verdict-box">
-          <div>
-            <div class="verdict-title">Hash Chain Ready</div>
-            <div class="verdict-sub">Run verification, injection, tamper detection, or upload an audit log file.</div>
-          </div>
-        </div>
-        <pre class="console" id="audit-out" style="max-height:170px;">Run chain verification, newline injection test, 1-byte mutation, or upload an audit log file.</pre>
-      </div>
-
-      <div class="card">
-        <h2>Official Track-4 Adapter Runner (<code>track4_service.py</code>)</h2>
-        <p class="sub">Executes real subprocess calls against <code>track4_service.py</code> using isolated <code>TRACK4_STATE_DIR</code> and live ML-KEM-768 + HMAC-SHA256 <code>protected_read</code> verification.</p>
-        <div class="row-3">
-          <div class="field"><label>Actor</label><input id="adp-actor" value="maya" /></div>
-          <div class="field"><label>Asset ID</label><input id="adp-asset" value="brief" /></div>
-          <div class="field"><label>Request ID</label><input id="adp-reqid" value="req-gui-01" /></div>
-        </div>
-        <div class="field"><label>Asset Content Body</label><input id="adp-body" value="Classified Track-4 Zero-Trust Brief" /></div>
-        <div class="btn-row">
-          <button class="act primary" onclick="runAdapter('full_suite')">Run Full Lost-Device + ML-KEM-768 Suite</button>
-          <button class="act success" onclick="runAdapter('single', 'setup')">Setup</button>
-          <button class="act" onclick="runAdapter('single', 'read')">Read</button>
-          <button class="act purple" onclick="runAdapter('single', 'protected_read')">Protected Read</button>
-          <button class="act danger" onclick="runAdapter('single', 'revoke')">Revoke</button>
-          <button class="act warn" onclick="runAdapter('single', 'audit')">Audit</button>
-        </div>
-        <pre class="console" id="adapter-out" style="margin-top:10px;max-height:205px;">Click "Run Full Lost-Device + ML-KEM-768 Suite" or step through setup -&gt; read -&gt; protected_read -&gt; revoke -&gt; audit.</pre>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Live Forensic Audit Chain Records</h2>
-      <div style="overflow-x:auto;">
-        <table>
-          <thead>
-            <tr><th>Seq</th><th>Service</th><th>Action</th><th>Subject / Actor</th><th>Status</th><th>Entry Hash</th></tr>
-          </thead>
-          <tbody id="audit-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <!-- TAB 6: DETECTOR & PRACTICE ANALYZER -->
-  <div id="tab-detector" class="tab-panel">
-    <div class="grid-2" style="margin-bottom:16px;">
-      <div class="card">
-        <h2>Explainable Rules, Lateral Movement DAG &amp; Clock Skew</h2>
-        <p class="sub">100% deterministic graph &amp; rule engine (zero AI/ML). Flags privilege abuse, unauthorized service hops, and out-of-order timing skew.</p>
-        <div class="btn-row">
-          <button class="act danger" onclick="apiCall('/api/sandbox/detector/lateral-movement', {}, 'det-out', 'det-verdict')">Lateral Hop (audit &rarr; node-c)</button>
-          <button class="act danger" onclick="apiCall('/api/sandbox/detector/privilege-escalation', {}, 'det-out', 'det-verdict')">Privilege Gain (guest &rarr; admin)</button>
-          <button class="act warn" onclick="apiCall('/api/sandbox/detector/clock-skew', {}, 'det-out', 'det-verdict')">Clock Skew (&plusmn;2000ms)</button>
-          <button class="act primary" onclick="apiCall('/api/sandbox/detector/eval-metrics', {}, 'det-out', 'det-verdict')">Benchmark (550 Events)</button>
-        </div>
-        <div class="dag-wrap">
-          <div class="mono" style="color:var(--muted);margin-bottom:6px;font-size:11px;">MICROSERVICE ACCESS TOPOLOGY DAG (GREEN = ALLOWED, RED = LATERAL BLOCKED)</div>
-          <svg viewBox="0 0 640 165" width="100%" height="150" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <marker id="arr-ok" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#10b981"/></marker>
-              <marker id="arr-bad" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#ef4444"/></marker>
-            </defs>
-            <line x1="120" y1="45" x2="255" y2="45" stroke="#10b981" stroke-width="2" marker-end="url(#arr-ok)"/>
-            <line x1="120" y1="55" x2="255" y2="120" stroke="#10b981" stroke-width="2" marker-end="url(#arr-ok)"/>
-            <line x1="365" y1="45" x2="495" y2="45" stroke="#10b981" stroke-width="2" marker-end="url(#arr-ok)"/>
-            <line x1="365" y1="120" x2="495" y2="120" stroke="#10b981" stroke-width="2" marker-end="url(#arr-ok)"/>
-            <line x1="495" y1="115" x2="370" y2="55" stroke="#ef4444" stroke-width="2.5" stroke-dasharray="5,4" marker-end="url(#arr-bad)"/>
-            <text x="415" y="96" fill="#fca5a5" font-size="10" font-family="monospace">BLOCKED DAG EDGE</text>
-
-            <rect x="16" y="25" width="104" height="40" rx="8" fill="#151f31" stroke="#38bdf8"/>
-            <text x="68" y="49" fill="#e2e8f0" text-anchor="middle" font-size="12" font-family="monospace">api-gateway</text>
-
-            <rect x="260" y="25" width="105" height="40" rx="8" fill="#151f31" stroke="#10b981"/>
-            <text x="312" y="49" fill="#e2e8f0" text-anchor="middle" font-size="12" font-family="monospace">node-c</text>
-
-            <rect x="260" y="100" width="105" height="40" rx="8" fill="#151f31" stroke="#10b981"/>
-            <text x="312" y="124" fill="#e2e8f0" text-anchor="middle" font-size="12" font-family="monospace">auth-service</text>
-
-            <rect x="500" y="25" width="120" height="40" rx="8" fill="#151f31" stroke="#a78bfa"/>
-            <text x="560" y="49" fill="#e2e8f0" text-anchor="middle" font-size="12" font-family="monospace">detector</text>
-
-            <rect x="500" y="100" width="120" height="40" rx="8" fill="#151f31" stroke="#f59e0b"/>
-            <text x="560" y="124" fill="#fcd34d" text-anchor="middle" font-size="12" font-family="monospace">audit-service</text>
-          </svg>
-        </div>
-        <div id="eval-metrics-box" style="margin-top:12px;"></div>
-        <div id="det-verdict" class="verdict-box" style="margin-top:10px;">
-          <div>
-            <div class="verdict-title">Detector Ready</div>
-            <div class="verdict-sub">Run a rule trigger or the 550-event benchmark.</div>
-          </div>
-        </div>
-        <pre class="console" id="det-out" style="max-height:170px;">Run lateral movement, privilege escalation, clock-skew ordering, or F1/MTTA benchmark.</pre>
-      </div>
-
-      <div class="card">
-        <h2>Live Explainable Alerts Feed</h2>
-        <div id="alerts-feed" style="max-height:560px;overflow:auto;"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>
-        <span>Event Timeline &amp; Change-Approval Triage (<code>events.csv</code> + <code>approvals.json</code> + <code>labels.csv</code>)</span>
-        <span id="practice-badge" class="badge info">Not run yet</span>
-      </h2>
-      <p class="sub">Upload test files directly (<code>events.csv</code>, <code>approvals.json</code>, optional <code>labels.csv</code>) or analyze the Track-4 practice set.</p>
-      <div class="row-3" style="margin-bottom:10px;">
-        <div class="field"><label>Events CSV File (<code>events.csv</code>)</label><input id="prac-events-file" type="file" accept=".csv,.txt" /></div>
-        <div class="field"><label>Approvals JSON File (<code>approvals.json</code>)</label><input id="prac-approvals-file" type="file" accept=".json" /></div>
-        <div class="field"><label>Expected Labels CSV (optional <code>labels.csv</code>)</label><input id="prac-labels-file" type="file" accept=".csv,.txt" /></div>
-      </div>
-      <div class="btn-row" style="margin-bottom:10px;">
-        <button class="act success" onclick="analyzeUploadedPracticeFiles()">Check Uploaded Practice Files</button>
-        <button class="act primary" onclick="runPracticeAnalysis(true)">Analyze Built-in / Local Practice Dataset</button>
-        <button class="act" onclick="toggleCustomCsv()">Toggle Paste Textareas</button>
-      </div>
-      <div id="custom-csv-box" style="display:none;margin-bottom:12px;">
         <div class="grid-2">
-          <div class="field">
-            <label>Paste Events CSV</label>
-            <textarea id="custom-events-csv" placeholder="event_id,event_time_utc,received_time_utc,source_clock_offset_ms,actor,source_service,target_service,action,role_before,role_after,outcome,approval_id,session_id,correlation_id"></textarea>
+          <div class="card">
+            <h3>Send Encrypted Envelope</h3>
+            <p class="sub">Establishes an ephemeral KEM shared secret with recipient AAD binding and post-quantum signature.</p>
+            <div class="row-3">
+              <div class="field"><label for="msg-sender">Sender</label><input id="msg-sender" value="alice" /></div>
+              <div class="field">
+                <label for="msg-recipient">Recipient</label>
+                <select id="msg-recipient">
+                  <option value="bob" selected>bob (node-b)</option>
+                  <option value="charlie">charlie (node-c)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="msg-profile">PQC Profile</label>
+                <select id="msg-profile">
+                  <option value="v1" selected>track4/v1 (ML-KEM-768)</option>
+                  <option value="v2-paranoid">track4/v2-paranoid (HQC + SLH-DSA)</option>
+                </select>
+              </div>
+            </div>
+            <div class="field"><label for="msg-input">Message Plaintext</label><input id="msg-input" value="Approve transfer #8841: $25,000 Escrow-B" /></div>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="sendTransfer()">Send Protected Message</button>
+              <button class="btn btn-warn" onclick="apiCall('/api/sandbox/attack/replay', {}, 'msg-out', 'msg-verdict')">Test Replay</button>
+              <button class="btn btn-warn" onclick="apiCall('/api/sandbox/attack/recipient-swap', {}, 'msg-out', 'msg-verdict')">Test Recipient Swap</button>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/attack/forward-secrecy', {}, 'msg-out', 'msg-verdict')">Verify Forward Secrecy</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/attack/session-resumption', {}, 'msg-out', 'msg-verdict')">Test Session Hijack</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/attack/loss-reorder', {}, 'msg-out', 'msg-verdict')">Test Loss &amp; Reordering</button>
+            </div>
           </div>
-          <div class="field">
-            <label>Paste approvals.json</label>
-            <textarea id="custom-approvals-json">{"changes": []}</textarea>
+
+          <div class="card">
+            <h3>Zero-Trust File Sharing Guard &amp; Verification</h3>
+            <p class="sub">Checks extension, MIME, magic bytes, and 20 MiB cap before chunked encryption.</p>
+            <div class="field">
+              <label for="file-picker">Select Media/Document File (&le; 20 MiB)</label>
+              <input id="file-picker" type="file" />
+            </div>
+            <div class="btn-row" style="margin-bottom:12px;">
+              <button class="btn btn-primary" onclick="uploadAndVerifyFile()">Encrypt &amp; Verify File</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'valid_png'}, 'msg-out', 'msg-verdict')">Valid PNG</button>
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'spoofed_exe'}, 'msg-out', 'msg-verdict')">Spoofed EXE</button>
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/file-share/validate', {preset:'oversized_21mb'}, 'msg-out', 'msg-verdict')">&gt;20 MiB Attack</button>
+            </div>
+            <div id="msg-verdict" class="verdict-box">
+              <div class="verdict-title">Checks ready</div>
+              <div class="verdict-sub">Send a message, upload a file, or trigger any delivery check.</div>
+            </div>
+            <details class="raw-json">
+              <summary>View Cryptographic Verdict JSON</summary>
+              <pre class="console" id="msg-out">Verification output appears here.</pre>
+            </details>
           </div>
         </div>
-        <button class="act success" onclick="runPracticeAnalysis(false)">Analyze Pasted Events &amp; Approvals</button>
-      </div>
-      <div id="practice-summary" style="margin-bottom:10px;"></div>
-      <div style="overflow-x:auto;max-height:360px;">
-        <table>
-          <thead>
-            <tr><th>Event</th><th>Actor</th><th>Service Edge</th><th>Corrected UTC</th><th>Offset</th><th>Classification</th><th>Explanation</th></tr>
-          </thead>
-          <tbody id="practice-tbody"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
 
-  <!-- TAB 7: HOW TO USE & THREAT MODEL -->
-  <div id="tab-threat" class="tab-panel">
-    <div class="card" style="margin-bottom:16px;">
-      <h2>How to Use Trust, But Verify (GUI + CLI Quick Reference)</h2>
-      <p class="sub">Every control in this web console maps directly to real cryptographic, identity, audit, and detector primitives verifiable from the command line.</p>
-      <div class="grid-2">
-        <div>
-          <h3>CLI Verification Commands (run inside <code>.venv</code>)</h3>
-          <div class="cmd-line"><code>python -m src.cli demo-replay &amp;&amp; python -m src.cli demo-forward-secrecy</code><button class="act" onclick="copyText('python -m src.cli demo-replay && python -m src.cli demo-forward-secrecy')">Copy</button></div>
-          <div class="cmd-line"><code>python -m src.cli demo-chunked-loss &amp;&amp; python -m src.cli demo-resumption-binding</code><button class="act" onclick="copyText('python -m src.cli demo-chunked-loss && python -m src.cli demo-resumption-binding')">Copy</button></div>
-          <div class="cmd-line"><code>python -m src.cli verify-logs &amp;&amp; python -m src.cli doc-check</code><button class="act" onclick="copyText('python -m src.cli verify-logs && python -m src.cli doc-check')">Copy</button></div>
-          <div class="cmd-line"><code>python ../Track-4-Toolkit/validate.py --entry ./track4_service.py</code><button class="act" onclick="copyText('python ../Track-4-Toolkit/validate.py --entry ./track4_service.py')">Copy</button></div>
-          <div class="cmd-line"><code>pytest tests/ -v</code><button class="act" onclick="copyText('pytest tests/ -v')">Copy</button></div>
+        <div class="card">
+          <h3>Encrypted Message Ledger</h3>
+          <p class="sub">Delivered envelopes with active suite and ephemeral key erasure confirmation.</p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead><tr><th>Message / Session ID</th><th>Sender</th><th>Recipient</th><th>Crypto Suite</th><th>Key Erasure</th><th>Latency</th><th>Status</th></tr></thead>
+              <tbody id="msg-ledger-tbody">
+                <tr><td colspan="7" style="color:var(--text-muted);text-align:center;padding:20px;">No envelopes sent yet. Send a protected message above to record one.</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div>
-          <h3>Interactive GUI Walkthrough</h3>
-          <ul style="color:var(--muted);padding-left:18px;font-size:12.5px;line-height:1.65;margin-top:4px;">
-            <li><strong>Step 1 (Tab 2 — Test Files):</strong> Drag &amp; drop <code>events.csv</code> + <code>approvals.json</code> + <code>labels.csv</code>, <code>*.log</code> files, or repo <code>tests/test_*.py</code> files — or run pytest / Track-4-Toolkit directly.</li>
-            <li><strong>Step 2 (Tab 3 — PQC &amp; Files):</strong> Send messages under <code>v1</code> or <code>v2-paranoid</code>, upload media/docs (&le; 20 MiB), and test replay &amp; swap rejection.</li>
-            <li><strong>Step 3 (Tab 4 — Keys &amp; Authority):</strong> Rotate/revoke keys across 3 nodes, test 1-device/timezone limits, and watch <code>AuthorityMonitor</code> revert suspicious mutations.</li>
-            <li><strong>Step 4 (Tab 5 — Audit &amp; Adapter):</strong> Verify or tamper hash chains, upload an exported <code>audit.log</code>, and run <code>track4_service.py</code> ML-KEM-768 <code>protected_read</code> checks.</li>
-            <li><strong>Step 5 (Tab 6 — Detector):</strong> Inspect lateral movement DAGs, benchmark F1/MTTA metrics, and upload practice log CSVs directly.</li>
-          </ul>
-        </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>1. Protected Assets &amp; Adversary Model</h2>
-        <div class="kv"><span>In-Flight Payloads</span><span>AES-256-GCM + Recipient Binding AAD</span></div>
-        <div class="kv"><span>Node Identity Keys</span><span>NIST ML-DSA-65 / Dual ML-DSA-87 + SLH-DSA</span></div>
-        <div class="kv"><span>Session Secrets</span><span>Ephemeral X25519 + ML-KEM-768 (+ HQC-256 in v2)</span></div>
-        <div class="kv"><span>File Shares &amp; Devices</span><span>20 MiB + Magic Bytes + 1 Device/User + Timezone</span></div>
-        <div class="kv"><span>Key State &amp; Backups</span><span>Fsynced WAL + HMAC-SHA3-512 snapshots</span></div>
-        <div class="kv"><span>Audit &amp; Console Config</span><span>SHA-256 hash chain + pre-change rollback snapshot</span></div>
-        <hr style="border:none;border-top:1px solid var(--border);margin:12px 0;" />
-        <h3>Threat Actors Addressed</h3>
-        <ul style="color:var(--muted);padding-left:18px;font-size:12.5px;">
-          <li><strong>Harvest-Now-Decrypt-Later (HNDL):</strong> Hybrid + multi-family PQC KEM prevents retroactive decryption.</li>
-          <li><strong>Network MITM:</strong> Replay cache, sequence monotonicity, chunked AAD, and recipient binding.</li>
-          <li><strong>Hijacked / Insider Admin:</strong> Timezone anomaly lock, 1-device cap, and <code>AuthorityMonitor</code> config rollback.</li>
-          <li><strong>Log-Injection Attacker:</strong> Newline/JSON escape sanitization + continuous SHA-256 chain verification.</li>
-        </ul>
-      </div>
-      <div class="card">
-        <h2>2. Trust Assumptions &amp; Honest System Limits</h2>
-        <ul style="color:var(--muted);padding-left:18px;font-size:12.5px;line-height:1.65;">
-          <li><strong>Zero AI/ML Hallucination:</strong> Detection relies purely on O(1) DAG edge checks and deterministic rules; zero model drift or training data bias.</li>
-          <li><strong>Clock-Skew Boundary (&plusmn;2000ms):</strong> Events within &plusmn;2000ms are buffered and ordered; extreme skew is preserved and flagged.</li>
-          <li><strong>SQLite &amp; File Locks:</strong> Adapter and policy databases use local <code>fcntl</code> / SQLite WAL locks; single-host persistence requires durable storage (<code>TRACK4_STATE_DIR</code>) in production.</li>
-          <li><strong>Python Heap Zeroization:</strong> Secret key wiping uses best-effort mutable <code>bytearray</code> clearing and reference dropping; production deployment should pair with KMS/HSM sealing.</li>
-          <li><strong>Metadata Visibility:</strong> Envelope routing fields (<span class="mono">sender_id</span>, <span class="mono">recipient_id</span>) remain visible for recipient-binding checks.</li>
-        </ul>
-      </div>
-    </div>
+      <!-- VIEW 4: THREAT DETECTION -->
+      <section id="view-threats" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Explainable Threat Detection &amp; Practice Triage</h2>
+            <p>Zero AI/ML deterministic rules, lateral-movement DAG, clock-skew ordering, and uploaded CSV timeline evaluation.</p>
+          </div>
+          <div class="btn-row" style="margin-top:0;">
+            <button class="btn btn-primary" onclick="apiCall('/api/sandbox/detector/eval-metrics', {}, 'det-out', 'det-verdict')">Run 550-Event Benchmark</button>
+          </div>
+        </div>
+
+        <div id="eval-metrics-box" class="grid-4">
+          <div class="stat-card"><div class="stat-label">F1 Score</div><div class="stat-value">--</div><div class="stat-meta">Run benchmark to measure</div></div>
+          <div class="stat-card"><div class="stat-label">Precision / Recall</div><div class="stat-value">--</div><div class="stat-meta">Labelled scenario set</div></div>
+          <div class="stat-card"><div class="stat-label">Median Time to Alert</div><div class="stat-value">--</div><div class="stat-meta">In-memory deterministic eval</div></div>
+          <div class="stat-card"><div class="stat-label">False Alerts / 1k</div><div class="stat-value">--</div><div class="stat-meta">Benign routine traffic</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Service Lateral Movement DAG &amp; Rule Triggers</h3>
+            <p class="sub">Test unauthorized service edges, non-admin rotation attempts, and &plusmn;2000ms out-of-order clock skew.</p>
+            <div class="btn-row">
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/detector/lateral-movement', {}, 'det-out', 'det-verdict')">Lateral Hop (audit &rarr; node-c)</button>
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/detector/privilege-escalation', {}, 'det-out', 'det-verdict')">Privilege Escalation</button>
+              <button class="btn btn-warn" onclick="apiCall('/api/sandbox/detector/clock-skew', {}, 'det-out', 'det-verdict')">Test Clock Skew (&plusmn;2000ms)</button>
+            </div>
+            <div class="dag-box">
+              <svg viewBox="0 0 620 155" width="100%" height="140" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                  <marker id="arr-ok" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#16a34a"/></marker>
+                  <marker id="arr-bad" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#dc2626"/></marker>
+                </defs>
+                <line x1="120" y1="42" x2="250" y2="42" stroke="#16a34a" stroke-width="2" marker-end="url(#arr-ok)"/>
+                <line x1="120" y1="52" x2="250" y2="112" stroke="#16a34a" stroke-width="2" marker-end="url(#arr-ok)"/>
+                <line x1="360" y1="42" x2="485" y2="42" stroke="#16a34a" stroke-width="2" marker-end="url(#arr-ok)"/>
+                <line x1="360" y1="112" x2="485" y2="112" stroke="#16a34a" stroke-width="2" marker-end="url(#arr-ok)"/>
+                <line x1="485" y1="106" x2="365" y2="52" stroke="#dc2626" stroke-width="2.2" stroke-dasharray="5,4" marker-end="url(#arr-bad)"/>
+                <text x="398" y="92" fill="#dc2626" font-size="10" font-family="monospace">BLOCKED LATERAL HOP</text>
+                <rect x="16" y="22" width="104" height="38" rx="8" fill="#ffffff" stroke="#2563eb"/><text x="68" y="45" fill="#0f172a" text-anchor="middle" font-size="11.5" font-family="monospace">api-gateway</text>
+                <rect x="255" y="22" width="105" height="38" rx="8" fill="#ffffff" stroke="#16a34a"/><text x="307" y="45" fill="#0f172a" text-anchor="middle" font-size="11.5" font-family="monospace">node-c</text>
+                <rect x="255" y="94" width="105" height="38" rx="8" fill="#ffffff" stroke="#16a34a"/><text x="307" y="117" fill="#0f172a" text-anchor="middle" font-size="11.5" font-family="monospace">auth-service</text>
+                <rect x="490" y="22" width="114" height="38" rx="8" fill="#ffffff" stroke="#2563eb"/><text x="547" y="45" fill="#0f172a" text-anchor="middle" font-size="11.5" font-family="monospace">detector</text>
+                <rect x="490" y="94" width="114" height="38" rx="8" fill="#ffffff" stroke="#d97706"/><text x="547" y="117" fill="#92400e" text-anchor="middle" font-size="11.5" font-family="monospace">audit-service</text>
+              </svg>
+            </div>
+            <div id="det-verdict" class="verdict-box" style="margin-top:12px;">
+              <div class="verdict-title">Detector ready</div>
+              <div class="verdict-sub">Run any trigger above to inspect explainable alerts.</div>
+            </div>
+            <details class="raw-json">
+              <summary>View Detector Telemetry JSON</summary>
+              <pre class="console" id="det-out">Detector output appears here.</pre>
+            </details>
+          </div>
+
+          <div class="card">
+            <h3>Live Explainable Security Alerts</h3>
+            <p class="sub">Identifies identity, service edge, event IDs, and deterministic rule trigger.</p>
+            <div id="alerts-feed" style="max-height:360px;overflow:auto;"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>
+            <span>Upload &amp; Analyze Event Log Files (<code>events.csv</code> + <code>approvals.json</code> + <code>labels.csv</code>)</span>
+            <span id="practice-badge" class="badge blue">Ready</span>
+          </h3>
+          <p class="sub">Separates approved change grants from unexpected role escalation, multi-edge lateral sequences, delayed events, and clock offsets.</p>
+          <div class="row-3">
+            <div class="field"><label for="prac-events-file">Events CSV (events.csv)</label><input id="prac-events-file" type="file" accept=".csv,.txt" /></div>
+            <div class="field"><label for="prac-approvals-file">Approvals JSON (approvals.json)</label><input id="prac-approvals-file" type="file" accept=".json" /></div>
+            <div class="field"><label for="prac-labels-file">Labels CSV (optional labels.csv)</label><input id="prac-labels-file" type="file" accept=".csv,.txt" /></div>
+          </div>
+          <div class="btn-row" style="margin-bottom:12px;">
+            <button class="btn btn-primary" onclick="analyzeUploadedPracticeFiles()">Check Uploaded Log Files</button>
+            <button class="btn btn-soft" onclick="runPracticeAnalysis(true)">Load Built-In / Local Toolkit Dataset</button>
+            <button class="btn" onclick="toggleCustomCsv()">Paste CSV Text</button>
+          </div>
+          <div id="custom-csv-box" style="display:none;margin-bottom:12px;">
+            <div class="grid-2">
+              <div class="field"><label>Events CSV</label><textarea id="custom-events-csv"></textarea></div>
+              <div class="field"><label>Approvals JSON</label><textarea id="custom-approvals-json">{"changes": []}</textarea></div>
+            </div>
+            <button class="btn btn-primary" onclick="runPracticeAnalysis(false)">Analyze Pasted Text</button>
+          </div>
+          <div id="practice-summary" style="margin-bottom:10px;"></div>
+          <div style="overflow-x:auto;max-height:340px;">
+            <table>
+              <thead><tr><th>Event</th><th>Actor</th><th>Service Edge</th><th>Corrected UTC</th><th>Offset</th><th>Classification</th><th>Explanation</th></tr></thead>
+              <tbody id="practice-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 5: DEVICES, TIMEZONE & AUTHORITY -->
+      <section id="view-devices" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Devices, Timezone Policy &amp; Authority Guard</h2>
+            <p>Strictly 1 active device per user, cross-timezone session protection, and self-healing rollback for suspicious admin mutations.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Device Lock &amp; Timezone Enforcement</h3>
+            <p class="sub">Bind user device and home timezone, attempt an illegal 2nd device, or test an anomalous geographic timezone jump.</p>
+            <div class="row-3">
+              <div class="field"><label for="pol-user">User ID</label><input id="pol-user" value="alice" /></div>
+              <div class="field"><label for="pol-dev">Device ID</label><input id="pol-dev" value="dev-alice-laptop-01" /></div>
+              <div class="field">
+                <label for="pol-tz">Timezone</label>
+                <select id="pol-tz">
+                  <option value="Asia/Kolkata" selected>Asia/Kolkata (Home)</option>
+                  <option value="America/New_York">America/New_York (Anomalous)</option>
+                  <option value="Europe/London">Europe/London (Anomalous)</option>
+                </select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="runDeviceTz('register_primary')">Bind Primary Device</button>
+              <button class="btn btn-danger" onclick="runSecondDevice()">Attack: Add 2nd Device</button>
+              <button class="btn btn-warn" onclick="runDeviceTz('timezone_check')">Test Timezone Access</button>
+              <button class="btn" onclick="runDeviceTz('reset')">Reset Policy DB</button>
+            </div>
+
+            <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;" />
+            <h3>Authority Monitor &amp; Console Snapshot Rollback</h3>
+            <div class="row-2">
+              <div class="field">
+                <label for="auth-action">Console Mutation Action</label>
+                <select id="auth-action">
+                  <option value="DISABLE_AUDIT">DISABLE_AUDIT (audit_enabled=false)</option>
+                  <option value="DISABLE_TIMEZONE_CHECK">DISABLE_TIMEZONE_CHECK</option>
+                  <option value="MODIFY_SECURITY_POLICY">Raise Device Cap to 5</option>
+                  <option value="BYPASS_POLICY">Raise File Limit to 100 MB</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="auth-role">Monitored Role</label>
+                <select id="auth-role"><option value="admin" selected>admin</option><option value="security-operator">security-operator</option></select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-soft" onclick="runAuthority('grant')">Grant Authority</button>
+              <button class="btn" onclick="runAuthority('routine')">Routine Banner Update</button>
+              <button class="btn btn-danger" onclick="runAuthority('suspicious')">Attempt Suspicious Edit</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Live Device, Authority &amp; Console Guard State</h3>
+            <div id="id-status-box" style="margin-bottom:10px;"></div>
+            <div id="policy-status-box" style="margin-bottom:12px;"></div>
+            <div id="pol-verdict" class="verdict-box">
+              <div class="verdict-title">Policy state synced</div>
+              <div class="verdict-sub">Run any device, timezone, or authority test on the left.</div>
+            </div>
+            <details class="raw-json">
+              <summary>View Policy Response JSON</summary>
+              <pre class="console" id="pol-out">Policy output appears here.</pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 6: KEY MANAGEMENT -->
+      <section id="view-keys" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Key Rotation &amp; Cross-Node Revocation</h2>
+            <p>Admin control plane for grace-period rotation, hard cutoff enforcement across nodes, rapid revocation broadcast, and device re-enrollment.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Cluster Key Rotation &amp; Revocation Controls</h3>
+            <p class="sub">Authorized transfers continue inside grace; every node rejects expired keys after cutoff and enforces revocations cluster-wide.</p>
+            <div class="field">
+              <label for="grace-sec">Grace Period Window (Seconds)</label>
+              <input id="grace-sec" type="number" step="0.5" min="0.5" max="30" value="3.0" />
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="apiCall('/api/sandbox/lifecycle/rotate', {grace_seconds: parseFloat(document.getElementById('grace-sec').value || '3')}, 'life-out', 'life-verdict')">1. Rotate Key (Start Grace)</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/lifecycle/test-old-key', {}, 'life-out', 'life-verdict')">2. Check Old Key (All 3 Nodes)</button>
+            </div>
+            <div class="btn-row">
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'revoke'}, 'life-out', 'life-verdict')">3. Revoke Alice Key (Measure ms)</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'reenroll'}, 'life-out', 'life-verdict')">4. Re-Enroll New Device</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Key Lifecycle Verdict &amp; Node State</h3>
+            <div id="life-verdict" class="verdict-box">
+              <div class="verdict-title">Key lifecycle ready</div>
+              <div class="verdict-sub">Rotate a key or trigger cluster revocation to measure timing.</div>
+            </div>
+            <details class="raw-json" open>
+              <summary>View Lifecycle Telemetry JSON</summary>
+              <pre class="console" id="life-out">Lifecycle operation results appear here.</pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 7: AUDIT LOGS -->
+      <section id="view-audit" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Tamper-Evident Audit Logs</h2>
+            <p>Continuous SHA-256 hash chaining with newline/JSON escape sanitization, 1-byte tamper detection, and exported log file verification.</p>
+          </div>
+          <span id="audit-badge" class="badge ok">VALID</span>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Chain Verification &amp; Upload Checker</h3>
+            <div class="btn-row" style="margin-top:0;margin-bottom:12px;">
+              <button class="btn btn-primary" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'verify'}, 'audit-out', 'audit-verdict')">Verify Cluster Chain</button>
+              <button class="btn btn-warn" onclick="apiCall('/api/sandbox/audit/injection', {}, 'audit-out', 'audit-verdict')">Test Log Injection</button>
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'tamper'}, 'audit-out', 'audit-verdict')">Mutate 1 Byte</button>
+              <button class="btn btn-soft" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'restore'}, 'audit-out', 'audit-verdict')">Restore Clean Chain</button>
+            </div>
+            <div class="field">
+              <label for="audit-file-picker">Upload Audit Log or Adapter State JSON (<code>*.log</code>, <code>*.jsonl</code>, <code>state.json</code>)</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input id="audit-file-picker" type="file" accept=".log,.jsonl,.json,.txt" />
+                <button class="btn btn-primary" style="white-space:nowrap;" onclick="uploadAuditLogFile()">Check File</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Audit Verification Verdict</h3>
+            <div id="audit-verdict" class="verdict-box ok">
+              <div class="verdict-title">Hash chain verification ready</div>
+              <div class="verdict-sub">Run any audit check or upload an exported log file.</div>
+            </div>
+            <details class="raw-json">
+              <summary>View Verification Payload JSON</summary>
+              <pre class="console" id="audit-out">Audit verification output appears here.</pre>
+            </details>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Recent Hash-Chained Events</h3>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead><tr><th>Seq</th><th>Service</th><th>Action</th><th>Actor / Subject</th><th>Status</th><th>Entry Hash</th></tr></thead>
+              <tbody id="audit-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 8: BACKUP & RECOVERY -->
+      <section id="view-recovery" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Crash Recovery &amp; Signed Backup Integrity</h2>
+            <p>Write-Ahead Log (WAL) crash recovery preserving revocations, plus HMAC-SHA3-512 snapshot verification and corruption rejection.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>WAL &amp; Backup Operations</h3>
+            <p class="sub">Simulate an interrupted rotation crash or flip a byte inside a signed key-state snapshot before restore.</p>
+            <div class="btn-row">
+              <button class="btn btn-warn" onclick="apiCall('/api/sandbox/resilience/crash-recovery', {}, 'rec-out', 'rec-verdict')">Simulate Mid-Rotation Crash (WAL)</button>
+              <button class="btn btn-primary" onclick="apiCall('/api/sandbox/resilience/backup', {tamper: false}, 'rec-out', 'rec-verdict')">Create &amp; Verify Backup</button>
+              <button class="btn btn-danger" onclick="apiCall('/api/sandbox/resilience/backup', {tamper: true}, 'rec-out', 'rec-verdict')">Corrupt 1 Byte &amp; Restore</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Recovery Verdict</h3>
+            <div id="rec-verdict" class="verdict-box">
+              <div class="verdict-title">Resilience suite ready</div>
+              <div class="verdict-sub">Run WAL recovery or backup integrity checks on the left.</div>
+            </div>
+            <details class="raw-json" open>
+              <summary>View Recovery Telemetry JSON</summary>
+              <pre class="console" id="rec-out">Crash recovery &amp; backup output appears here.</pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 9: TRACK-4 ADAPTER -->
+      <section id="view-adapter" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Track 4 Compatibility Adapter (<code>track4_service.py</code>)</h2>
+            <p>Runs per-request JSON subprocess calls directly against the root adapter with ML-KEM-768 + HMAC-SHA256 <code>protected_read</code>.</p>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Adapter Parameters &amp; Operations</h3>
+            <div class="row-3">
+              <div class="field"><label for="adp-actor">Actor</label><input id="adp-actor" value="maya" /></div>
+              <div class="field"><label for="adp-asset">Asset ID</label><input id="adp-asset" value="brief" /></div>
+              <div class="field"><label for="adp-reqid">Request ID</label><input id="adp-reqid" value="req-gui-01" /></div>
+            </div>
+            <div class="field"><label for="adp-body">Asset Content Body</label><input id="adp-body" value="Classified Track-4 Zero-Trust Brief" /></div>
+            <div class="btn-row">
+              <button class="btn btn-primary" onclick="runAdapter('full_suite')">Run Full 7-Step Adapter Suite</button>
+              <button class="btn btn-soft" onclick="runAdapter('single', 'setup')">Setup</button>
+              <button class="btn" onclick="runAdapter('single', 'read')">Read</button>
+              <button class="btn btn-soft" onclick="runAdapter('single', 'protected_read')">Protected Read</button>
+              <button class="btn btn-danger" onclick="runAdapter('single', 'revoke')">Revoke</button>
+              <button class="btn" onclick="runAdapter('single', 'audit')">Audit</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Adapter Output</h3>
+            <div id="adp-verdict" class="verdict-box">
+              <div class="verdict-title">Adapter idle</div>
+              <div class="verdict-sub">Run the full lost-device + ML-KEM-768 suite or step individually.</div>
+            </div>
+            <pre class="console" id="adapter-out">Subprocess JSON request &amp; response trace appears here.</pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- VIEW 10: THREAT MODEL & GUIDE -->
+      <section id="view-guide" class="view-panel">
+        <div class="page-head">
+          <div>
+            <h2>Threat Model &amp; CLI Quickstart</h2>
+            <p>Protected assets, adversaries, honest constraints, and reproducible terminal commands.</p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;">
+          <h3>Reproducible CLI Verification Commands (inside <code>.venv</code>)</h3>
+          <div class="cmd-line"><code>python -m src.cli demo-replay &amp;&amp; python -m src.cli demo-forward-secrecy</code><button class="btn" onclick="copyText('python -m src.cli demo-replay && python -m src.cli demo-forward-secrecy')">Copy</button></div>
+          <div class="cmd-line"><code>python -m src.cli demo-chunked-loss &amp;&amp; python -m src.cli demo-resumption-binding</code><button class="btn" onclick="copyText('python -m src.cli demo-chunked-loss && python -m src.cli demo-resumption-binding')">Copy</button></div>
+          <div class="cmd-line"><code>python -m src.cli verify-logs &amp;&amp; python -m src.cli doc-check</code><button class="btn" onclick="copyText('python -m src.cli verify-logs && python -m src.cli doc-check')">Copy</button></div>
+          <div class="cmd-line"><code>python ../Track-4-Toolkit/validate.py --entry ./track4_service.py</code><button class="btn" onclick="copyText('python ../Track-4-Toolkit/validate.py --entry ./track4_service.py')">Copy</button></div>
+          <div class="cmd-line"><code>pytest tests/ -v</code><button class="btn" onclick="copyText('pytest tests/ -v')">Copy</button></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Protected Assets &amp; Threat Actors</h3>
+            <div class="kv"><span>Payloads</span><span>AES-256-GCM + Recipient AAD</span></div>
+            <div class="kv"><span>Identity Keys</span><span>ML-DSA-65 / Dual ML-DSA-87 + SLH-DSA</span></div>
+            <div class="kv"><span>Session Secrets</span><span>X25519 + ML-KEM-768 (+ HQC-256)</span></div>
+            <div class="kv"><span>File Shares &amp; Devices</span><span>20 MiB + Magic Bytes + 1 Device/User</span></div>
+            <div class="kv"><span>Key State &amp; Backups</span><span>Fsynced WAL + HMAC-SHA3-512</span></div>
+            <div class="kv"><span>Audit &amp; Config</span><span>SHA-256 Chain + Authority Rollback</span></div>
+          </div>
+          <div class="card">
+            <h3>Assumptions &amp; Honest Limits</h3>
+            <ul style="color:var(--text-secondary);padding-left:18px;font-size:13px;line-height:1.65;margin:6px 0 0;">
+              <li><strong>Zero AI/ML:</strong> Deterministic O(1) graph edges &amp; context rules; zero black-box drift.</li>
+              <li><strong>Clock Skew (&plusmn;2000ms):</strong> Ordered inside window; extreme skew flagged without dropping records.</li>
+              <li><strong>Python Memory Zeroization:</strong> Uses best-effort mutable bytearray wiping rather than native mlock/HSM enclaves.</li>
+              <li><strong>Single-Host SQLite/WAL:</strong> Durable host storage (<code>TRACK4_STATE_DIR</code>) required for production persistence.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+    </main>
   </div>
 </div>
 
 <script>
+const VIEW_TITLES = {
+  dashboard: 'Dashboard',
+  tests: 'Test Files & Suites',
+  messaging: 'Secure Messaging',
+  threats: 'Threat Detection',
+  devices: 'Devices & Authority',
+  keys: 'Key Management',
+  audit: 'Audit Logs',
+  recovery: 'Backup & Recovery',
+  adapter: 'Track-4 Adapter',
+  guide: 'Threat Model & Guide',
+};
+
+const SEARCH_SHORTCUTS = [
+  {view: 'dashboard', title: 'Dashboard', sub: 'Cluster status, 12-objective verification checklist'},
+  {view: 'tests', title: 'Test Files & Suites', sub: 'Upload events.csv / logs / test files, run pytest & validate.py'},
+  {view: 'messaging', title: 'Secure Messaging & File Guard', sub: 'PQC v1/v2-paranoid envelopes, 20 MiB magic-byte upload'},
+  {view: 'threats', title: 'Threat Detection', sub: 'Lateral DAG, clock skew, F1 benchmark, CSV log upload'},
+  {view: 'devices', title: 'Devices & Authority', sub: '1-device lock, timezone anomaly check, admin rollback'},
+  {view: 'keys', title: 'Key Management (Admin)', sub: 'Atomic rotation, grace cutoff, cluster revocation, re-enroll'},
+  {view: 'audit', title: 'Audit Logs', sub: 'SHA-256 chain verification, log injection, upload .log check'},
+  {view: 'recovery', title: 'Backup & Recovery (Admin)', sub: 'WAL crash recovery, HMAC-SHA3-512 backup tamper check'},
+  {view: 'adapter', title: 'Track-4 Adapter', sub: 'track4_service.py ML-KEM-768 protected_read runner'},
+  {view: 'guide', title: 'Threat Model & Guide', sub: 'Architecture limits and CLI quickstart commands'},
+];
+
+let latestState = null;
+
 function esc(v) {
   return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
@@ -776,14 +1168,144 @@ function copyText(txt) {
   if (navigator.clipboard) navigator.clipboard.writeText(txt);
 }
 
-function switchTab(id) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  const panel = document.getElementById('tab-' + id);
-  const btn = document.querySelector(`.tab-btn[data-tab="${id}"]`);
+function getSession() {
+  try {
+    const raw = sessionStorage.getItem('tbv_session');
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function applySessionUI(sess) {
+  const login = document.getElementById('login-screen');
+  const shell = document.getElementById('app-shell');
+  if (!sess) {
+    login.style.display = 'flex';
+    shell.classList.remove('visible');
+    return;
+  }
+  login.style.display = 'none';
+  shell.classList.add('visible');
+
+  const isAdmin = sess.role === 'ADMIN';
+  document.getElementById('sb-avatar').textContent = (sess.username || 'TB').slice(0, 2).toUpperCase();
+  document.getElementById('sb-name').textContent = sess.display_name || sess.username;
+  document.getElementById('sb-email').textContent = sess.email || (sess.username + '@tbv.local');
+  const rb = document.getElementById('hdr-role-badge');
+  rb.textContent = sess.role;
+  rb.className = 'badge ' + (isAdmin ? 'blue' : 'ok');
+
+  document.querySelectorAll('.nav-btn[data-admin="true"]').forEach(b => {
+    b.classList.toggle('hidden-role', !isAdmin);
+  });
+
+  const activeBtn = document.querySelector('.nav-btn.active');
+  if (activeBtn && activeBtn.classList.contains('hidden-role')) {
+    goView('dashboard');
+  }
+  refreshState();
+  loadRepoTests();
+}
+
+async function quickSignIn(username, role) {
+  document.getElementById('login-username').value = username;
+  document.getElementById('login-role').value = role;
+  await doLogin(username, role);
+}
+
+async function submitLoginForm(e) {
+  e.preventDefault();
+  const username = document.getElementById('login-username').value || 'admin';
+  const role = document.getElementById('login-role').value || 'ADMIN';
+  await doLogin(username, role);
+}
+
+async function doLogin(username, role) {
+  const btn = document.getElementById('btn-signin');
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+  try {
+    const res = await fetch('/api/sandbox/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, role})
+    });
+    const sess = await res.json();
+    sessionStorage.setItem('tbv_session', JSON.stringify(sess));
+    applySessionUI(sess);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Sign In to Console';
+  }
+}
+
+async function signOut() {
+  const sess = getSession();
+  try {
+    await fetch('/api/sandbox/auth/logout', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: sess ? sess.token : ''})
+    });
+  } catch {}
+  sessionStorage.removeItem('tbv_session');
+  applySessionUI(null);
+}
+
+function openAccountSwitcher() {
+  signOut();
+}
+
+function goView(viewId) {
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  const panel = document.getElementById('view-' + viewId);
+  const btn = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
   if (panel) panel.classList.add('active');
   if (btn) btn.classList.add('active');
+  document.getElementById('topbar-title').textContent = VIEW_TITLES[viewId] || 'Console';
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('search-dropdown').classList.remove('open');
 }
+
+function onGlobalSearch() {
+  const inp = document.getElementById('global-search');
+  const dd = document.getElementById('search-dropdown');
+  const q = (inp.value || '').trim().toLowerCase();
+  if (!q) { dd.classList.remove('open'); return; }
+
+  const sess = getSession();
+  const isAdmin = !sess || sess.role === 'ADMIN';
+  const hits = [];
+  SEARCH_SHORTCUTS.forEach(s => {
+    if (!isAdmin && (s.view === 'keys' || s.view === 'recovery')) return;
+    if ((s.title + ' ' + s.sub).toLowerCase().includes(q)) hits.push(s);
+  });
+  if (latestState && Array.isArray(latestState.nodes)) {
+    latestState.nodes.forEach(n => {
+      if ((n.node_id + ' ' + (n.active_key_id || '')).toLowerCase().includes(q)) {
+        hits.push({view: 'dashboard', title: `Node ${n.node_id}`, sub: `Active key ${n.active_key_id || 'NONE'}`});
+      }
+    });
+  }
+  if (!hits.length) {
+    dd.innerHTML = '<div style="padding:10px 12px;color:var(--text-muted);font-size:12px;">No matching views or nodes found.</div>';
+  } else {
+    dd.innerHTML = hits.slice(0, 8).map(h => `
+      <button type="button" class="search-hit" onclick="goView('${esc(h.view)}')">
+        <strong>${esc(h.title)}</strong>
+        <span>${esc(h.sub)}</span>
+      </button>
+    `).join('');
+  }
+  dd.classList.add('open');
+}
+
+document.addEventListener('click', e => {
+  const sw = document.getElementById('search-wrap');
+  if (sw && !sw.contains(e.target)) {
+    document.getElementById('search-dropdown').classList.remove('open');
+  }
+});
 
 function setVerdict(boxId, data) {
   const box = document.getElementById(boxId);
@@ -793,12 +1315,12 @@ function setVerdict(boxId, data) {
   let sub = '';
   if (data.blocked) {
     cls += ' blocked';
-    title = 'BLOCKED (Security Control Enforced)';
-    sub = data.detail || data.error_type || data.reason || 'Attack or policy violation denied';
+    title = 'BLOCKED &mdash; Security Policy Enforced';
+    sub = data.detail || data.error_type || data.reason || 'Attack or policy violation denied cleanly';
   } else if (data.ok === false || data.is_valid === false) {
     cls += ' bad';
-    title = 'Check Reported Failure';
-    sub = data.first_error || data.detail || 'Inspect details below';
+    title = 'Verification Alert / Failure';
+    sub = data.first_error || data.detail || 'Review details below';
   } else {
     cls += ' ok';
     title = data.allowed === true ? 'ALLOWED &amp; VERIFIED' : 'PASSED / VERIFIED';
@@ -809,10 +1331,10 @@ function setVerdict(boxId, data) {
     if (data.sha256) parts.push('sha256=' + data.sha256.slice(0, 14) + '...');
     if (data.phase) parts.push('phase=' + data.phase);
     if (data.total_records !== undefined) parts.push('records=' + data.total_records);
-    sub = parts.join(' | ') || (data.detail || 'Operation succeeded and audit logged');
+    sub = parts.join(' | ') || (data.detail || 'Completed and audit-logged cleanly');
   }
   box.className = cls;
-  box.innerHTML = '<div><div class="verdict-title">' + title + '</div><div class="verdict-sub">' + esc(sub) + '</div></div>';
+  box.innerHTML = '<div class="verdict-title">' + title + '</div><div class="verdict-sub">' + esc(sub) + '</div>';
 }
 
 function bytesToB64(bytes) {
@@ -828,9 +1350,7 @@ async function apiCall(url, body, outId, verdictId) {
   if (out) out.textContent = 'Running ' + url + ' ...';
   try {
     const res = await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body || {})
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})
     });
     const data = await res.json();
     if (out) out.textContent = JSON.stringify(data, null, 2);
@@ -842,11 +1362,8 @@ async function apiCall(url, body, outId, verdictId) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Universal Test Files & Pytest Runner
-// ---------------------------------------------------------------------------
+// ── Test Files & Suites ──
 let queuedBundleFiles = [];
-
 const dz = document.getElementById('bundle-dropzone');
 if (dz) {
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
@@ -854,9 +1371,7 @@ if (dz) {
   dz.addEventListener('drop', e => {
     e.preventDefault();
     dz.classList.remove('drag');
-    if (e.dataTransfer && e.dataTransfer.files) {
-      handleBundleFiles(e.dataTransfer.files);
-    }
+    if (e.dataTransfer && e.dataTransfer.files) handleBundleFiles(e.dataTransfer.files);
   });
 }
 
@@ -865,9 +1380,7 @@ function handleBundleFiles(fileList) {
   document.getElementById('bundle-chips').innerHTML = queuedBundleFiles.map(
     f => `<span class="file-chip">${esc(f.name)} (${f.size} B)</span>`
   ).join('');
-  if (queuedBundleFiles.length > 0) {
-    checkSelectedBundle();
-  }
+  if (queuedBundleFiles.length) checkSelectedBundle();
 }
 
 function clearBundleFiles() {
@@ -884,16 +1397,10 @@ async function checkSelectedBundle() {
   const badge = document.getElementById('bundle-status-badge');
   badge.className = 'badge warn';
   badge.textContent = `Checking ${queuedBundleFiles.length} file(s)...`;
-  document.getElementById('bundle-raw-out').textContent = 'Reading and verifying uploaded files...';
-
   const items = [];
   for (const file of queuedBundleFiles) {
     const buf = await file.arrayBuffer();
-    items.push({
-      filename: file.name,
-      mime_type: file.type || null,
-      content_b64: bytesToB64(new Uint8Array(buf))
-    });
+    items.push({filename: file.name, mime_type: file.type || null, content_b64: bytesToB64(new Uint8Array(buf))});
   }
   const res = await fetch('/api/sandbox/files/check-bundle', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({files: items})
@@ -906,7 +1413,7 @@ async function checkSelectedBundle() {
   badge.textContent = `${s.passed}/${s.total_files} Verified`;
   setVerdict('bundle-verdict', {
     ok: s.blocked_or_failed === 0,
-    detail: `Checked ${s.total_files} file(s): ${s.passed} passed, ${s.blocked_or_failed} blocked or failed`
+    detail: `Checked ${s.total_files} file(s): ${s.passed} passed, ${s.blocked_or_failed} blocked/failed`
   });
 
   document.getElementById('bundle-results-wrap').innerHTML = `
@@ -924,7 +1431,6 @@ async function checkSelectedBundle() {
       </tbody>
     </table>
   `;
-
   if (data.practice_triage && data.practice_triage.events) {
     renderPracticeTableInto('bundle-triage-wrap', data.practice_triage);
   } else {
@@ -938,16 +1444,14 @@ async function loadRepoTests() {
     const res = await fetch('/api/sandbox/tests/list');
     const data = await res.json();
     const files = data.test_files || [];
-    document.getElementById('repo-tests-meta').textContent = `${files.length} suites | toolkit=${data.toolkit_available ? 'found' : 'absent'}`;
+    document.getElementById('repo-tests-meta').textContent = `${files.length} suites | toolkit=${data.toolkit_available ? 'ready' : 'absent'}`;
     document.getElementById('repo-tests-list').innerHTML = files.map(t => `
       <div class="test-item">
         <label><input type="checkbox" class="repo-test-chk" value="${esc(t.name)}" /> <span>tests/${esc(t.name)}</span></label>
-        <span style="color:var(--muted);">${t.size_bytes} B</span>
+        <span style="color:var(--text-muted);">${t.size_bytes} B</span>
       </div>
     `).join('');
-  } catch (e) {
-    document.getElementById('repo-tests-list').textContent = 'Failed to load tests list';
-  }
+  } catch {}
 }
 
 function toggleAllTests(checked) {
@@ -957,38 +1461,32 @@ function toggleAllTests(checked) {
 async function executeRepoTestRun(payload) {
   const badge = document.getElementById('bundle-status-badge');
   badge.className = 'badge warn';
-  badge.textContent = 'Running tests...';
-  document.getElementById('bundle-raw-out').textContent = 'Executing test runner...';
+  badge.textContent = 'Running...';
   document.getElementById('bundle-results-wrap').innerHTML = '';
   document.getElementById('bundle-triage-wrap').innerHTML = '';
-
   const res = await fetch('/api/sandbox/tests/run', {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
   });
   const data = await res.json();
   let txt = '';
   if (data.pytest) txt += `=== PYTEST ===\\n${data.pytest.output}\\n\\n`;
-  if (data.toolkit_validator) txt += `=== TRACK-4-TOOLKIT VALIDATOR ===\\n${data.toolkit_validator.output}`;
-  if (!txt) txt = JSON.stringify(data, null, 2);
-  document.getElementById('bundle-raw-out').textContent = txt;
+  if (data.toolkit_validator) txt += `=== TRACK-4-TOOLKIT ===\\n${data.toolkit_validator.output}`;
+  document.getElementById('bundle-raw-out').textContent = txt || JSON.stringify(data, null, 2);
 
   badge.className = 'badge ' + (data.ok ? 'ok' : 'bad');
-  const pCounts = data.pytest ? data.pytest.counts : null;
   badge.textContent = data.ok ? `PASS (${data.duration_ms}ms)` : `FAIL (${data.duration_ms}ms)`;
-  const summaryParts = [];
-  if (pCounts) summaryParts.push(`pytest: ${pCounts.passed} passed, ${pCounts.failed} failed`);
-  if (data.toolkit_validator) summaryParts.push(`Track-4-Toolkit: ${data.toolkit_validator.passed ? 'PASS' : 'FAIL'}`);
-  setVerdict('bundle-verdict', {ok: data.ok, detail: summaryParts.join(' | ') || data.detail});
+  const parts = [];
+  if (data.pytest) parts.push(`pytest: ${data.pytest.counts.passed} passed, ${data.pytest.counts.failed} failed`);
+  if (data.toolkit_validator) parts.push(`Track-4-Toolkit: ${data.toolkit_validator.passed ? 'PASS' : 'FAIL'}`);
+  setVerdict('bundle-verdict', {ok: data.ok, detail: parts.join(' | ') || data.detail});
   await refreshState();
 }
 
-async function runSelectedTests(includeToolkitOnly) {
+async function runSelectedTests(toolkitOnly) {
+  if (toolkitOnly) return executeRepoTestRun({test_files: [], run_pytest: false, include_toolkit_validator: true});
   const selected = Array.from(document.querySelectorAll('.repo-test-chk:checked')).map(c => c.value);
-  if (includeToolkitOnly) {
-    return executeRepoTestRun({test_files: [], run_pytest: false, include_toolkit_validator: true});
-  }
   if (!selected.length) {
-    setVerdict('bundle-verdict', {ok: false, detail: 'Check one or more test files on the right, or click Run Full Pytest Suite.'});
+    setVerdict('bundle-verdict', {ok: false, detail: 'Select one or more test files, or click Run Full Suite.'});
     return;
   }
   return executeRepoTestRun({test_files: selected, run_pytest: true, include_toolkit_validator: false});
@@ -998,91 +1496,96 @@ async function runAllPytestSuites() {
   return executeRepoTestRun({test_files: [], run_pytest: true, include_toolkit_validator: true});
 }
 
-// ---------------------------------------------------------------------------
-// Tab 3..6 Helpers
-// ---------------------------------------------------------------------------
+// ── Messaging & Files ──
 async function sendTransfer() {
-  const sender = document.getElementById('msg-sender').value || 'alice';
-  const recipient = document.getElementById('msg-recipient').value || 'bob';
-  const profile = document.getElementById('msg-profile').value || 'v1';
-  const message = document.getElementById('msg-input').value || '';
-  return apiCall('/api/sandbox/pqc-transfer', {sender, recipient, profile, message}, 'msg-out', 'msg-verdict');
+  return apiCall('/api/sandbox/pqc-transfer', {
+    sender: document.getElementById('msg-sender').value || 'alice',
+    recipient: document.getElementById('msg-recipient').value || 'bob',
+    profile: document.getElementById('msg-profile').value || 'v1',
+    message: document.getElementById('msg-input').value || ''
+  }, 'msg-out', 'msg-verdict');
+}
+
+async function runMessagingSuite() {
+  await sendTransfer();
+  await apiCall('/api/sandbox/attack/replay', {}, 'msg-out', 'msg-verdict');
+  await apiCall('/api/sandbox/attack/recipient-swap', {}, 'msg-out', 'msg-verdict');
+  await apiCall('/api/sandbox/attack/forward-secrecy', {}, 'msg-out', 'msg-verdict');
+  await apiCall('/api/sandbox/attack/session-resumption', {}, 'msg-out', 'msg-verdict');
+  await apiCall('/api/sandbox/attack/loss-reorder', {}, 'msg-out', 'msg-verdict');
 }
 
 async function uploadAndVerifyFile() {
-  const inp = document.getElementById('file-picker');
-  const file = inp && inp.files && inp.files[0];
-  if (!file) {
-    setVerdict('msg-verdict', {ok: false, detail: 'Choose a file first or click one of the Preset buttons.'});
-    return;
-  }
+  const file = document.getElementById('file-picker').files[0];
+  if (!file) { setVerdict('msg-verdict', {ok: false, detail: 'Choose a file first.'}); return; }
   if (file.size > 22 * 1024 * 1024) {
-    setVerdict('msg-verdict', {ok: true, blocked: true, detail: `Browser pre-check: ${file.name} is ${(file.size / (1024*1024)).toFixed(2)} MiB (>20 MiB limit)`});
-    document.getElementById('msg-out').textContent = JSON.stringify({blocked: true, filename: file.name, size_bytes: file.size, max_bytes: 20 * 1024 * 1024}, null, 2);
+    setVerdict('msg-verdict', {ok: true, blocked: true, detail: `Browser pre-check: ${file.name} exceeds 20 MiB limit`});
     return;
   }
   const buf = await file.arrayBuffer();
   return apiCall('/api/sandbox/file-share/validate', {
-    filename: file.name,
-    mime_type: file.type || null,
-    content_b64: bytesToB64(new Uint8Array(buf))
+    filename: file.name, mime_type: file.type || null, content_b64: bytesToB64(new Uint8Array(buf))
   }, 'msg-out', 'msg-verdict');
 }
 
+// ── Audit, Policy, Adapter & Practice ──
 async function uploadAuditLogFile() {
-  const inp = document.getElementById('audit-file-picker');
-  const file = inp && inp.files && inp.files[0];
-  if (!file) {
-    setVerdict('audit-verdict', {ok: false, detail: 'Choose an audit.log, .jsonl, or state.json file first.'});
-    return;
-  }
+  const file = document.getElementById('audit-file-picker').files[0];
+  if (!file) { setVerdict('audit-verdict', {ok: false, detail: 'Choose an audit.log, .jsonl, or state.json file first.'}); return; }
   const content = await file.text();
   return apiCall('/api/sandbox/audit/verify-file', {filename: file.name, content}, 'audit-out', 'audit-verdict');
 }
 
 async function runDeviceTz(mode) {
-  const user_id = document.getElementById('pol-user').value || 'alice';
-  const device_id = document.getElementById('pol-dev').value || 'dev-alice-laptop-01';
-  const timezone = document.getElementById('pol-tz').value || 'Asia/Kolkata';
-  return apiCall('/api/sandbox/policy/device-timezone', {mode, user_id, device_id, timezone}, 'life-out', 'life-verdict');
+  return apiCall('/api/sandbox/policy/device-timezone', {
+    mode,
+    user_id: document.getElementById('pol-user').value || 'alice',
+    device_id: document.getElementById('pol-dev').value || 'dev-alice-laptop-01',
+    timezone: document.getElementById('pol-tz').value || 'Asia/Kolkata'
+  }, 'pol-out', 'pol-verdict');
 }
 
 async function runSecondDevice() {
-  const user_id = document.getElementById('pol-user').value || 'alice';
-  const timezone = document.getElementById('pol-tz').value || 'Asia/Kolkata';
-  return apiCall('/api/sandbox/policy/device-timezone', {mode: 'second_device', user_id, device_id: 'dev-rogue-secondary-02', timezone}, 'life-out', 'life-verdict');
+  return apiCall('/api/sandbox/policy/device-timezone', {
+    mode: 'second_device',
+    user_id: document.getElementById('pol-user').value || 'alice',
+    device_id: 'dev-rogue-secondary-02',
+    timezone: document.getElementById('pol-tz').value || 'Asia/Kolkata'
+  }, 'pol-out', 'pol-verdict');
 }
 
 async function runAuthority(mode) {
-  const user_id = document.getElementById('pol-user').value || 'alice';
-  const role = document.getElementById('auth-role').value || 'admin';
-  const action = document.getElementById('auth-action').value || 'DISABLE_AUDIT';
-  return apiCall('/api/sandbox/authority/console-action', {mode, user_id, role, action}, 'life-out', 'life-verdict');
+  return apiCall('/api/sandbox/authority/console-action', {
+    mode,
+    user_id: document.getElementById('pol-user').value || 'alice',
+    role: document.getElementById('auth-role').value || 'admin',
+    action: document.getElementById('auth-action').value || 'DISABLE_AUDIT'
+  }, 'pol-out', 'pol-verdict');
 }
 
 async function runAdapter(mode, op) {
-  const actor = document.getElementById('adp-actor').value || 'maya';
-  const asset = document.getElementById('adp-asset').value || 'brief';
-  const body = document.getElementById('adp-body').value || 'Brief';
-  const request_id = document.getElementById('adp-reqid').value || 'req-gui-01';
-  const out = document.getElementById('adapter-out');
-  if (out) out.textContent = 'Running track4_service.py (' + (op || mode) + ') ...';
-  return apiCall('/api/sandbox/toolkit/adapter-run', {mode, op, actor, asset, body, request_id}, 'adapter-out', null);
+  return apiCall('/api/sandbox/toolkit/adapter-run', {
+    mode, op,
+    actor: document.getElementById('adp-actor').value || 'maya',
+    asset: document.getElementById('adp-asset').value || 'brief',
+    body: document.getElementById('adp-body').value || 'Brief',
+    request_id: document.getElementById('adp-reqid').value || 'req-gui-01'
+  }, 'adapter-out', 'adp-verdict');
 }
 
 function toggleCustomCsv() {
-  const box = document.getElementById('custom-csv-box');
-  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  const b = document.getElementById('custom-csv-box');
+  b.style.display = b.style.display === 'none' ? 'block' : 'none';
 }
 
 function renderPracticeTableInto(containerId, data) {
   const fs = data.findings_summary || {};
   document.getElementById(containerId).innerHTML = `
     <div class="grid-4" style="margin-bottom:8px;">
-      <div class="chk-item fail"><span class="mono">Unapproved Escalations</span><strong>${esc((fs.unexpected_role_changes || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item fail"><span class="mono">Lateral Chains</span><strong>${esc((fs.lateral_movement_chains || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item"><span class="mono">Clock Skew Adjusted</span><strong>${esc((fs.clock_skew_events || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item pass"><span class="mono">Label Agreement</span><strong>${esc(data.label_matches)}</strong></div>
+      <div class="chk-item fail"><span class="mono">Unapproved Escalations</span><div><strong>${esc((fs.unexpected_role_changes || []).join(', ') || '0')}</strong></div></div>
+      <div class="chk-item fail"><span class="mono">Lateral Chains</span><div><strong>${esc((fs.lateral_movement_chains || []).join(', ') || '0')}</strong></div></div>
+      <div class="chk-item"><span class="mono">Clock Skew Adjusted</span><div><strong>${esc((fs.clock_skew_events || []).join(', ') || '0')}</strong></div></div>
+      <div class="chk-item pass"><span class="mono">Label Agreement</span><div><strong>${esc(data.label_matches)}</strong></div></div>
     </div>
     <table>
       <thead><tr><th>Event</th><th>Actor</th><th>Service Edge</th><th>Corrected UTC</th><th>Offset</th><th>Classification</th><th>Explanation</th></tr></thead>
@@ -1091,18 +1594,8 @@ function renderPracticeTableInto(containerId, data) {
           const cls = ev.classification || 'routine';
           const bCls = cls.includes('unexpected') || cls.includes('lateral') || cls.includes('review') ? 'bad'
             : cls.includes('approved') ? 'ok'
-            : cls.includes('clock') || cls.includes('delayed') || cls.includes('isolated') ? 'warn' : 'info';
-          return `
-            <tr>
-              <td class="mono">${esc(ev.event_id)}</td>
-              <td class="mono">${esc(ev.actor)}</td>
-              <td class="mono">${esc(ev.edge)}</td>
-              <td class="mono">${esc(ev.corrected_utc)}</td>
-              <td class="mono">${esc(ev.offset_ms)}ms</td>
-              <td><span class="badge ${bCls}">${esc(cls)}</span></td>
-              <td>${esc(ev.explanation)}</td>
-            </tr>
-          `;
+            : cls.includes('clock') || cls.includes('delayed') || cls.includes('isolated') ? 'warn' : 'blue';
+          return `<tr><td class="mono">${esc(ev.event_id)}</td><td class="mono">${esc(ev.actor)}</td><td class="mono">${esc(ev.edge)}</td><td class="mono">${esc(ev.corrected_utc)}</td><td class="mono">${esc(ev.offset_ms)}ms</td><td><span class="badge ${bCls}">${esc(cls)}</span></td><td>${esc(ev.explanation)}</td></tr>`;
         }).join('')}
       </tbody>
     </table>
@@ -1114,24 +1607,21 @@ async function analyzeUploadedPracticeFiles() {
   const appFile = document.getElementById('prac-approvals-file').files[0];
   const lblFile = document.getElementById('prac-labels-file').files[0];
   const badge = document.getElementById('practice-badge');
-  if (!evFile) {
-    badge.className = 'badge warn';
-    badge.textContent = 'Select an events.csv file first';
-    return;
-  }
-  const events_csv = await evFile.text();
-  const approvals_json = appFile ? await appFile.text() : '{"changes": []}';
-  const labels_csv = lblFile ? await lblFile.text() : null;
-  return _runPracticePayload({events_csv, approvals_json, labels_csv, use_sample: false});
+  if (!evFile) { badge.className = 'badge warn'; badge.textContent = 'Select events.csv first'; return; }
+  return _runPracticePayload({
+    events_csv: await evFile.text(),
+    approvals_json: appFile ? await appFile.text() : '{"changes": []}',
+    labels_csv: lblFile ? await lblFile.text() : null,
+    use_sample: false
+  });
 }
 
 async function runPracticeAnalysis(useSample) {
-  const body = useSample ? {use_sample: true} : {
+  return _runPracticePayload(useSample ? {use_sample: true} : {
     use_sample: false,
     events_csv: document.getElementById('custom-events-csv').value,
     approvals_json: document.getElementById('custom-approvals-json').value
-  };
-  return _runPracticePayload(body);
+  });
 }
 
 async function _runPracticePayload(body) {
@@ -1141,41 +1631,12 @@ async function _runPracticePayload(body) {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
   });
   const data = await res.json();
-  if (!data.ok) {
-    badge.className = 'badge bad';
-    badge.textContent = data.detail || 'Error';
-    return;
-  }
+  if (!data.ok) { badge.className = 'badge bad'; badge.textContent = data.detail || 'Error'; return; }
   badge.className = 'badge ok';
-  badge.textContent = `${data.total_events} events (${data.dataset_source})` + (data.label_matches !== 'no labels.csv provided' ? ` | Labels: ${data.label_matches}` : '');
-
-  const fs = data.findings_summary || {};
-  document.getElementById('practice-summary').innerHTML = `
-    <div class="grid-4">
-      <div class="chk-item fail"><span class="mono">Unapproved Role Escalations</span><strong>${esc((fs.unexpected_role_changes || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item fail"><span class="mono">Lateral Movement Chain</span><strong>${esc((fs.lateral_movement_chains || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item"><span class="mono">Clock Skew Adjusted</span><strong>${esc((fs.clock_skew_events || []).join(', ') || '0')}</strong></div>
-      <div class="chk-item"><span class="mono">Out-of-Order Delivery</span><strong>${esc((fs.delayed_out_of_order || []).join(', ') || '0')}</strong></div>
-    </div>
-  `;
-
-  document.getElementById('practice-tbody').innerHTML = (data.events || []).map(ev => {
-    const cls = ev.classification || 'routine';
-    const bCls = cls.includes('unexpected') || cls.includes('lateral') || cls.includes('review') ? 'bad'
-      : cls.includes('approved') ? 'ok'
-      : cls.includes('clock') || cls.includes('delayed') || cls.includes('isolated') ? 'warn' : 'info';
-    return `
-      <tr>
-        <td class="mono">${esc(ev.event_id)}</td>
-        <td class="mono">${esc(ev.actor)}</td>
-        <td class="mono">${esc(ev.edge)}</td>
-        <td class="mono">${esc(ev.corrected_utc)}</td>
-        <td class="mono">${esc(ev.offset_ms)}ms</td>
-        <td><span class="badge ${bCls}">${esc(cls)}</span></td>
-        <td>${esc(ev.explanation)}</td>
-      </tr>
-    `;
-  }).join('');
+  badge.textContent = `${data.total_events} events (${data.dataset_source})` + (data.label_matches !== 'no labels.csv provided' ? ` | ${data.label_matches} labels` : '');
+  document.getElementById('practice-summary').innerHTML = '';
+  renderPracticeTableInto('practice-summary', data);
+  document.getElementById('practice-tbody').innerHTML = '';
   await refreshState();
 }
 
@@ -1183,34 +1644,28 @@ async function refreshState() {
   try {
     const res = await fetch('/api/sandbox/state');
     const s = await res.json();
+    latestState = s;
 
-    document.getElementById('uptime-lbl').textContent = 'uptime: ' + s.uptime_seconds + 's';
-    const prov = s.crypto.provider || 'pqcrypto';
-    document.getElementById('hdr-pqc').textContent = `PQC: ${s.crypto.kem_algorithm} + ${s.crypto.sig_algorithm} (${prov})`;
+    document.getElementById('hdr-pqc').textContent = `${s.crypto.kem_algorithm} + ${s.crypto.sig_algorithm}`;
+    document.getElementById('kpi-uptime').textContent = `uptime: ${s.uptime_seconds}s`;
+    const activeNodes = (s.nodes || []).filter(n => n.active_key_id).length;
+    document.getElementById('kpi-nodes').textContent = `${activeNodes} / ${(s.nodes || []).length}`;
 
-    const chainOk = s.audit.verification && s.audit.verification.is_valid;
-    const chainBadge = document.getElementById('hdr-chain');
-    const auditBadge = document.getElementById('audit-badge');
-    chainBadge.textContent = chainOk ? `Audit Chain: VALID (${s.audit.verification.total_records})` : 'Audit Chain: TAMPERED!';
-    chainBadge.className = 'badge ' + (chainOk ? 'ok' : 'bad');
-    auditBadge.textContent = chainOk ? `VALID (${s.audit.verification.total_records} records)` : `TAMPER DETECTED (seq ${s.audit.verification.corrupted_sequence})`;
-    auditBadge.className = 'badge ' + (chainOk ? 'ok' : 'bad');
-
-    const scoreBadge = document.getElementById('hdr-score');
-    scoreBadge.textContent = `Checklist: ${s.checklist_passed}/${s.checklist_total}`;
-    scoreBadge.className = 'badge ' + (s.checklist_passed === s.checklist_total ? 'ok' : 'warn');
+    document.getElementById('kpi-score').textContent = `${s.checklist_passed} / ${s.checklist_total}`;
     document.getElementById('chk-count-lbl').textContent = `${s.checklist_passed} / ${s.checklist_total} Verified`;
     document.getElementById('chk-bar').style.width = ((s.checklist_passed / s.checklist_total) * 100) + '%';
 
+    const chainOk = s.audit.verification && s.audit.verification.is_valid;
+    document.getElementById('kpi-chain').textContent = chainOk ? 'VALID' : 'TAMPERED!';
+    document.getElementById('kpi-chain').style.color = chainOk ? 'var(--green-text)' : 'var(--red-text)';
+    document.getElementById('kpi-records').textContent = `${s.audit.verification.total_records || 0} hash-chained records`;
+    const auditBadge = document.getElementById('audit-badge');
+    auditBadge.textContent = chainOk ? `VALID (${s.audit.verification.total_records} records)` : `TAMPERED (seq ${s.audit.verification.corrupted_sequence})`;
+    auditBadge.className = 'badge ' + (chainOk ? 'ok' : 'bad');
+
     const ps = s.policy_state || {};
     const cs = ps.console_state || {};
-    document.getElementById('hdr-policy').textContent = `${ps.max_file_size_mb || 20} MiB | ${ps.max_devices_per_user || 1} Device/User`;
-    document.getElementById('policy-overview-strip').innerHTML = `
-      <div class="chk-item pass"><span class="mono">Max Shared File</span><strong>${esc(ps.max_file_size_mb || 20)} MiB + Magic Bytes</strong></div>
-      <div class="chk-item pass"><span class="mono">Device Lock Policy</span><strong>Strictly ${esc(ps.max_devices_per_user || 1)} Active / User</strong></div>
-      <div class="chk-item pass"><span class="mono">Timezone Guard</span><strong>${cs.timezone_check_enabled !== false ? 'ENFORCED' : 'OFF'}</strong></div>
-      <div class="chk-item pass"><span class="mono">Console Audit Lock</span><strong>${cs.audit_enabled !== false ? 'LOCKED ON' : 'OFF'} (${esc((ps.console_state_hash || '').slice(0,10))}...)</strong></div>
-    `;
+    document.getElementById('kpi-policy').textContent = `${ps.max_file_size_mb || 20} MiB / ${ps.max_devices_per_user || 1} Dev`;
 
     document.getElementById('nodes-grid').innerHTML = s.nodes.map(n => `
       <div class="card">
@@ -1231,19 +1686,36 @@ async function refreshState() {
       </div>
     `).join('');
 
+    const ml = s.message_ledger || [];
+    document.getElementById('msg-kpi-count').textContent = String(ml.length);
+    document.getElementById('msg-kpi-wiped').textContent = String(ml.filter(x => x.ephemeral_wiped).length);
+    if (ml.length > 0) {
+      document.getElementById('msg-ledger-tbody').innerHTML = ml.map(m => `
+        <tr>
+          <td class="mono">${esc((m.id || '').slice(0, 18))}...</td>
+          <td>${esc(m.sender)}</td>
+          <td>${esc(m.recipient)}</td>
+          <td class="mono">${esc(m.suite)}</td>
+          <td><span class="badge ok">${m.ephemeral_wiped ? 'WIPED' : 'ACTIVE'}</span></td>
+          <td class="mono">${esc(m.latency_ms)} ms</td>
+          <td><span class="badge ok">${esc(m.status)}</span></td>
+        </tr>
+      `).join('');
+    }
+
     const al = s.identities.alice;
     const bo = s.identities.bob;
     document.getElementById('id-status-box').innerHTML = `
-      <div class="kv"><span>Alice (${esc(al.device_id)})</span><span class="badge ${al.status === 'active' ? 'ok' : 'bad'}">${esc(al.status.toUpperCase())} (${esc(al.active_key_id || al.revoked_key_id)})</span></div>
-      <div class="kv"><span>Bob (${esc(bo.device_id)})</span><span class="badge ok">ACTIVE (${esc(bo.active_key_id)})</span></div>
-      <div class="kv"><span>Last Revocation Latency</span><span class="mono">${s.revocation_propagation_ms !== null ? esc(s.revocation_propagation_ms) + ' ms' : 'Not yet measured'}</span></div>
+      <div class="kv"><span>Alice (${esc(al.device_id)})</span><span class="badge ${al.status === 'active' ? 'ok' : 'bad'}">${esc(al.status.toUpperCase())}</span></div>
+      <div class="kv"><span>Bob (${esc(bo.device_id)})</span><span class="badge ok">ACTIVE</span></div>
+      <div class="kv"><span>Last Revocation Latency</span><span class="mono">${s.revocation_propagation_ms !== null ? esc(s.revocation_propagation_ms) + ' ms' : 'Not measured yet'}</span></div>
     `;
 
     const devRows = (ps.devices || []).map(d => `<div class="kv"><span>${esc(d.user_id)} / ${esc(d.device_id)}</span><span class="badge ${d.status === 'active' ? 'ok' : 'bad'}">${esc(d.status)} @ ${esc(d.home_timezone)}</span></div>`).join('');
-    const authRows = (ps.authorities || []).map(a => `<div class="kv"><span>Authority: ${esc(a.user_id)} (${esc(a.role)})</span><span class="badge ${a.status === 'active' && !a.has_active_threat ? 'ok' : 'bad'}">${esc(a.status.toUpperCase())}${a.has_active_threat ? ' [THREAT: ' + esc(a.last_threat_case) + ']' : ''}</span></div>`).join('');
+    const authRows = (ps.authorities || []).map(a => `<div class="kv"><span>Authority: ${esc(a.user_id)} (${esc(a.role)})</span><span class="badge ${a.status === 'active' && !a.has_active_threat ? 'ok' : 'bad'}">${esc(a.status.toUpperCase())}${a.has_active_threat ? ' [' + esc(a.last_threat_case) + ']' : ''}</span></div>`).join('');
     document.getElementById('policy-status-box').innerHTML = `
-      <div class="kv"><span>Console Protected Digest</span><span class="mono">${esc((ps.console_state_hash || '').slice(0, 20))}...</span></div>
-      <div class="kv"><span>Console audit_enabled / tz_check</span><span class="badge ok">${esc(cs.audit_enabled)} / ${esc(cs.timezone_check_enabled)}</span></div>
+      <div class="kv"><span>Console Snapshot Digest</span><span class="mono">${esc((ps.console_state_hash || '').slice(0, 18))}...</span></div>
+      <div class="kv"><span>Audit Lock / Timezone Check</span><span class="badge blue">${esc(cs.audit_enabled)} / ${esc(cs.timezone_check_enabled)}</span></div>
       ${devRows}
       ${authRows}
     `;
@@ -1253,35 +1725,33 @@ async function refreshState() {
         <td class="mono">${esc(r.sequence ?? '-')}</td>
         <td class="mono">${esc(r.service || '-')}</td>
         <td class="mono">${esc(r.action || '-')}</td>
-        <td class="mono">${esc((r.subject || '-').slice(0, 42))}</td>
+        <td class="mono">${esc((r.subject || '-').slice(0, 38))}</td>
         <td><span class="badge ${r.status === 'SUCCESS' ? 'ok' : 'bad'}">${esc(r.status || '-')}</span></td>
-        <td class="hash-pill">${esc((r.entry_hash || '').slice(0, 18))}...</td>
+        <td class="mono" style="color:var(--blue-text);">${esc((r.entry_hash || '').slice(0, 16))}...</td>
       </tr>
     `).join('');
 
     const alerts = s.alerts || [];
     document.getElementById('alerts-feed').innerHTML = alerts.length === 0
-      ? '<p class="sub">No alerts recorded yet. Run any attack simulation to inspect explainable evidence.</p>'
+      ? '<p class="sub">No security alerts recorded yet. Run any simulation on the left to trigger alerts.</p>'
       : alerts.map(a => `
         <div class="alert-card ${esc(a.severity || 'HIGH')}">
           <div style="display:flex;justify-content:space-between;font-weight:700;font-size:12.5px;">
             <span>[${esc(a.severity || 'HIGH')}] ${esc(a.rule_name)}</span>
-            <span class="mono" style="color:var(--muted);">${esc(a.service || '')}</span>
+            <span class="mono">${esc(a.service || '')}</span>
           </div>
           <div style="font-size:12.5px;margin:4px 0;">${esc(a.description || '')}</div>
-          <div class="mono" style="font-size:11px;color:var(--muted);">Subject: ${esc(a.subject || '-')} | Evidence: ${esc(JSON.stringify(a.evidence || {}))}</div>
+          <div class="mono" style="font-size:11px;color:var(--text-muted);">Subject: ${esc(a.subject || '-')}</div>
         </div>
       `).join('');
 
     if (s.eval_metrics) {
       const m = s.eval_metrics;
       document.getElementById('eval-metrics-box').innerHTML = `
-        <div class="grid-4">
-          <div class="chk-item pass"><span class="mono">F1 Score</span><strong>${esc(m.f1_score)}</strong></div>
-          <div class="chk-item pass"><span class="mono">Precision / Recall</span><strong>${esc(m.precision)} / ${esc(m.recall)}</strong></div>
-          <div class="chk-item pass"><span class="mono">MTTA</span><strong>${esc(m.mtta_ms)} ms</strong></div>
-          <div class="chk-item pass"><span class="mono">FP / 1k Events</span><strong>${esc(m.false_alerts_per_1k)}</strong></div>
-        </div>
+        <div class="stat-card"><div class="stat-label">F1 Score</div><div class="stat-value" style="color:var(--green-text);">${esc(m.f1_score)}</div><div class="stat-meta">Target &ge; 0.90</div></div>
+        <div class="stat-card"><div class="stat-label">Precision / Recall</div><div class="stat-value">${esc(m.precision)} / ${esc(m.recall)}</div><div class="stat-meta">550 labelled events</div></div>
+        <div class="stat-card"><div class="stat-label">Median Alert Latency</div><div class="stat-value">${esc(m.mtta_ms)} ms</div><div class="stat-meta">Zero AI/ML engine</div></div>
+        <div class="stat-card"><div class="stat-label">False Alerts / 1k</div><div class="stat-value">${esc(m.false_alerts_per_1k)}</div><div class="stat-meta">Routine traffic</div></div>
       `;
     }
   } catch (e) {
@@ -1292,10 +1762,10 @@ async function refreshState() {
 async function runAll12() {
   const btn = document.getElementById('btn-run-all');
   btn.disabled = true;
-  btn.textContent = 'Running All Verification Checks...';
+  btn.textContent = 'Running 12 Scenarios...';
   try {
-    await apiCall('/api/sandbox/pqc-transfer', {message: 'Auto-Audit Verified Wire #101', profile: 'v1'}, 'msg-out', 'msg-verdict');
-    await apiCall('/api/sandbox/pqc-transfer', {message: 'Multi-Family Paranoid Wire #102', profile: 'v2-paranoid'}, 'msg-out', 'msg-verdict');
+    await apiCall('/api/sandbox/pqc-transfer', {message: 'Auto Wire #101', profile: 'v1'}, 'msg-out', 'msg-verdict');
+    await apiCall('/api/sandbox/pqc-transfer', {message: 'Paranoid Wire #102', profile: 'v2-paranoid'}, 'msg-out', 'msg-verdict');
     await apiCall('/api/sandbox/file-share/validate', {preset: 'valid_png'}, 'msg-out', 'msg-verdict');
     await apiCall('/api/sandbox/attack/replay', {}, 'msg-out', 'msg-verdict');
     await apiCall('/api/sandbox/attack/recipient-swap', {}, 'msg-out', 'msg-verdict');
@@ -1308,13 +1778,13 @@ async function runAll12() {
     await apiCall('/api/sandbox/lifecycle/test-old-key', {}, 'life-out', 'life-verdict');
     await apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'revoke'}, 'life-out', 'life-verdict');
     await apiCall('/api/sandbox/lifecycle/revoke-and-reenroll', {mode: 'reenroll'}, 'life-out', 'life-verdict');
-    await apiCall('/api/sandbox/resilience/crash-recovery', {}, 'life-out', 'life-verdict');
-    await apiCall('/api/sandbox/resilience/backup', {tamper: false}, 'life-out', 'life-verdict');
-    await apiCall('/api/sandbox/resilience/backup', {tamper: true}, 'life-out', 'life-verdict');
-    await apiCall('/api/sandbox/policy/device-timezone', {mode: 'second_device', user_id: 'alice', device_id: 'dev-rogue-2', timezone: 'Asia/Kolkata'}, 'life-out', 'life-verdict');
-    await apiCall('/api/sandbox/authority/console-action', {mode: 'suspicious', user_id: 'alice', role: 'admin', action: 'DISABLE_AUDIT'}, 'life-out', 'life-verdict');
+    await apiCall('/api/sandbox/resilience/crash-recovery', {}, 'rec-out', 'rec-verdict');
+    await apiCall('/api/sandbox/resilience/backup', {tamper: false}, 'rec-out', 'rec-verdict');
+    await apiCall('/api/sandbox/resilience/backup', {tamper: true}, 'rec-out', 'rec-verdict');
+    await apiCall('/api/sandbox/policy/device-timezone', {mode: 'second_device', user_id: 'alice', device_id: 'dev-rogue-2', timezone: 'Asia/Kolkata'}, 'pol-out', 'pol-verdict');
+    await apiCall('/api/sandbox/authority/console-action', {mode: 'suspicious', user_id: 'alice', role: 'admin', action: 'DISABLE_AUDIT'}, 'pol-out', 'pol-verdict');
     await apiCall('/api/sandbox/audit/injection', {}, 'audit-out', 'audit-verdict');
-    await apiCall('/api/sandbox/toolkit/adapter-run', {mode: 'full_suite'}, 'adapter-out', null);
+    await apiCall('/api/sandbox/toolkit/adapter-run', {mode: 'full_suite'}, 'adapter-out', 'adp-verdict');
     await apiCall('/api/sandbox/detector/lateral-movement', {}, 'det-out', 'det-verdict');
     await apiCall('/api/sandbox/detector/privilege-escalation', {}, 'det-out', 'det-verdict');
     await apiCall('/api/sandbox/detector/clock-skew', {}, 'det-out', 'det-verdict');
@@ -1327,9 +1797,8 @@ async function runAll12() {
   }
 }
 
-refreshState();
-loadRepoTests();
-setInterval(refreshState, 4000);
+applySessionUI(getSession());
+setInterval(() => { if (getSession()) refreshState(); }, 4000);
 </script>
 </body>
 </html>

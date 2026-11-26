@@ -158,6 +158,12 @@ class FileBundlePayload(BaseModel):
     files: List[UploadedFileItem]
 
 
+class LoginPayload(BaseModel):
+    username: str = "admin"
+    role: Optional[str] = None
+    operator_code: Optional[str] = None
+
+
 OBJECTIVE_META = [
     ("key_rotation", "1. Key Rotation & Cutoff"),
     ("revocation", "2. Cross-Node Revocation"),
@@ -233,6 +239,9 @@ class SandboxController:
         self.bob_device_id: str = "dev-bob-workstation-01"
         self.bob_active_key_id: str = ""
         self.cluster_secret = secrets.token_bytes(32)
+        self._session_hmac_key = secrets.token_bytes(32)
+        self._active_ui_sessions: Dict[str, Dict[str, Any]] = {}
+        self.message_ledger: List[Dict[str, Any]] = []
         self.reenroll_svc = DeviceReEnrollment(self.cluster_secret)
         self.last_eval_metrics: Optional[Dict[str, Any]] = None
 
@@ -459,6 +468,7 @@ class SandboxController:
                 "recent_entries": self._read_audit_entries(20),
             },
             "alerts": list(reversed(self.recent_alerts[-25:])),
+            "message_ledger": list(reversed(self.message_ledger[-25:])),
             "eval_metrics": self.last_eval_metrics,
             "checklist": list(self.checklist.values()),
             "checklist_passed": passed_count,
@@ -491,6 +501,16 @@ class SandboxController:
             ct = AESGCM(a_keys.tx_key).encrypt(nonce, json.dumps(pt_obj).encode("utf-8"), aad)
             decrypted = json.loads(AESGCM(b_keys.rx_key).decrypt(nonce, ct, aad).decode("utf-8"))
             latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+            self.message_ledger.append({
+                "id": b_keys.session_id,
+                "sender": payload.sender,
+                "recipient": payload.recipient,
+                "suite": SUITE_V2_PARANOID,
+                "status": "DELIVERED",
+                "ephemeral_wiped": True,
+                "latency_ms": latency_ms,
+                "ts": pt_obj["ts"],
+            })
             self._record_event(
                 "node-b",
                 "PQC_V2_PARANOID_DELIVERED",
@@ -543,6 +563,16 @@ class SandboxController:
         decrypted = self.bob_msg.unpack_envelope(envelope, session_secret, self.sig, self.sig_pub)
         self.kem.wipe_keys()
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+        self.message_ledger.append({
+            "id": envelope["message_id"],
+            "sender": payload.sender,
+            "recipient": payload.recipient,
+            "suite": "track4/v1",
+            "status": "DELIVERED",
+            "ephemeral_wiped": True,
+            "latency_ms": latency_ms,
+            "ts": time.strftime("%H:%M:%SZ", time.gmtime()),
+        })
 
         self._record_event(
             "node-b",
@@ -2123,9 +2153,68 @@ class SandboxController:
             "results": results,
         }
 
+    def login_session(self, payload: LoginPayload) -> Dict[str, Any]:
+        accounts = {
+            "admin": {"display_name": "Security Admin", "role": "ADMIN", "email": "admin@tbv.local"},
+            "alice": {"display_name": "Alice (Owner)", "role": "USER", "email": "alice@tbv.local"},
+            "bob": {"display_name": "Bob (Peer)", "role": "USER", "email": "bob@tbv.local"},
+            "charlie": {"display_name": "Charlie (Node-C)", "role": "USER", "email": "charlie@tbv.local"},
+        }
+        username = (payload.username or "admin").strip().lower()
+        info = accounts.get(username)
+        if info is None:
+            role = (payload.role or "USER").upper()
+            if role not in ("ADMIN", "USER"):
+                role = "USER"
+            info = {"display_name": username.title(), "role": role, "email": f"{username}@tbv.local"}
+
+        session_id = f"sess-{secrets.token_hex(8)}"
+        sig = hmac.new(self._session_hmac_key, f"{username}|{info['role']}|{session_id}".encode("utf-8"), hashlib.sha256).hexdigest()
+        token = f"tbv.{session_id}.{sig[:24]}"
+        session_obj = {
+            "ok": True,
+            "token": token,
+            "username": username,
+            "display_name": info["display_name"],
+            "role": info["role"],
+            "email": info["email"],
+            "session_id": session_id,
+        }
+        self._active_ui_sessions[token] = session_obj
+        self._record_event(
+            self.node_id,
+            "OPERATOR_LOGIN",
+            username,
+            "/auth/session",
+            "SUCCESS",
+            {"role": info["role"], "session_id": session_id},
+        )
+        return session_obj
+
+    def logout_session(self, token: Optional[str] = None) -> Dict[str, Any]:
+        removed = self._active_ui_sessions.pop(token or "", None)
+        if removed:
+            self._record_event(
+                self.node_id,
+                "OPERATOR_LOGOUT",
+                removed["username"],
+                "/auth/session",
+                "SUCCESS",
+                {"session_id": removed["session_id"]},
+            )
+        return {"ok": True, "logged_out": True}
+
 
 def create_sandbox_router(controller: SandboxController) -> APIRouter:
     router = APIRouter(prefix="/api/sandbox", tags=["Interactive Sandbox"])
+
+    @router.post("/auth/login")
+    def sandbox_login(req: LoginPayload):
+        return controller.login_session(req)
+
+    @router.post("/auth/logout")
+    def sandbox_logout(req: Optional[Dict[str, str]] = None):
+        return controller.logout_session((req or {}).get("token"))
 
     @router.get("/state")
     def sandbox_state():
