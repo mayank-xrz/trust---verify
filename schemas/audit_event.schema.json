@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trust-but-verify.dev/schemas/audit_event.schema.json",
+  "title": "AuditEvent",
+  "description": "Tamper-evident structured audit event schema linked by cryptographic hash chains.",
+  "type": "object",
+  "required": [
+    "sequence",
+    "event_id",
+    "timestamp_ns",
+    "node_id",
+    "service",
+    "action",
+    "subject",
+    "resource",
+    "status",
+    "metadata",
+    "prev_hash",
+    "entry_hash"
+  ],
+  "properties": {
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "timestamp_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "node_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+    },
+    "service": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "resource": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["SUCCESS", "DENIED", "SUSPICIOUS", "ERROR"]
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "client_ip": {
+      "type": "string"
+    },
+    "prev_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "entry_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "signature": {
+      "type": "string",
+      "contentEncoding": "base64"
+    }
+  },
+  "additionalProperties": false
+}

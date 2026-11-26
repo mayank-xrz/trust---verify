@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trust-but-verify.dev/schemas/envelope.schema.json",
+  "title": "SecureMessageEnvelope",
+  "description": "Cryptographically bound, post-quantum authenticated secure messaging envelope.",
+  "type": "object",
+  "required": [
+    "version",
+    "message_id",
+    "sender_id",
+    "recipient_id",
+    "sequence_number",
+    "timestamp_ns",
+    "algorithm_suite",
+    "ciphertext",
+    "nonce",
+    "signature"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["1.0.0"]
+    },
+    "message_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sender_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+    },
+    "recipient_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128
+    },
+    "sequence_number": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "timestamp_ns": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "algorithm_suite": {
+      "type": "object",
+      "required": ["kem", "sig", "aead"],
+      "properties": {
+        "kem": {
+          "type": "string",
+          "enum": ["ML-KEM-768", "ML-KEM-1024", "MOCK-KEM-768"]
+        },
+        "sig": {
+          "type": "string",
+          "enum": ["ML-DSA-65", "ML-DSA-87", "MOCK-DSA-65"]
+        },
+        "aead": {
+          "type": "string",
+          "enum": ["AES-256-GCM", "ChaCha20-Poly1305"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ephemeral_kem_public_key": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "kem_ciphertext": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "ciphertext": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "nonce": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "signature": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "additional_authenticated_data": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,92 @@
+version: "3.8"
+
+services:
+  node-1:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY . /app
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8081
+        CMD ["python3", "-m", "src.node.server", "node-1", "8081"]
+    container_name: tbv-node-1
+    ports:
+      - "8081:8081"
+    environment:
+      - NODE_ID=node-1
+      - PORT=8081
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tbv-sandbox-net
+
+  node-2:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY . /app
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8082
+        CMD ["python3", "-m", "src.node.server", "node-2", "8082"]
+    container_name: tbv-node-2
+    ports:
+      - "8082:8082"
+    environment:
+      - NODE_ID=node-2
+      - PORT=8082
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tbv-sandbox-net
+
+  detector:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY . /app
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8085
+        CMD ["python3", "-m", "src.node.server", "detector-service", "8085"]
+    container_name: tbv-detector
+    ports:
+      - "8085:8085"
+    environment:
+      - NODE_ID=detector-service
+      - PORT=8085
+    depends_on:
+      - node-1
+      - node-2
+    networks:
+      - tbv-sandbox-net
+
+  audit-aggregator:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY . /app
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8086
+        CMD ["python3", "-m", "src.node.server", "audit-service", "8086"]
+    container_name: tbv-audit-aggregator
+    ports:
+      - "8086:8086"
+    networks:
+      - tbv-sandbox-net
+
+networks:
+  tbv-sandbox-net:
+    driver: bridge

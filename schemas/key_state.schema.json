@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://trust-but-verify.dev/schemas/key_state.schema.json",
+  "title": "KeyState",
+  "description": "Cryptographic key lifecycle state schema with atomic rotation and cutoff tracking.",
+  "type": "object",
+  "required": [
+    "key_id",
+    "owner_node_id",
+    "algorithm",
+    "public_key_b64",
+    "state",
+    "created_at",
+    "expires_at",
+    "version"
+  ],
+  "properties": {
+    "key_id": {
+      "type": "string",
+      "pattern": "^key-[a-zA-Z0-9_-]{8,64}$"
+    },
+    "owner_node_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+    },
+    "algorithm": {
+      "type": "string",
+      "enum": ["ML-KEM-768", "ML-KEM-1024", "ML-DSA-65", "ML-DSA-87", "MOCK-KEM-768", "MOCK-DSA-65"]
+    },
+    "public_key_b64": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "state": {
+      "type": "string",
+      "enum": ["ACTIVE", "GRACE_PERIOD", "EXPIRED", "REVOKED"]
+    },
+    "created_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "activated_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "grace_period_cutoff": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expires_at": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "revocation_reason": {
+      "type": ["string", "null"]
+    },
+    "revocation_timestamp": {
+      "type": ["integer", "null"]
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

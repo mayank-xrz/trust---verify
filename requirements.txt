@@ -1,0 +1,9 @@
+# Post-Quantum Cryptography & Core Dependencies
+liboqs-python==0.10.0
+cryptography==42.0.8
+jsonschema==4.22.0
+pytest==8.2.1
+click==8.1.7
+fastapi==0.111.0
+uvicorn==0.30.0
+requests==2.32.3
