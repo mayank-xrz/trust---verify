@@ -9,6 +9,8 @@ import subprocess
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
+from .node_bridge import call_node
+
 SUITE = "ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1"
 
 
@@ -93,13 +95,8 @@ def hkdf(secret, salt, info, length=32):
     if not 1 <= length <= 255 * 32:
         raise CryptoError("invalid KDF length")
     request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
-    try:
-        result = subprocess.run(["node", str(Path(__file__).with_name("node_aead.cjs"))],
-                                input=json.dumps(request), text=True, capture_output=True,
-                                check=True, timeout=10)
-        return unb64(json.loads(result.stdout)["data"], length)
-    except (subprocess.SubprocessError, ValueError, KeyError) as exc:
-        raise CryptoError("HKDF operation failed") from exc
+    result = call_node(request, CryptoError)
+    return unb64(result["data"], length)
 
 
 def digest(value):

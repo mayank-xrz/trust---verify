@@ -1,11 +1,7 @@
 """AES-256-GCM through the guaranteed Node.js runtime; no custom cipher code."""
-import json
-from pathlib import Path
-import subprocess
 
+from .node_bridge import call_node
 from .primitives import CryptoError, b64, unb64
-
-HELPER = Path(__file__).with_name("node_aead.cjs")
 
 
 def _call(operation, key, nonce, aad, data, tag=None):
@@ -16,12 +12,7 @@ def _call(operation, key, nonce, aad, data, tag=None):
         if len(tag) != 16:
             raise CryptoError("invalid authentication tag")
         request["tag"] = b64(tag)
-    try:
-        result = subprocess.run(["node", str(HELPER)], input=json.dumps(request), text=True,
-                                capture_output=True, check=True, timeout=10)
-        return json.loads(result.stdout)
-    except (subprocess.SubprocessError, ValueError) as exc:
-        raise CryptoError("AEAD authentication failed") from exc
+    return call_node(request, CryptoError)
 
 
 def encrypt(key, nonce, aad, plaintext):

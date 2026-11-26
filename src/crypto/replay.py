@@ -11,9 +11,17 @@ class ReplayLedger:
         self.max_per_session = max_per_session
         self.max_rows = max_rows
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as db:
-            db.execute("CREATE TABLE IF NOT EXISTS seen (session TEXT, sender TEXT, recipient TEXT, epoch INTEGER, counter INTEGER, PRIMARY KEY(session,sender,recipient,epoch,counter))")
-            db.execute("CREATE TABLE IF NOT EXISTS completed_transfers (session TEXT, sender TEXT, recipient TEXT, transfer_id TEXT, PRIMARY KEY(session,sender,recipient,transfer_id))")
+        db = self._connect()
+        try:
+            with db:
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS seen (session TEXT, sender TEXT, recipient TEXT, epoch INTEGER, counter INTEGER, PRIMARY KEY(session,sender,recipient,epoch,counter))"
+                )
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS completed_transfers (session TEXT, sender TEXT, recipient TEXT, transfer_id TEXT, PRIMARY KEY(session,sender,recipient,transfer_id))"
+                )
+        finally:
+            db.close()
 
     def _connect(self):
         db = sqlite3.connect(self.path, timeout=5)
@@ -39,17 +47,31 @@ class ReplayLedger:
             db.close()
 
     def mark_transfer(self, session, sender, recipient, transfer_id):
-        with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            if db.execute("SELECT COUNT(*) FROM completed_transfers").fetchone()[0] >= self.max_rows:
-                raise CryptoError("transfer ledger capacity reached")
-            try:
-                db.execute("INSERT INTO completed_transfers VALUES (?,?,?,?)",
-                           (session, sender, recipient, transfer_id))
-            except sqlite3.IntegrityError as exc:
-                raise CryptoError("completed transfer replay rejected") from exc
+        db = self._connect()
+        try:
+            with db:
+                db.execute("BEGIN IMMEDIATE")
+                if db.execute("SELECT COUNT(*) FROM completed_transfers WHERE session=?", (session,)).fetchone()[0] >= self.max_rows:
+                    raise CryptoError("transfer ledger capacity reached")
+                try:
+                    db.execute(
+                        "INSERT INTO completed_transfers VALUES (?,?,?,?)",
+                        (session, sender, recipient, transfer_id),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise CryptoError("completed transfer replay rejected") from exc
+        finally:
+            db.close()
 
     def transfer_completed(self, session, sender, recipient, transfer_id):
-        with self._connect() as db:
-            return db.execute("SELECT 1 FROM completed_transfers WHERE session=? AND sender=? AND recipient=? AND transfer_id=?",
-                              (session, sender, recipient, transfer_id)).fetchone() is not None
+        db = self._connect()
+        try:
+            return (
+                db.execute(
+                    "SELECT 1 FROM completed_transfers WHERE session=? AND sender=? AND recipient=? AND transfer_id=?",
+                    (session, sender, recipient, transfer_id),
+                ).fetchone()
+                is not None
+            )
+        finally:
+            db.close()

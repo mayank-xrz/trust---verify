@@ -289,6 +289,137 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError):
             initiate(valid_offer, "alice", "phone", self.alice_sk, reg3)
 
+    def test_handshake_node_process_count_and_distinct_errors(self):
+        from unittest.mock import patch
+        import subprocess as sp
+        from src.crypto import aead, node_bridge
+
+        prekeys = PrekeyStore()
+        offer = prekeys.offer("bob", "laptop", self.bob_sk)
+
+        real_run = sp.run
+        counts = []
+
+        def counting_run(*args, **kwargs):
+            counts.append(args[0])
+            return real_run(*args, **kwargs)
+
+        with patch("src.crypto.node_bridge.subprocess.run", side_effect=counting_run):
+            counts.clear()
+            initiation, alice = initiate(offer, "alice", "phone", self.alice_sk, self.registry)
+            self.assertLessEqual(len(counts), 2)
+
+            counts.clear()
+            ack, bob = accept(offer, initiation, self.bob_sk, self.registry, prekeys)
+            self.assertLessEqual(len(counts), 2)
+
+            counts.clear()
+            finish(ack, initiation, self.registry, alice)
+            self.assertLessEqual(len(counts), 1)
+
+        # Distinct error: AEAD tag mismatch vs timeout vs missing node
+        key = b"\x01" * 32
+        nonce = b"\x02" * 12
+        ct, tag = aead.encrypt(key, nonce, b"aad", b"hello")
+        bad_tag = bytes([tag[0] ^ 0xFF]) + tag[1:]
+        with self.assertRaises(CryptoError) as ctx_auth:
+            aead.decrypt(key, nonce, b"aad", ct, bad_tag)
+        self.assertIn("AEAD authentication failed", str(ctx_auth.exception))
+
+        with patch("src.crypto.node_bridge.subprocess.run", side_effect=sp.TimeoutExpired("node", 10)):
+            with self.assertRaises(CryptoError) as ctx_to:
+                aead.decrypt(key, nonce, b"aad", ct, tag)
+            self.assertIn("timed out", str(ctx_to.exception))
+
+        orig_bin = node_bridge._NODE_BIN
+        try:
+            node_bridge._NODE_BIN = None
+            with patch("src.crypto.node_bridge.shutil.which", return_value=None):
+                with self.assertRaises(CryptoError) as ctx_missing:
+                    aead.decrypt(key, nonce, b"aad", ct, tag)
+                self.assertIn("not found", str(ctx_missing.exception))
+        finally:
+            node_bridge._NODE_BIN = orig_bin
+
+    def test_per_session_replay_cap_and_auto_rekey(self):
+        ledger = ReplayLedger(Path(self.temp.name) / "scoped.db", max_rows=2)
+        ledger.mark("sess-a", "a", "b", 0)
+        ledger.mark("sess-a", "a", "b", 1)
+        with self.assertRaises(CryptoError):
+            ledger.mark("sess-a", "a", "b", 2)
+        # Session B has its own quota
+        ledger.mark("sess-b", "a", "b", 0)
+
+        alice, bob, _, _, _ = self.sessions()
+        session_ledger = ReplayLedger(Path(self.temp.name) / "auto_rekey.db")
+        alice.auto_rekey_at = 2
+        p0 = alice.encrypt(b"m0")
+        p1 = alice.encrypt(b"m1")
+        p2 = alice.encrypt(b"m2")  # triggers auto-rekey to epoch 1
+        self.assertEqual(p2["header"]["epoch"], 1)
+        self.assertEqual(p2["header"]["counter"], 0)
+        self.assertEqual(bob.decrypt(p0, session_ledger), b"m0")
+        self.assertEqual(bob.decrypt(p1, session_ledger), b"m1")
+        self.assertEqual(bob.decrypt(p2, session_ledger), b"m2")
+        self.assertEqual(bob.epoch, 1)
+
+    def test_adapter_at_rest_encryption_audit_chain_and_challenge_bounds(self):
+        import track4_service
+
+        state_root = Path(self.temp.name)
+        def call(request, expect_ok=True):
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "track4_service.py")],
+                input=json.dumps(request),
+                text=True,
+                capture_output=True,
+                env={**os.environ, "TRACK4_STATE_DIR": str(state_root)},
+            )
+            if expect_ok:
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return json.loads(result.stdout)
+            self.assertNotEqual(result.returncode, 0)
+            return result
+
+        secret_body = "top-secret-body-value"
+        key_mat = "super-secret-key-material"
+        self.assertEqual(
+            call({"op": "setup", "owners": {"doc1": "alice"}, "contents": {"doc1": secret_body},
+                  "disabled": [], "key_material": key_mat}),
+            {"ready": True},
+        )
+        raw_state = (state_root / "track4-local" / "state.json").read_text(encoding="utf-8")
+        raw_key = (state_root / "track4-local" / ".storage_key").read_text(encoding="utf-8")
+        self.assertNotIn(secret_body, raw_state)
+        self.assertNotIn(key_mat, raw_state)
+        self.assertNotIn(key_mat, raw_key)
+
+        self.assertEqual(
+            call({"op": "read", "actor": "alice", "asset": "doc1", "request_id": "r1"}),
+            {"decision": "allow", "body": secret_body},
+        )
+        self.assertEqual(
+            call({"op": "audit", "request_id": "unknown-id"}),
+            {"request_id": "unknown-id", "decision": "deny"},
+        )
+
+        # Challenge validation & reuse rejection
+        public, _ = kem_keypair()
+        pk_b64 = b64(public)
+        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "", "public_key": pk_b64}, expect_ok=False)
+        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "x" * 513, "public_key": pk_b64}, expect_ok=False)
+        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "once", "public_key": pk_b64}, expect_ok=True)
+        call({"op": "protected_read", "actor": "alice", "asset": "doc1", "challenge": "once", "public_key": pk_b64}, expect_ok=False)
+
+        # Audit hash chain verification & 1-byte tamper detection
+        state_obj = json.loads((state_root / "track4-local" / "state.json").read_text(encoding="utf-8"))
+        audit_log = state_obj["audit_log"]
+        self.assertGreaterEqual(len(audit_log), 3)
+        self.assertTrue(track4_service.verify_chain(audit_log))
+        tampered_log = copy.deepcopy(audit_log)
+        tampered_log[0]["decision"] = "deny"
+        self.assertFalse(track4_service.verify_chain(tampered_log))
+
 
 if __name__ == "__main__":
     unittest.main()

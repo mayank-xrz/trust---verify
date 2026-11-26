@@ -26,6 +26,7 @@ from pqcrypto.sign import ml_dsa_65
 
 from . import aead
 from . import classical
+from .node_bridge import call_node
 from .primitives import (
     CryptoError,
     SUITE,
@@ -230,14 +231,35 @@ class PrekeyStore:
         return private, dh_private
 
 
-def _derive(kem_shared, dh_shared, init):
+def _handshake_derive(kem_shared, dh_shared, init, sender_id, sender_dev, recv_id, recv_dev, with_confirm=False):
     transcript_hash = hashlib.sha256(canonical(init)).digest()
     salt = hashlib.sha256(b"track4/v1/handshake\x00" + transcript_hash).digest()
-    return hkdf(
-        b"track4/v1/hybrid-secret\x00" + kem_shared + dh_shared,
-        salt,
-        b"track4/v1/session-root\x00" + transcript_hash,
-    )
+    ikm = b"track4/v1/hybrid-secret\x00" + kem_shared + dh_shared
+    info = b"track4/v1/session-root\x00" + transcript_hash
+    s_label = canonical({"identity": sender_id, "device": sender_dev, "epoch": 0})
+    r_label = canonical({"identity": recv_id, "device": recv_dev, "epoch": 0})
+    req = {
+        "op": "hkdf_session",
+        "ikm": b64(ikm),
+        "salt": b64(salt),
+        "info": b64(info),
+        "send_salt": b64(hashlib.sha256(b"track4/v1/chain-init\x00" + s_label).digest()),
+        "send_info": b64(b"track4/v1/chain-key\x00" + s_label),
+        "recv_salt": b64(hashlib.sha256(b"track4/v1/chain-init\x00" + r_label).digest()),
+        "recv_info": b64(b"track4/v1/chain-key\x00" + r_label),
+    }
+    if with_confirm:
+        req["confirm_salt"] = b64(hashlib.sha256(b"track4/v1/confirm-salt\x00" + transcript_hash).digest())
+        req["confirm_info"] = b64(b"track4/v1/key-confirm\x00" + init["session_id"].encode("ascii"))
+    res = call_node(req, CryptoError)
+    root = unb64(res["root"], 32)
+    send_chain = unb64(res["send_chain"], 32)
+    recv_chain = unb64(res["recv_chain"], 32)
+    if with_confirm:
+        confirm_key = unb64(res["confirm_key"], 32)
+        confirm_mac = hmac.new(confirm_key, transcript_hash, hashlib.sha256).hexdigest()
+        return root, send_chain, recv_chain, confirm_mac
+    return root, send_chain, recv_chain
 
 
 def _key_confirmation_mac(root, init):
@@ -279,8 +301,7 @@ def initiate(offer, initiator, initiator_device, signing_secret, registry, state
         unb64(offer["signature"], ml_dsa_65.SIGNATURE_SIZE),
     )
     ciphertext, shared = encapsulate(unb64(unsigned["kem_public_key"], ml_kem_768.PUBLIC_KEY_SIZE))
-    initiator_dh_public, initiator_dh_private = classical.keypair()
-    dh_shared = classical.shared(initiator_dh_private, unb64(unsigned["x25519_public_key"], 44))
+    initiator_dh_public, dh_shared = classical.ephemeral_shared(unb64(unsigned["x25519_public_key"], 44))
     init = {
         "version": VERSION,
         "suite": SUITE,
@@ -294,8 +315,13 @@ def initiate(offer, initiator, initiator_device, signing_secret, registry, state
         "kem_ciphertext": b64(ciphertext),
         "x25519_public_key": b64(initiator_dh_public),
     }
-    root = _derive(shared, dh_shared, init)
-    session = Session(root, init, initiator, initiator_device, ready=False, state_path=state_path)
+    root, send_chain, recv_chain = _handshake_derive(
+        shared, dh_shared, init, initiator, initiator_device, responder, responder_device, with_confirm=False
+    )
+    session = Session(
+        root, init, initiator, initiator_device, ready=False, state_path=state_path,
+        _initial_chains=(send_chain, recv_chain),
+    )
     return {**init, "signature": b64(sign(signing_secret, "track4/v1/init", init))}, session
 
 
@@ -319,7 +345,16 @@ def accept(offer, init_signed, responder_signing_secret, registry, prekeys, stat
     private, dh_private = prekeys.take(init["prekey_id"])
     shared = decapsulate(private, unb64(init["kem_ciphertext"], ml_kem_768.CIPHERTEXT_SIZE))
     dh_shared = classical.shared(dh_private, unb64(init["x25519_public_key"], 44))
-    root = _derive(shared, dh_shared, init)
+    root, send_chain, recv_chain, key_confirm = _handshake_derive(
+        shared,
+        dh_shared,
+        init,
+        init["responder"],
+        init["responder_device"],
+        init["initiator"],
+        init["initiator_device"],
+        with_confirm=True,
+    )
     ack = {
         "version": VERSION,
         "suite": SUITE,
@@ -327,9 +362,12 @@ def accept(offer, init_signed, responder_signing_secret, registry, prekeys, stat
         "transcript_hash": digest(init),
         "responder": init["responder"],
         "responder_device": init["responder_device"],
-        "key_confirm": _key_confirmation_mac(root, init),
+        "key_confirm": key_confirm,
     }
-    session = Session(root, init, init["responder"], init["responder_device"], ready=True, state_path=state_path)
+    session = Session(
+        root, init, init["responder"], init["responder_device"], ready=True, state_path=state_path,
+        _initial_chains=(send_chain, recv_chain),
+    )
     return {**ack, "signature": b64(sign(responder_signing_secret, "track4/v1/ack", ack))}, session
 
 
@@ -366,7 +404,7 @@ class Session:
 
     grace_epochs = 0
 
-    def __init__(self, root, transcript, identity, device, ready=True, state_path=None):
+    def __init__(self, root, transcript, identity, device, ready=True, state_path=None, auto_rekey_at=None, _initial_chains=None):
         self.root = root
         self.transcript = transcript
         self.identity = identity
@@ -375,6 +413,7 @@ class Session:
         self.epoch = 0
         self.send_counter = 0
         self.recv_counter = 0
+        self.auto_rekey_at = MAX_MESSAGES_PER_EPOCH - 10 if auto_rekey_at is None else auto_rekey_at
         self._skipped_keys = {}
         self._send_lock = threading.Lock()
         self.ready = ready
@@ -384,8 +423,11 @@ class Session:
             self.peer, self.peer_device = transcript["initiator"], transcript["initiator_device"]
         else:
             raise CryptoError("session identity mismatch")
-        self._send_chain_key = _derive_chain_key(self.root, self.identity, self.device, self.epoch)
-        self._recv_chain_key = _derive_chain_key(self.root, self.peer, self.peer_device, self.epoch)
+        if _initial_chains is not None:
+            self._send_chain_key, self._recv_chain_key = _initial_chains
+        else:
+            self._send_chain_key = _derive_chain_key(self.root, self.identity, self.device, self.epoch)
+            self._recv_chain_key = _derive_chain_key(self.root, self.peer, self.peer_device, self.epoch)
         if self.state_path is not None and self.ready:
             self._persist()
 
@@ -432,6 +474,7 @@ class Session:
         inst.epoch = int(data["epoch"])
         inst.send_counter = int(data["send_counter"])
         inst.recv_counter = int(data["recv_counter"])
+        inst.auto_rekey_at = int(data.get("auto_rekey_at", MAX_MESSAGES_PER_EPOCH - 10))
         inst._send_chain_key = unb64(data["send_chain_key"], 32)
         inst._recv_chain_key = unb64(data["recv_chain_key"], 32)
         inst._skipped_keys = {
@@ -441,34 +484,43 @@ class Session:
         inst._send_lock = threading.Lock()
         return inst
 
+    def _next_epoch_material(self, next_epoch):
+        salt = hashlib.sha256(b"track4/v1/rekey\x00" + next_epoch.to_bytes(8, "big")).digest()
+        info = b"track4/v1/epoch-root\x00" + canonical(
+            {"session_id": self.transcript["session_id"], "epoch": next_epoch}
+        )
+        new_root = hkdf(self.root, salt, info)
+        send_chain = _derive_chain_key(new_root, self.identity, self.device, next_epoch)
+        recv_chain = _derive_chain_key(new_root, self.peer, self.peer_device, next_epoch)
+        return new_root, send_chain, recv_chain
+
+    def _rekey_locked(self):
+        new_epoch = self.epoch + 1
+        self.root, self._send_chain_key, self._recv_chain_key = self._next_epoch_material(new_epoch)
+        self.epoch = new_epoch
+        self.send_counter = 0
+        self.recv_counter = 0
+        self._skipped_keys.clear()
+        self._persist()
+        return self.epoch
+
     def rekey(self):
         if not self.ready:
             raise CryptoError("handshake not confirmed")
         with self._send_lock:
-            new_epoch = self.epoch + 1
-            salt = hashlib.sha256(b"track4/v1/rekey\x00" + new_epoch.to_bytes(8, "big")).digest()
-            info = b"track4/v1/epoch-root\x00" + canonical(
-                {"session_id": self.transcript["session_id"], "epoch": new_epoch}
-            )
-            self.root = hkdf(self.root, salt, info)
-            self.epoch = new_epoch
-            self.send_counter = 0
-            self.recv_counter = 0
-            self._skipped_keys.clear()
-            self._send_chain_key = _derive_chain_key(self.root, self.identity, self.device, self.epoch)
-            self._recv_chain_key = _derive_chain_key(self.root, self.peer, self.peer_device, self.epoch)
-            self._persist()
-            return self.epoch
+            return self._rekey_locked()
 
     def encrypt(self, plaintext, message_id=None, epoch=None):
         if not self.ready:
             raise CryptoError("handshake not confirmed")
-        target_epoch = self.epoch if epoch is None else epoch
-        if type(target_epoch) is not int or target_epoch != self.epoch:
-            raise CryptoError("invalid key epoch")
         if not isinstance(plaintext, bytes):
             raise CryptoError("message limit exceeded or invalid plaintext")
         with self._send_lock:
+            if epoch is None and self.send_counter >= self.auto_rekey_at:
+                self._rekey_locked()
+            target_epoch = self.epoch if epoch is None else epoch
+            if type(target_epoch) is not int or target_epoch != self.epoch:
+                raise CryptoError("invalid key epoch")
             if self.send_counter >= MAX_MESSAGES_PER_EPOCH:
                 raise CryptoError("message limit exceeded")
             counter = self.send_counter
@@ -503,20 +555,33 @@ class Session:
     def decrypt(self, packet, ledger, epoch=None):
         if not self.ready:
             raise CryptoError("handshake not confirmed")
-        expected_epoch = self.epoch if epoch is None else epoch
-        if type(expected_epoch) is not int or expected_epoch != self.epoch:
-            raise CryptoError("invalid key epoch")
         header = packet["header"]
         _check_protocol(header)
-        if type(header.get("epoch")) is not int:
+        pkt_epoch = header.get("epoch")
+        if type(pkt_epoch) is not int:
             raise CryptoError("invalid key epoch")
+
+        auto_advance = None
+        if epoch is None:
+            if pkt_epoch == self.epoch:
+                expected_epoch = self.epoch
+            elif pkt_epoch == self.epoch + 1:
+                expected_epoch = pkt_epoch
+                auto_advance = self._next_epoch_material(pkt_epoch)
+            else:
+                raise CryptoError("recipient, session, or epoch mismatch")
+        else:
+            if type(epoch) is not int or epoch != self.epoch:
+                raise CryptoError("invalid key epoch")
+            expected_epoch = epoch
+
         if (
             header.get("session_id"),
             header.get("sender"),
             header.get("sender_device"),
             header.get("recipient"),
             header.get("recipient_device"),
-            header.get("epoch"),
+            pkt_epoch,
         ) != (
             self.transcript["session_id"],
             self.peer,
@@ -531,6 +596,42 @@ class Session:
             header.get("message_id"), str
         ):
             raise CryptoError("invalid message metadata")
+
+        if auto_advance is not None:
+            new_root, new_send_chain, new_recv_chain = auto_advance
+            if counter > MAX_SKIP:
+                raise CryptoError("message skip limit exceeded")
+            chain = new_recv_chain
+            skipped = {}
+            idx = 0
+            while idx < counter:
+                chain, sk = _ratchet_step(chain, self.peer, self.peer_device, idx, expected_epoch)
+                skipped[(expected_epoch, idx)] = sk
+                idx += 1
+            chain, msg_key = _ratchet_step(chain, self.peer, self.peer_device, counter, expected_epoch)
+            plaintext = aead.decrypt(
+                msg_key,
+                counter.to_bytes(12, "big"),
+                canonical(header),
+                unb64(packet["ciphertext"]),
+                unb64(packet["tag"], 16),
+            )
+            ledger.mark(
+                header["session_id"],
+                self.peer + "/" + self.peer_device,
+                self.identity + "/" + self.device,
+                counter,
+                epoch=expected_epoch,
+            )
+            self.root = new_root
+            self._send_chain_key = new_send_chain
+            self._recv_chain_key = chain
+            self.epoch = expected_epoch
+            self.send_counter = 0
+            self.recv_counter = counter + 1
+            self._skipped_keys = skipped
+            self._persist()
+            return plaintext
 
         skip_id = (expected_epoch, counter)
         if skip_id in self._skipped_keys:

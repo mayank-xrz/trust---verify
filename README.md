@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![NIST FIPS 203](https://img.shields.io/badge/NIST-ML--KEM--768-success)](https://csrc.nist.gov/pubs/fips/203/final)
 [![NIST FIPS 204](https://img.shields.io/badge/NIST-ML--DSA--65-success)](https://csrc.nist.gov/pubs/fips/204/final)
-[![Security Tests](https://img.shields.io/badge/Security%20Tests-41%2F41%20Passing-brightgreen)]()
+[![Security Tests](https://img.shields.io/badge/Security%20Tests-26%2F26%20Passing-brightgreen)]()
 [![Zero AI/ML](https://img.shields.io/badge/AI%2FML%20Deps-ZERO-success)]()
 
 ---
@@ -113,7 +113,7 @@ Tested from a fresh clone on macOS / Linux. Zero external binaries required.
 # 1. Install pinned requirements & pre-push hooks
 make setup
 
-# 2. Run the complete 41-test security & regression suite
+# 2. Run the 26-test core crypto, audit, detector, and lifecycle suite
 make test
 
 # 3. Run performance & cryptographic overhead benchmarks
@@ -131,11 +131,10 @@ make clean
 
 ### Manual Execution (No Make Required)
 
-#### Run All Security Tests
+#### Run All Core Security Tests
 ```bash
-python3 -m pytest tests/test_crypto_security.py tests/test_lifecycle_chaos.py \
-    tests/test_log_injection.py tests/test_detector_eval.py \
-    tests/test_integration_e2e.py tests/test_security_regression.py tests/test_schemas.py -v
+python3 -m pytest tests/test_crypto.py tests/test_detector_eval.py \
+    tests/test_log_injection.py tests/test_lifecycle_chaos.py -v
 ```
 
 #### Run Benchmarks
