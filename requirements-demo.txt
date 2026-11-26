@@ -1,4 +1,0 @@
-# Demo and multi-node sandbox dependencies.
-# The canonical dependency set lives in requirements.txt; this file is an alias
-# so `pip install -r requirements-demo.txt` cannot downgrade packages.
--r requirements.txt
