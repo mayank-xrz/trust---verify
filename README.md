@@ -211,3 +211,107 @@ python3 -m src.node.operator_cli alerts
 * [`schemas/envelope.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/envelope.schema.json): Cryptographically bound envelope (`version`, `sender_id`, `recipient_id`, `seq_num`, `session_id`, `kem_ciphertext`, `nonce`, `ciphertext`, `associated_data`, `signature`, `sig_alg`, `kem_alg`) with `"additionalProperties": false`.
 * [`schemas/key_state.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/key_state.schema.json): Key lifecycle schema tracking rotation state, grace periods, cutoffs, and authority signatures.
 * [`schemas/audit_event.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/audit_event.schema.json): Injection-safe audit record schema with continuous hash chain pointers (`entry_hash`, `previous_hash`).
+
+---
+
+## 🔐 PQC & Crypto Engineer — Scope
+
+| Objective | Code Path | Acceptance Test File | Demo Command |
+| :--- | :--- | :--- | :--- |
+| **1. Replay & Recipient Binding** | [`src/crypto/envelope.py`](src/crypto/envelope.py), [`src/crypto/replay_cache.py`](src/crypto/replay_cache.py) | [`tests/test_replay_binding.py`](tests/test_replay_binding.py) | `python -m src.cli demo-replay` |
+| **2. Forward Secrecy** | [`src/crypto/handshake.py`](src/crypto/handshake.py) | [`tests/test_forward_secrecy.py`](tests/test_forward_secrecy.py) | `python -m src.cli demo-forward-secrecy` |
+| **3. Delivery Under Loss / Reordering** | [`src/crypto/delivery.py`](src/crypto/delivery.py) | [`tests/test_delivery.py`](tests/test_delivery.py) | `python -m src.cli demo-chunked-loss` |
+| **4. Peer-Bound Session Resumption** | [`src/crypto/resumption.py`](src/crypto/resumption.py) | [`tests/test_resumption.py`](tests/test_resumption.py) | `python -m src.cli demo-resumption-binding` |
+
+> **Standards precision:** ML-DSA (FIPS 204) relies on **both Module-LWE and Module-SIS** (not Module-SIS alone). FIPS 206 (FN-DSA / Falcon) is **draft / expected** and not yet finalized.
+
+---
+
+## 📚 Course Provenance and Documentation
+
+The educational and protocol-risk documentation in `docs/` is derived from **Prof. Alfred Menezes's Cryptography 101** curriculum at the University of Waterloo (<https://cryptography101.ca/>), with attribution; any errors are the repository authors' own.
+
+* [01 — Course Provenance & Attribution](docs/01-course-provenance.md)
+* [02 — Protocol-Level Quantum Risk & HNDL Prioritization](docs/02-protocol-risk.md)
+* [03 — 16-Module PQC Syllabus & Resource Index](docs/03-syllabus.md)
+* [04 — NIST PQC Standards Reference (FIPS 203–206)](docs/04-nist-standards.md)
+* [05 — PQC Migration Engineering](docs/05-migration-engineering.md)
+* [06 — Mathematical Foundations (LLL, SIS/M-SIS, LWE/M-LWE)](docs/06-math-foundations.md)
+* [07 — Corrections & Part B Scope Checklist](docs/07-corrections-and-scope.md)
+
+---
+
+## 💻 Clean-Machine Setup
+
+* **OS & Python:** macOS or Linux, Python 3.11+ (verified on macOS arm64 with Python 3.15.2).
+* **System dependencies:** None required beyond Python 3.11+ and `pip` (`pqcrypto==1.0.0` ships prebuilt wheels for ML-KEM-768 and ML-DSA-65).
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run full pytest suite (including the 4 crypto acceptance test files)
+pytest -v tests/
+
+# Run all 6 reproducible demo & verification CLI commands
+python -m src.cli demo-replay
+python -m src.cli demo-forward-secrecy
+python -m src.cli demo-chunked-loss
+python -m src.cli demo-resumption-binding
+python -m src.cli verify-logs
+python -m src.cli doc-check
+
+# Run the Track-4-Toolkit lost-device validator (no regression)
+python ../Track-4-Toolkit/validate.py --entry ./track4_service.py
+```
+
+---
+
+## 📦 Dependency List (Pinned Versions & Licenses)
+
+See [`requirements.txt`](requirements.txt) for exact pins:
+* `cryptography==42.0.8` (Apache-2.0 / BSD-3-Clause) — X25519, HKDF-SHA256, AES-256-GCM, SHA-256
+* `pqcrypto==1.0.0` (MIT / Apache-2.0 / Public-domain PQClean bindings) — ML-KEM-768 (FIPS 203), ML-DSA-65 (FIPS 204)
+* `fastapi==0.111.0`, `uvicorn==0.30.0`, `pydantic==2.7.4`, `jsonschema==4.22.0`, `pytest==8.2.1`, `httpx==0.27.2`, `click==8.1.7`, `requests==2.32.3`, `sqlalchemy==2.0.30`, `alembic==1.14.0`, `psycopg[binary]==3.2.3`
+
+---
+
+## 🧪 Negative-Test Output Snippet
+
+```text
+$ ../.venv/bin/pytest -q tests/test_replay_binding.py tests/test_forward_secrecy.py tests/test_delivery.py tests/test_resumption.py -s
+20 passed in 0.18s
+
+$ ../.venv/bin/python -m src.cli demo-replay
+{
+  "demo": "demo-replay",
+  "valid_accepted": true,
+  "replay_rejected": true,
+  "recipient_mismatch_rejected": true,
+  "log_valid": true
+}
+```
+
+---
+
+## ⏱️ Timing and Ordering Assumptions
+
+* **Chunk-delivery timeout:** `DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0` seconds (configurable in `ChunkReceiver`); incomplete messages past timeout are discarded and logged as `delivery_failed_incomplete`.
+* **Replay counter window:** Sliding window of `256` counters per `(sender_identity, recipient_identity, session_id)` in `PersistentReplayCache` (configurable).
+* **Clock-skew buffer:** ±2000 ms clock-skew buffer unchanged (`ClockSyncBuffer` in `src/detector/clock_sync.py` was not modified).
+
+---
+
+## ⚠️ Limitations and Honest Non-Goals
+
+* **Python memory zeroization:** Python `bytes` objects are immutable and garbage-collected; zeroization in `src/crypto/handshake.py` (`_best_effort_zeroize`) overwrites `bytearray` buffers and drops references, which is best-effort (brief residual copies may exist in the CPython heap until overwritten or freed).
+* **Session resumption edge cases:** `PersistentResumptionStore` is single-node SQLite-backed and assumes the responder holds the ticket database; cross-node distributed ticket replication without shared storage is not implemented here.
+* **Out-of-scope subsystems:** Backup-key management, key-rotation grace/cutoff internals, revocation broadcast, WAL recovery, and the detector rule engine are out of this role's scope and were left untouched.
+* **Timeline verification flag:** full exclusive PQC by 2035 — needs verification against agency-specific updates (see [docs/05-migration-engineering.md](docs/05-migration-engineering.md)).
+
+---
+
+## 🛡️ Threat Model Delta
+
+These controls protect against **message replay across restarts**, **recipient/device substitution**, **retroactive decryption of past sessions upon long-term ML-DSA identity-key compromise**, **corrupt or out-of-order chunked delivery**, and **session-ID hijacking during resumption**. They do **not** protect against a **compromised endpoint** (active malware reading live memory/keys), **compromise of a long-term ML-DSA key for future impersonation**, or **volumetric denial-of-service (DoS)** attacks.
