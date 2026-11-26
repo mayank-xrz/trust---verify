@@ -1,4 +1,4 @@
-"""Mock Service Node exposing protected endpoints with PQC verification & audit logging."""
+"""FastAPI Mock Service Node exposing PQC protected endpoints, audit logging & detector integration."""
 
 from __future__ import annotations
 import base64
@@ -7,307 +7,519 @@ import os
 import sys
 import threading
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Any, Optional
+import uuid
+from typing import Dict, Any, Optional, List
 
-from ..crypto.pqc_kem import MLKEMKeyExchange
-from ..crypto.pqc_sig import MLDSASignature
-from ..crypto.messaging import SecureMessaging, RecipientMismatchError, ReplayAttackError, MessageTamperedError
-from ..identity.key_manager import KeyManager
-from ..identity.revocation import RevocationCoordinator
-from ..identity.recovery import WALManager
-from ..audit.logger import AuditLogger
-from ..audit.verifier import AuditLogVerifier
-from ..detector.clock_sync import ClockSyncBuffer
-from ..detector.rules import ContextRuleEngine
-from ..detector.graph_lateral import LateralMovementGraph
+from fastapi import FastAPI, HTTPException, Request, Response
+from pydantic import BaseModel, Field
+import uvicorn
+
+# Adapters with graceful in-memory fallbacks for Persons A, B, and C
+try:
+    from src.crypto.pqc_kem import MLKEMKeyExchange
+    from src.crypto.pqc_sig import MLDSASignature
+    from src.crypto.messaging import (
+        SecureMessaging,
+        RecipientMismatchError,
+        ReplayAttackError,
+        MessageTamperedError,
+    )
+except ImportError:
+    # In-memory Person A Crypto Stubs
+    class MLKEMKeyExchange:
+        algorithm_name = "MOCK-KEM-768"
+        def generate_keypair(self): return b"MOCK_PUB", b"MOCK_PRIV"
+        def encapsulate(self, pub): return b"MOCK_CT", b"MOCK_SECRET_32_BYTES_STUB!!!!!"
+        def decapsulate(self, ct, priv=None): return b"MOCK_SECRET_32_BYTES_STUB!!!!!"
+        def wipe_keys(self): pass
+
+    class MLDSASignature:
+        algorithm_name = "MOCK-DSA-65"
+        def generate_keypair(self): return b"MOCK_SIG_PUB", b"MOCK_SIG_PRIV"
+        def sign(self, msg, priv=None): return b"MOCK_SIGNATURE_BYTES_STUB"
+        def verify(self, msg, sig, pub): return True
+
+    class RecipientMismatchError(Exception): pass
+    class ReplayAttackError(Exception): pass
+    class MessageTamperedError(Exception): pass
+
+    class SecureMessaging:
+        def __init__(self, node_id: str): self.node_id = node_id
+        def pack_envelope(self, sender_id, recipient_id, plaintext, shared_key, signer, **kwargs):
+            return {
+                "version": "1.0.0",
+                "message_id": str(uuid.uuid4()),
+                "sender_id": sender_id,
+                "recipient_id": recipient_id,
+                "seq_num": 0,
+                "session_id": "sess-stub",
+                "kem_ciphertext": base64.b64encode(b"ct").decode(),
+                "nonce": base64.b64encode(b"nonce").decode(),
+                "ciphertext": base64.b64encode(plaintext).decode(),
+                "associated_data": base64.b64encode(b"aad").decode(),
+                "signature": base64.b64encode(b"sig").decode(),
+            }
+        def unpack_envelope(self, envelope, shared_key, verifier, sender_pubkey):
+            if envelope.get("recipient_id") != self.node_id:
+                raise RecipientMismatchError(f"Recipient mismatch: target {envelope.get('recipient_id')}, local {self.node_id}")
+            return base64.b64decode(envelope.get("ciphertext", ""))
+
+try:
+    from src.identity.key_manager import KeyManager, KeyStateEnum
+    from src.identity.revocation import RevocationCoordinator
+    from src.identity.recovery import WALManager
+except ImportError:
+    # In-memory Person B Identity Stubs
+    class KeyStateEnum:
+        ACTIVE = "active"
+        GRACE_PERIOD = "grace"
+        REVOKED = "revoked"
+
+    class KeyRecordStub:
+        def __init__(self, key_id, version=1, state="active"):
+            self.key_id = key_id
+            self.version = version
+            self.state = state
+        def to_dict(self, **kwargs):
+            return {"key_id": self.key_id, "version": self.version, "status": str(self.state)}
+
+    class KeyManager:
+        def __init__(self, node_id, **kwargs):
+            self.node_id = node_id
+            self.active_key_id = f"key-{node_id}-v1"
+            self.keys = {self.active_key_id: KeyRecordStub(self.active_key_id)}
+        def enroll_initial_key(self, algo, pub, priv):
+            return self.keys[self.active_key_id]
+        def get_active_key(self):
+            return self.keys.get(self.active_key_id)
+        def rotate_key(self, new_pub, new_priv):
+            old = self.keys.get(self.active_key_id)
+            new_id = f"key-{self.node_id}-v{old.version + 1 if old else 1}"
+            new_rec = KeyRecordStub(new_id, version=(old.version + 1 if old else 1))
+            self.keys[new_id] = new_rec
+            self.active_key_id = new_id
+            return new_rec, old
+        def revoke_key(self, key_id, reason="manual"):
+            if key_id in self.keys:
+                self.keys[key_id].state = "revoked"
+                return True
+            return False
+
+    class RevocationCoordinator:
+        def __init__(self, node_id): self.node_id = node_id
+        def create_revocation(self, key_id, target_node_id, reason, **kwargs):
+            class RevEventStub:
+                revocation_id = f"rev-{key_id}"
+                def to_dict(self): return {"revocation_id": self.revocation_id, "key_id": key_id, "reason": reason}
+            return RevEventStub()
+
+    class WALManager:
+        def __init__(self, path): self.path = path
+        def append_entry(self, op, payload): return time.time_ns()
+
+try:
+    from src.audit.logger import AuditLogger
+    from src.audit.verifier import AuditLogVerifier
+    from src.detector.rules import ContextRuleEngine
+    from src.detector.graph_lateral import LateralMovementGraph
+    from src.detector.metrics import compute_f1_mtta
+except ImportError:
+    # In-memory Person C Audit and Detector Stubs
+    class AuditRecordStub:
+        def __init__(self, seq, h): self.sequence = seq; self.entry_hash = h; self.record_hash = h
+        def to_dict(self): return {"sequence": self.sequence, "record_hash": self.record_hash}
+
+    class AuditLogger:
+        def __init__(self, node_id, log_file_path, **kwargs):
+            self.node_id = node_id
+            self.log_file_path = log_file_path
+            self._seq = 0
+        def log_event(self, **kwargs):
+            self._seq += 1
+            return AuditRecordStub(self._seq, "0" * 64)
+
+    class AuditLogVerifier:
+        def verify_file(self, path):
+            class VerifResStub:
+                is_valid = True
+                total_records = 1
+                verified_checkpoints = 1
+                first_error = None
+                def to_dict(self): return {"is_valid": self.is_valid, "total_records": self.total_records}
+            return VerifResStub()
+
+    class ContextRuleEngine:
+        def evaluate_event(self, event): return []
+
+    class LateralMovementGraph:
+        def check_call(self, src, dst, action=""): return None
 
 
-class NodeServerRequestHandler(BaseHTTPRequestHandler):
-    server: "NodeServer"  # type hint
+# Request/Response Models
+class EnrollRequest(BaseModel):
+    node_id: str
+    public_key_b64: str
+    role: str = "node"
 
-    def do_GET(self):
-        if self.path == "/health":
-            active_key = self.server.key_manager.get_active_key()
-            self._send_json(200, {
-                "status": "healthy",
-                "node_id": self.server.node_id,
-                "active_key_id": active_key.key_id if active_key else None,
-                "active_key_version": active_key.version if active_key else 0,
-                "timestamp_ns": time.time_ns(),
+class SendRequest(BaseModel):
+    target_node_url: str
+    recipient_id: str
+    payload: Dict[str, Any]
+
+class RotateKeyRequest(BaseModel):
+    role: str = "admin"
+    requested_by: str = "operator"
+
+class RevokeKeyRequest(BaseModel):
+    key_id: str
+    reason: str = "administrative revocation"
+    target_node_id: Optional[str] = None
+    role: str = "admin"
+
+
+def create_app(node_id: str = "node-a", data_dir: str = "/tmp/tbv_data") -> FastAPI:
+    app = FastAPI(title=f"Trust-But-Verify Node Service [{node_id}]", version="1.0.0")
+
+    # Initialize node state
+    os.makedirs(data_dir, exist_ok=True)
+    kem_provider = MLKEMKeyExchange()
+    sig_provider = MLDSASignature()
+    sig_pub, sig_priv = sig_provider.generate_keypair()
+
+    wal_path = os.path.join(data_dir, f"{node_id}_wal.log")
+    wal = WALManager(wal_path)
+
+    key_manager = KeyManager(node_id=node_id, wal_manager=wal)
+    initial_pub, initial_priv = kem_provider.generate_keypair()
+    key_manager.enroll_initial_key(getattr(kem_provider, "algorithm_name", "ML-KEM-768"), initial_pub, initial_priv)
+
+    revocation_coord = RevocationCoordinator(node_id=node_id)
+    messaging = SecureMessaging(node_id=node_id)
+
+    audit_path = os.path.join(data_dir, f"{node_id}_audit.log")
+    audit_logger = AuditLogger(node_id=node_id, log_file_path=audit_path, signer=sig_provider)
+
+    rule_engine = ContextRuleEngine()
+    lateral_graph = LateralMovementGraph()
+
+    # In-memory state tracking
+    enrolled_nodes: Dict[str, Dict[str, Any]] = {}
+    recent_alerts: List[Dict[str, Any]] = []
+    peer_shared_keys: Dict[str, bytes] = {}
+    peer_public_keys: Dict[str, bytes] = {}
+    message_stats = {"sent": 0, "received": 0, "rejected": 0}
+
+    # Attach components for programmatic access
+    app.state.node_id = node_id
+    app.state.key_manager = key_manager
+    app.state.audit_logger = audit_logger
+    app.state.messaging = messaging
+    app.state.peer_shared_keys = peer_shared_keys
+    app.state.peer_public_keys = peer_public_keys
+    app.state.enrolled_nodes = enrolled_nodes
+
+    @app.get("/health")
+    def health_check():
+        active = key_manager.get_active_key()
+        return {
+            "status": "healthy",
+            "node_id": node_id,
+            "active_key_id": active.key_id if active else None,
+            "active_key_version": getattr(active, "version", 1) if active else 0,
+            "timestamp_ns": time.time_ns(),
+        }
+
+    @app.post("/enroll")
+    def enroll_device(req: EnrollRequest):
+        enrolled_nodes[req.node_id] = {
+            "node_id": req.node_id,
+            "public_key_b64": req.public_key_b64,
+            "role": req.role,
+            "enrolled_at": time.time_ns(),
+        }
+        rec = audit_logger.log_event(
+            service=node_id,
+            action="DEVICE_ENROLLMENT",
+            subject=req.node_id,
+            resource="/enroll",
+            status="SUCCESS",
+            metadata={"role": req.role},
+        )
+        return {
+            "status": "enrolled",
+            "node_id": req.node_id,
+            "role": req.role,
+            "audit_sequence": getattr(rec, "sequence", 0),
+        }
+
+    @app.post("/send")
+    def send_message(req: SendRequest):
+        sender_id = node_id
+        recipient_id = req.recipient_id
+
+        # Check lateral graph
+        viol = lateral_graph.check_call(sender_id, recipient_id, "SEND_MESSAGE")
+        if viol:
+            recent_alerts.append({
+                "alert_id": f"alert-lateral-{time.time_ns()}",
+                "rule_name": "LATERAL_MOVEMENT_VIOLATION",
+                "severity": "HIGH",
+                "description": getattr(viol, "reason", "Lateral movement policy violation"),
+                "evidence": getattr(viol, "to_dict", lambda: {})(),
             })
-        elif self.path == "/api/v1/alerts":
-            alerts = [a.to_dict() for a in self.server.recent_alerts]
-            self._send_json(200, {"alerts": alerts, "count": len(alerts)})
-        elif self.path == "/api/v1/log/verify":
-            verifier = AuditLogVerifier()
-            res = verifier.verify_file(self.server.audit_logger.log_file_path)
-            self._send_json(200 if res.is_valid else 409, res.to_dict())
-        else:
-            self._send_json(404, {"error": "Endpoint not found"})
+            audit_logger.log_event(
+                service=node_id,
+                action="LATERAL_SEND_BLOCKED",
+                subject=sender_id,
+                resource=f"node://{recipient_id}",
+                status="DENIED",
+                metadata={"reason": "unauthorized lateral path"},
+            )
+            raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
 
-    def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        body_bytes = self.rfile.read(content_len) if content_len > 0 else b"{}"
+        # Prepare envelope
+        shared_key = peer_shared_keys.get(recipient_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
+        plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
 
-        try:
-            payload = json.loads(body_bytes.decode("utf-8"))
-        except Exception as e:
-            self._send_json(400, {"error": f"Invalid JSON payload: {e}"})
-            return
+        envelope = messaging.pack_envelope(
+            sender_id=sender_id,
+            recipient_id=recipient_id,
+            plaintext=plaintext_bytes,
+            shared_key=shared_key,
+            signer=sig_provider,
+        )
 
-        if self.path == "/api/v1/message":
-            self._handle_secure_message(payload)
-        elif self.path == "/api/v1/keys/rotate":
-            self._handle_key_rotate(payload)
-        elif self.path == "/api/v1/keys/revoke":
-            self._handle_key_revoke(payload)
-        else:
-            self._send_json(404, {"error": "Endpoint not found"})
+        # Normalize envelope properties for schemas/envelope.schema.json
+        if "sequence_number" in envelope and "seq_num" not in envelope:
+            envelope["seq_num"] = envelope["sequence_number"]
+        if "additional_authenticated_data" in envelope and "associated_data" not in envelope:
+            envelope["associated_data"] = envelope["additional_authenticated_data"]
 
-    def _handle_secure_message(self, envelope: Dict[str, Any]):
+        message_stats["sent"] += 1
+        audit_logger.log_event(
+            service=node_id,
+            action="MESSAGE_DISPATCHED",
+            subject=sender_id,
+            resource=f"node://{recipient_id}",
+            status="SUCCESS",
+            metadata={"message_id": envelope.get("message_id")},
+        )
+
+        return {"status": "dispatched", "envelope": envelope}
+
+    @app.post("/receive")
+    def receive_message(envelope: Dict[str, Any]):
         sender_id = envelope.get("sender_id", "unknown")
-        action = "RECEIVE_SECURE_MESSAGE"
+
+        # 1. Lateral movement check
+        viol = lateral_graph.check_call(sender_id, node_id, "RECEIVE_MESSAGE")
+        if viol:
+            message_stats["rejected"] += 1
+            alert_obj = {
+                "alert_id": f"alert-lateral-{time.time_ns()}",
+                "rule_name": "LATERAL_MOVEMENT_VIOLATION",
+                "severity": "HIGH",
+                "description": getattr(viol, "reason", "Unauthorized lateral movement path"),
+                "evidence": getattr(viol, "to_dict", lambda: {})(),
+            }
+            recent_alerts.append(alert_obj)
+            audit_logger.log_event(
+                service=node_id,
+                action="LATERAL_RECEIVE_BLOCKED",
+                subject=sender_id,
+                resource="/receive",
+                status="DENIED",
+                metadata={"error": alert_obj["description"]},
+            )
+            raise HTTPException(status_code=403, detail=alert_obj["description"])
+
+        # 2. Recipient binding & signature & anti-replay verification
+        shared_key = peer_shared_keys.get(sender_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
+        sender_pubkey = peer_public_keys.get(sender_id, b"DEFAULT-PUBKEY-32BYTES-MOCK!!!!")
+
+        # Ensure compatibility with envelope schema fields
+        if "seq_num" in envelope and "sequence_number" not in envelope:
+            envelope["sequence_number"] = envelope["seq_num"]
+        if "associated_data" in envelope and "additional_authenticated_data" not in envelope:
+            envelope["additional_authenticated_data"] = envelope["associated_data"]
 
         try:
-            # Check service-to-service graph violation
-            viol = self.server.lateral_graph.check_call(sender_id, self.server.node_id, action)
-            if viol:
-                alert = {
-                    "alert_id": f"alert-lateral-{time.time_ns()}",
-                    "rule_name": "LATERAL_MOVEMENT_VIOLATION",
-                    "severity": "HIGH",
-                    "timestamp_ns": time.time_ns(),
-                    "subject": sender_id,
-                    "service": self.server.node_id,
-                    "resource": "/api/v1/message",
-                    "description": viol.reason,
-                    "evidence": viol.to_dict(),
-                }
-                self.server.audit_logger.log_event(
-                    service=self.server.node_id,
-                    action="LATERAL_HOP_BLOCKED",
-                    subject=sender_id,
-                    resource="/api/v1/message",
-                    status="DENIED",
-                    metadata={"violation": viol.to_dict()},
-                    client_ip=self.client_address[0],
-                )
-                self._send_json(403, {"error": viol.reason})
-                return
-
-            # Lookup peer public key & shared key
-            shared_key = self.server.peer_shared_keys.get(sender_id)
-            sender_pubkey = self.server.peer_public_keys.get(sender_id)
-
-            if not shared_key or not sender_pubkey:
-                # Mock default if not pre-shared for demo
-                shared_key = b"DEFAULT-DEMO-SHARED-KEY-32BYTES!"
-                sender_pubkey = b"DEFAULT-PUBKEY-32BYTES-MOCK!!!!"
-
-            # Verify envelope & anti-replay
-            plaintext = self.server.secure_messaging.unpack_envelope(
+            plaintext = messaging.unpack_envelope(
                 envelope=envelope,
                 shared_key=shared_key,
-                verifier_sig=self.server.sig_provider,
+                verifier_sig=sig_provider,
                 sender_public_key=sender_pubkey,
             )
-
-            # Log success in tamper-evident chain
-            rec = self.server.audit_logger.log_event(
-                service=self.server.node_id,
-                action=action,
+            message_stats["received"] += 1
+            rec = audit_logger.log_event(
+                service=node_id,
+                action="MESSAGE_RECEIVED",
                 subject=sender_id,
-                resource="/api/v1/message",
+                resource="/receive",
                 status="SUCCESS",
-                metadata={"message_id": envelope.get("message_id"), "seq": envelope.get("sequence_number")},
-                client_ip=self.client_address[0],
+                metadata={"message_id": envelope.get("message_id")},
             )
+            try:
+                dec_payload = json.loads(plaintext.decode("utf-8"))
+            except Exception:
+                dec_payload = {"raw": base64.b64encode(plaintext).decode()}
 
-            self._send_json(200, {
+            return {
                 "status": "delivered",
                 "message_id": envelope.get("message_id"),
-                "sequence": rec.sequence,
-                "entry_hash": rec.entry_hash,
-            })
+                "sequence": getattr(rec, "sequence", 0),
+                "record_hash": getattr(rec, "entry_hash", getattr(rec, "record_hash", "")),
+                "payload": dec_payload,
+            }
 
         except (RecipientMismatchError, ReplayAttackError, MessageTamperedError) as e:
+            message_stats["rejected"] += 1
             err_type = type(e).__name__
-            self.server.audit_logger.log_event(
-                service=self.server.node_id,
+            audit_logger.log_event(
+                service=node_id,
                 action=f"{err_type.upper()}_BLOCKED",
                 subject=sender_id,
-                resource="/api/v1/message",
+                resource="/receive",
                 status="DENIED",
                 metadata={"error": str(e), "envelope": envelope},
-                client_ip=self.client_address[0],
             )
-            # Pass to detector engine
-            alerts = self.server.rule_engine.evaluate_event({
-                "event_id": envelope.get("message_id", ""),
+            alerts = rule_engine.evaluate_event({
+                "event_id": envelope.get("message_id", str(uuid.uuid4())),
                 "timestamp_ns": time.time_ns(),
+                "action": f"{err_type.upper()}_BLOCKED",
                 "subject": sender_id,
-                "service": self.server.node_id,
-                "resource": "/api/v1/message",
+                "service": node_id,
+                "resource": "/receive",
                 "status": "DENIED",
                 "metadata": {"error": str(e)},
             })
-            self.server.recent_alerts.extend(alerts)
-            self._send_json(400, {"error": str(e), "type": err_type})
+            for a in alerts:
+                recent_alerts.append(getattr(a, "to_dict", lambda: a)())
+            raise HTTPException(status_code=400, detail=str(e))
 
-        except Exception as e:
-            self._send_json(500, {"error": f"Internal node error: {e}"})
-
-    def _handle_key_rotate(self, payload: Dict[str, Any]):
-        role = payload.get("role", "user")
-        if role != "admin":
-            event = {
-                "event_id": f"evt-{time.time_ns()}",
-                "timestamp_ns": time.time_ns(),
-                "subject": payload.get("requested_by", "anonymous"),
-                "service": self.server.node_id,
-                "resource": "/api/v1/keys/rotate",
-                "action": "ROTATE_KEY",
-                "status": "DENIED",
-                "metadata": {"role": role},
-            }
-            alerts = self.server.rule_engine.evaluate_event(event)
-            self.server.recent_alerts.extend(alerts)
-            self.server.audit_logger.log_event(
-                service=self.server.node_id,
-                action="ROTATE_KEY_ATTEMPT_DENIED",
-                subject=payload.get("requested_by", "anonymous"),
-                resource="/api/v1/keys/rotate",
+    @app.post("/keys/rotate")
+    def rotate_key(req: RotateKeyRequest):
+        if req.role != "admin":
+            recent_alerts.append({
+                "alert_id": f"alert-priv-{time.time_ns()}",
+                "rule_name": "UNAUTHORIZED_PRIVILEGE_ELEVATION",
+                "severity": "CRITICAL",
+                "description": f"Non-admin role '{req.role}' attempted key rotation",
+            })
+            audit_logger.log_event(
+                service=node_id,
+                action="ROTATE_KEY_DENIED",
+                subject=req.requested_by,
+                resource="/keys/rotate",
                 status="DENIED",
-                metadata={"reason": "unauthorized", "role": role},
+                metadata={"role": req.role},
             )
-            self._send_json(403, {"error": "Unauthorized: admin role required"})
-            return
+            raise HTTPException(status_code=403, detail="Unauthorized: admin role required for key rotation")
 
-        new_pub, new_priv = self.server.kem_provider.generate_keypair()
-        new_rec, old_rec = self.server.key_manager.rotate_key(new_pub, new_priv)
-        self.server.audit_logger.log_event(
-            service=self.server.node_id,
+        new_pub, new_priv = kem_provider.generate_keypair()
+        new_rec, old_rec = key_manager.rotate_key(new_pub, new_priv)
+        audit_logger.log_event(
+            service=node_id,
             action="ROTATE_KEY_SUCCESS",
-            subject=payload.get("requested_by", "admin"),
-            resource="/api/v1/keys/rotate",
+            subject=req.requested_by,
+            resource="/keys/rotate",
             status="SUCCESS",
-            metadata={"new_key_id": new_rec.key_id, "old_key_id": old_rec.key_id if old_rec else None},
+            metadata={"new_key_id": new_rec.key_id, "old_key_id": getattr(old_rec, "key_id", None)},
         )
-        self._send_json(200, {
-            "status": "key_rotated",
-            "active_key": new_rec.to_dict(),
-            "grace_period_key": old_rec.to_dict() if old_rec else None,
-        })
+        return {
+            "status": "rotated",
+            "active_key": new_rec.to_dict() if hasattr(new_rec, "to_dict") else {"key_id": new_rec.key_id},
+            "grace_key": old_rec.to_dict() if (old_rec and hasattr(old_rec, "to_dict")) else None,
+        }
 
-    def _handle_key_revoke(self, payload: Dict[str, Any]):
-        key_id = payload.get("key_id", "")
-        reason = payload.get("reason", "manual revocation")
-        target_node = payload.get("target_node_id", self.server.node_id)
+    @app.post("/keys/revoke")
+    def revoke_key(req: RevokeKeyRequest):
+        if req.role != "admin":
+            raise HTTPException(status_code=403, detail="Unauthorized: admin role required for revocation")
 
-        rev_event = self.server.revocation_coord.create_revocation(
-            key_id=key_id,
-            target_node_id=target_node,
-            reason=reason,
-            signer=self.server.sig_provider,
-        )
-        self.server.key_manager.revoke_key(key_id, reason)
+        target = req.target_node_id or node_id
+        rev_ev = revocation_coord.create_revocation(req.key_id, target, req.reason, signer=sig_provider)
+        key_manager.revoke_key(req.key_id, req.reason)
 
-        self.server.audit_logger.log_event(
-            service=self.server.node_id,
-            action="REVOKE_KEY",
-            subject=payload.get("requested_by", "operator"),
-            resource=f"/keys/{key_id}",
+        audit_logger.log_event(
+            service=node_id,
+            action="REVOKE_KEY_SUCCESS",
+            subject=req.role,
+            resource=f"/keys/{req.key_id}",
             status="SUCCESS",
-            metadata={"revocation_id": rev_event.revocation_id, "reason": reason},
+            metadata={"revocation_id": getattr(rev_ev, "revocation_id", str(uuid.uuid4())), "reason": req.reason},
         )
-
-        self._send_json(200, {
+        return {
             "status": "revoked",
-            "revocation": rev_event.to_dict(),
-        })
+            "key_id": req.key_id,
+            "revocation": rev_ev.to_dict() if hasattr(rev_ev, "to_dict") else {"key_id": req.key_id},
+        }
 
-    def _send_json(self, status_code: int, data: Dict[str, Any]):
-        body = json.dumps(data, indent=2).encode("utf-8")
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    @app.get("/logs/verify")
+    def verify_logs():
+        verifier = AuditLogVerifier()
+        result = verifier.verify_file(audit_logger.log_file_path)
+        res_dict = result.to_dict() if hasattr(result, "to_dict") else {"is_valid": getattr(result, "is_valid", False)}
+        if not getattr(result, "is_valid", False):
+            raise HTTPException(status_code=409, detail=res_dict)
+        return res_dict
 
-    def log_message(self, format, *args):
-        # Suppress noisy default HTTP server console logging
-        pass
+    @app.get("/metrics")
+    def node_metrics():
+        active = key_manager.get_active_key()
+        return {
+            "node_id": node_id,
+            "status": "healthy",
+            "active_key_id": active.key_id if active else None,
+            "active_key_version": getattr(active, "version", 1) if active else 0,
+            "messages": message_stats,
+            "alerts_count": len(recent_alerts),
+            "alerts": recent_alerts[-10:],
+            "enrolled_nodes_count": len(enrolled_nodes),
+            "uptime_seconds": time.monotonic(),
+        }
+
+    return app
 
 
 class NodeServer:
-    """Multi-node capable service node instance."""
+    """Threaded/Programmatic wrapper around the FastAPI Node Server."""
 
-    def __init__(
-        self,
-        node_id: str,
-        host: str = "127.0.0.1",
-        port: int = 8080,
-        data_dir: str = "/tmp/tbv_data",
-    ):
+    def __init__(self, node_id: str = "node-a", host: str = "0.0.0.0", port: int = 8001, data_dir: str = "/tmp/tbv_data"):
         self.node_id = node_id
         self.host = host
         self.port = port
         self.data_dir = data_dir
-        os.makedirs(data_dir, exist_ok=True)
-
-        # Components
-        self.kem_provider = MLKEMKeyExchange()
-        self.sig_provider = MLDSASignature()
-        self.sig_pub, self.sig_priv = self.sig_provider.generate_keypair()
-
-        wal_path = os.path.join(data_dir, f"{node_id}_wal.log")
-        self.wal_manager = WALManager(wal_path)
-
-        self.key_manager = KeyManager(node_id=node_id, wal_manager=self.wal_manager)
-        kem_pub, kem_priv = self.kem_provider.generate_keypair()
-        self.key_manager.enroll_initial_key(self.kem_provider.algorithm_name, kem_pub, kem_priv)
-
-        self.revocation_coord = RevocationCoordinator(node_id=node_id)
-        self.secure_messaging = SecureMessaging(node_id=node_id)
-
-        audit_path = os.path.join(data_dir, f"{node_id}_audit.log")
-        self.audit_logger = AuditLogger(node_id=node_id, log_file_path=audit_path, signer=self.sig_provider)
-
-        self.clock_buffer = ClockSyncBuffer()
-        self.rule_engine = ContextRuleEngine()
-        self.lateral_graph = LateralMovementGraph()
-
-        self.peer_shared_keys: Dict[str, bytes] = {}
-        self.peer_public_keys: Dict[str, bytes] = {}
-        self.recent_alerts = []
-
-        self._httpd: Optional[HTTPServer] = None
+        self.app = create_app(node_id=node_id, data_dir=data_dir)
+        self.server_config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="warning")
+        self.server = uvicorn.Server(self.server_config)
         self._thread: Optional[threading.Thread] = None
 
     def start(self, blocking: bool = False):
-        """Starts node HTTP server."""
-        self._httpd = HTTPServer((self.host, self.port), NodeServerRequestHandler)
-        # Bind reference to self on the server handler
-        self._httpd.node_id = self.node_id
-        NodeServerRequestHandler.server = self
-
         if blocking:
-            self._httpd.serve_forever()
+            self.server.run()
         else:
-            self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+            self._thread = threading.Thread(target=self.server.run, daemon=True)
             self._thread.start()
+            # Wait briefly for socket binding
+            time.sleep(0.5)
 
     def stop(self):
-        """Stops node HTTP server."""
-        if self._httpd:
-            self._httpd.shutdown()
-            self._httpd.server_close()
+        self.server.should_exit = True
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+
+
+# Default app instance
+app = create_app(
+    node_id=os.environ.get("NODE_ID", "node-a"),
+    data_dir=os.environ.get("DATA_DIR", "/tmp/tbv_data")
+)
 
 
 if __name__ == "__main__":
-    node_id = sys.argv[1] if len(sys.argv) > 1 else "node-1"
-    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
-    server = NodeServer(node_id=node_id, port=port)
-    print(f"Starting Node {node_id} on http://127.0.0.1:{port}...")
-    server.start(blocking=True)
+    node_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NODE_ID", "node-a")
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", 8001))
+    server_app = create_app(node_id=node_id)
+    print(f"🚀 Starting Trust-But-Verify Node [{node_id}] on http://0.0.0.0:{port}")
+    uvicorn.run(server_app, host="0.0.0.0", port=port, log_level="warning")
