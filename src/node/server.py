@@ -23,11 +23,14 @@ import uuid
 from typing import Dict, Any, Optional, List
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 import jsonschema
 
 from src.node.adapters import NodeAdapters
+from src.node.sandbox_api import SandboxController, create_sandbox_router
+from src.node.ui import render_dashboard_html
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
@@ -117,8 +120,18 @@ def create_app(
     app.state.enrolled_nodes = enrolled_nodes
     app.state.recent_alerts = recent_alerts
 
-    @app.get("/")
-    def root():
+    sandbox = SandboxController(
+        node_id=node_id,
+        data_dir=data_dir,
+        grace_period_sec=grace_period_sec,
+        audit_logger=audit.logger,
+        audit_verifier=audit.verifier,
+        recent_alerts=recent_alerts,
+        boot_time=boot_time,
+    )
+    app.include_router(create_sandbox_router(sandbox))
+
+    def _service_info() -> Dict[str, Any]:
         active = identity.key_manager.get_active_key()
         return {
             "name": "Trust-But-Verify",
@@ -129,6 +142,7 @@ def create_app(
             "active_key_version": getattr(active, "version", 1) if active else 0,
             "pqc_standards": ["NIST FIPS 203 (ML-KEM-768)", "NIST FIPS 204 (ML-DSA-65)"],
             "endpoints": {
+                "dashboard_ui": "/",
                 "health": "/health",
                 "interactive_swagger_docs": "/docs",
                 "metrics": "/metrics",
@@ -140,6 +154,17 @@ def create_app(
                 "enroll_device": "POST /enroll",
             },
         }
+
+    @app.get("/api/info")
+    def api_info():
+        return _service_info()
+
+    @app.get("/", response_class=HTMLResponse)
+    def root(request: Request):
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept and "text/html" not in accept:
+            return JSONResponse(_service_info())
+        return HTMLResponse(content=render_dashboard_html())
 
     @app.get("/health")
     def health_check():
