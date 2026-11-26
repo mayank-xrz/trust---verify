@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import time
-from typing import Any, Dict, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 
 @dataclasses.dataclass
@@ -15,19 +16,41 @@ class GraphViolation:
     action: str
     reason: str
     timestamp_ns: int
+    identity: str = ""
+    services: List[str] = dataclasses.field(default_factory=list)
+    event_ids: List[str] = dataclasses.field(default_factory=list)
+    rule_id: str = ""
+    velocity: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        data = dataclasses.asdict(self)
+        # Only include the velocity block when the hop-velocity window fired.
+        if data.get("velocity") is None:
+            data.pop("velocity", None)
+        return data
 
 
 class LateralMovementGraph:
     """Enforces authorized service topology (DAG) and flags anomalous lateral hops."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        velocity_threshold: int = 5,
+        velocity_window_sec: float = 60.0,
+        clock: Any = None,
+    ):
         # source_service -> Set of allowed target_services
         self.allowed_edges: Dict[str, Set[str]] = {}
         # Dynamic tracking of observed edges: (src, dst) -> count
         self.observed_edges: Dict[Tuple[str, str], int] = {}
+        self.velocity_threshold = velocity_threshold
+        self.velocity_window_sec = velocity_window_sec
+        self._clock = clock or time.time_ns
+        # identity -> deque[(timestamp_ns, event_id, target_service)]
+        self._violation_history: Dict[str, collections.deque] = collections.defaultdict(
+            collections.deque
+        )
+        self._hop_seq = 0
         self._set_default_topology()
 
     def _set_default_topology(self) -> None:
@@ -57,13 +80,50 @@ class LateralMovementGraph:
 
         allowed_targets = self.allowed_edges.get(source_service)
         if allowed_targets is None or target_service not in allowed_targets:
+            now_ns = int(self._clock())
+            self._hop_seq += 1
+            violation_id = f"viol-{source_service[:4]}-{target_service[:4]}"
+            event_id = f"{violation_id}#{self._hop_seq}"
+
+            history = self._violation_history[source_service]
+            history.append((now_ns, event_id, target_service))
+            window_ns = int(self.velocity_window_sec * 1_000_000_000)
+            while history and now_ns - history[0][0] > window_ns:
+                history.popleft()
+
+            velocity = None
+            if len(history) >= self.velocity_threshold:
+                velocity = {
+                    "hop_count": len(history),
+                    "threshold": self.velocity_threshold,
+                    "window_sec": self.velocity_window_sec,
+                }
+
+            services = sorted({source_service} | {target for _, _, target in history})
+            event_ids = [eid for _, eid, _ in history]
+            rule_id = "LATERAL_MOVEMENT_VELOCITY" if velocity else "UNAUTHORIZED_LATERAL_HOP"
+            reason = (
+                f"Unauthorized lateral movement path: '{source_service}' is not authorized "
+                f"to call '{target_service}'"
+            )
+            if velocity:
+                reason += (
+                    f"; hop velocity {velocity['hop_count']} in "
+                    f"{self.velocity_window_sec}s exceeds threshold {self.velocity_threshold}"
+                )
+
             return GraphViolation(
-                violation_id=f"viol-{source_service[:4]}-{target_service[:4]}",
+                violation_id=violation_id,
                 source_service=source_service,
                 target_service=target_service,
                 action=action,
-                reason=f"Unauthorized lateral movement path: '{source_service}' is not authorized to call '{target_service}'",
-                timestamp_ns=time.time_ns(),
+                reason=reason,
+                timestamp_ns=now_ns,
+                identity=source_service,
+                services=services,
+                event_ids=event_ids,
+                rule_id=rule_id,
+                velocity=velocity,
             )
 
         return None
