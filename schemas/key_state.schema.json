@@ -2,79 +2,95 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://trust-but-verify.dev/schemas/key_state.schema.json",
   "title": "KeyState",
-  "description": "Key lifecycle state schema with atomic rotation, grace period, and cutoff enforcement.",
+  "description": "Key lifecycle, rotation, grace period, and revocation state tracking schema (P4-07).",
   "type": "object",
   "required": [
     "key_id",
     "identity_id",
+    "device_id",
     "version",
     "algorithm",
+    "public_key",
     "status",
-    "created_at"
+    "created_at",
+    "grace_cutoff",
+    "revoked_at",
+    "authority_sig"
   ],
   "properties": {
     "key_id": {
       "type": "string",
-      "pattern": "^[a-zA-Z0-9_-]{8,64}$"
+      "description": "Unique key identifier",
+      "minLength": 1
     },
     "identity_id": {
       "type": "string",
-      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+      "description": "Owner identity or service identifier",
+      "minLength": 1
     },
-    "owner_node_id": {
-      "type": "string"
+    "device_id": {
+      "type": "string",
+      "description": "Specific host or enclave device identifier",
+      "minLength": 1
     },
     "version": {
       "type": "integer",
+      "description": "Monotonically increasing key version number",
       "minimum": 1
     },
     "algorithm": {
       "type": "string",
-      "enum": ["ML-KEM-768", "ML-KEM-1024", "ML-DSA-65", "ML-DSA-87", "MOCK-KEM-768", "MOCK-DSA-65"]
+      "description": "Cryptographic algorithm name (e.g., ML-KEM-768, ML-DSA-65)",
+      "minLength": 1
+    },
+    "public_key": {
+      "type": "string",
+      "description": "Base64-encoded public key bytes",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
     "status": {
       "type": "string",
-      "enum": ["active", "grace", "revoked", "ACTIVE", "GRACE", "REVOKED", "GRACE_PERIOD", "EXPIRED"]
-    },
-    "state": {
-      "type": "string"
+      "description": "Lifecycle status of the key",
+      "enum": [
+        "active",
+        "grace",
+        "revoked"
+      ]
     },
     "created_at": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "activated_at": {
-      "type": "integer",
-      "minimum": 0
+      "type": "string",
+      "description": "RFC3339 timestamp when key was enrolled",
+      "format": "date-time"
     },
     "grace_cutoff": {
-      "type": ["integer", "null"],
-      "minimum": 0
-    },
-    "grace_period_cutoff": {
-      "type": ["integer", "null"],
-      "minimum": 0
+      "description": "RFC3339 timestamp when grace period ends, or null if active without rotation",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "revoked_at": {
-      "type": ["integer", "null"],
-      "minimum": 0
-    },
-    "revocation_timestamp": {
-      "type": ["integer", "null"],
-      "minimum": 0
-    },
-    "revocation_reason": {
-      "type": ["string", "null"]
+      "description": "RFC3339 timestamp when key was revoked, or null if not revoked",
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "authority_sig": {
-      "type": ["string", "null"]
-    },
-    "public_key_b64": {
-      "type": "string"
-    },
-    "expires_at": {
-      "type": "integer"
+      "type": "string",
+      "description": "Base64-encoded authority signature certifying this key record",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

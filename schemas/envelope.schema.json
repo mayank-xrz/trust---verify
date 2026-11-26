@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://trust-but-verify.dev/schemas/envelope.schema.json",
   "title": "PQCMessageEnvelope",
-  "description": "Cryptographically bound, post-quantum authenticated secure messaging envelope.",
+  "description": "Cryptographically bound, post-quantum encrypted messaging envelope (P4-06).",
   "type": "object",
   "required": [
     "version",
@@ -14,70 +14,101 @@
     "nonce",
     "ciphertext",
     "associated_data",
-    "signature"
+    "signature",
+    "sig_alg",
+    "kem_alg"
   ],
   "properties": {
     "version": {
       "type": "string",
-      "enum": ["1.0.0", "1.0"]
-    },
-    "message_id": {
-      "type": "string"
+      "description": "Envelope specification version"
     },
     "sender_id": {
       "type": "string",
-      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+      "description": "Unique identifier of sending node",
+      "minLength": 1
     },
     "recipient_id": {
       "type": "string",
-      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+      "description": "Unique identifier of target recipient node",
+      "minLength": 1
     },
     "seq_num": {
       "type": "integer",
-      "minimum": 0
-    },
-    "sequence_number": {
-      "type": "integer",
+      "description": "Monotonically increasing sequence number per session",
       "minimum": 0
     },
     "session_id": {
       "type": "string",
-      "minLength": 8,
-      "maxLength": 128
+      "description": "Cryptographically bound session identifier",
+      "minLength": 1
     },
     "kem_ciphertext": {
-      "type": "string"
-    },
-    "ephemeral_kem_public_key": {
-      "type": "string"
+      "type": "string",
+      "description": "Base64-encoded post-quantum KEM encapsulated ciphertext",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
     "nonce": {
-      "type": "string"
+      "type": "string",
+      "description": "Base64-encoded AEAD initialization vector / nonce",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
     "ciphertext": {
-      "type": "string"
+      "type": "string",
+      "description": "Base64-encoded AEAD encrypted payload",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
     "associated_data": {
-      "type": "string"
-    },
-    "additional_authenticated_data": {
-      "type": "string"
+      "type": "object",
+      "description": "Authenticated associated data explicitly binding sender, recipient, sequence, and session",
+      "required": [
+        "sender_id",
+        "recipient_id",
+        "seq_num",
+        "session_id"
+      ],
+      "properties": {
+        "sender_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recipient_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "seq_num": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
     },
     "signature": {
-      "type": "string"
+      "type": "string",
+      "description": "Base64-encoded post-quantum digital signature over canonical header and ciphertext",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
-    "algorithm_suite": {
-      "type": "object",
-      "properties": {
-        "kem": { "type": "string" },
-        "sig": { "type": "string" },
-        "aead": { "type": "string" }
-      }
+    "sig_alg": {
+      "type": "string",
+      "description": "NIST-standardized post-quantum digital signature algorithm",
+      "enum": [
+        "ML-DSA-65",
+        "ML-DSA-87",
+        "SLH-DSA-SHA2-128s"
+      ]
     },
-    "timestamp_ns": {
-      "type": "integer",
-      "minimum": 0
+    "kem_alg": {
+      "type": "string",
+      "description": "NIST-standardized post-quantum key encapsulation mechanism",
+      "enum": [
+        "ML-KEM-768",
+        "ML-KEM-1024"
+      ]
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }

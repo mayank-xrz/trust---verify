@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://trust-but-verify.dev/schemas/audit_event.schema.json",
   "title": "AuditEvent",
-  "description": "Injection-safe structured audit record linked by cryptographic hash chains.",
+  "description": "Injection-proof, hash-chained structured audit log record (P4-08).",
   "type": "object",
   "required": [
     "event_id",
@@ -14,70 +14,76 @@
     "status",
     "metadata",
     "prev_hash",
-    "record_hash"
+    "record_hash",
+    "sig"
   ],
   "properties": {
     "event_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Unique UUID event identifier",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },
     "timestamp": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "timestamp_ns": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "sequence": {
-      "type": "integer",
-      "minimum": 0
+      "type": "string",
+      "description": "RFC3339 formatted event occurrence timestamp",
+      "format": "date-time"
     },
     "actor_id": {
-      "type": "string"
-    },
-    "subject": {
-      "type": "string"
-    },
-    "node_id": {
-      "type": "string"
+      "type": "string",
+      "description": "Subject or principal identity initiating action",
+      "minLength": 1
     },
     "service": {
-      "type": "string"
+      "type": "string",
+      "description": "Service generating or logging the event",
+      "minLength": 1
     },
     "action": {
-      "type": "string"
+      "type": "string",
+      "description": "Deterministic operation name",
+      "minLength": 1
     },
     "resource": {
-      "type": "string"
+      "type": "string",
+      "description": "Target resource URI or identifier",
+      "minLength": 1
     },
     "status": {
       "type": "string",
-      "enum": ["SUCCESS", "DENIED", "SUSPICIOUS", "ERROR", "success", "denied", "suspicious", "error"]
+      "description": "Outcome of the evaluated action",
+      "enum": [
+        "allow",
+        "deny",
+        "error"
+      ]
     },
     "metadata": {
-      "type": "object"
-    },
-    "client_ip": {
-      "type": "string"
+      "type": "object",
+      "description": "Strictly typed key-value metadata payload",
+      "additionalProperties": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      }
     },
     "prev_hash": {
       "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
+      "description": "64-character hexadecimal SHA-256 digest of previous audit log record",
+      "pattern": "^[0-9a-fA-F]{64}$"
     },
     "record_hash": {
       "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
-    },
-    "entry_hash": {
-      "type": "string",
-      "pattern": "^[a-f0-9]{64}$"
+      "description": "64-character hexadecimal SHA-256 digest of canonical current record",
+      "pattern": "^[0-9a-fA-F]{64}$"
     },
     "sig": {
-      "type": ["string", "null"]
-    },
-    "signature": {
-      "type": ["string", "null"]
+      "type": "string",
+      "description": "Base64-encoded authority or node signature over record_hash",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     }
   },
-  "additionalProperties": true
+  "additionalProperties": false
 }
