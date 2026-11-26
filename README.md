@@ -99,7 +99,7 @@ flowchart TD
 
 ### Offline Track 4 verification
 
-Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.9+ (verified on 3.15.2), `pqcrypto==1.0.0`, and Node.js 24.11.1 on `PATH` after `pip install -r requirements.txt`. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
+Run `python3 -m compileall src track4_service.py` and `python3 -m unittest tests.test_crypto` with Python 3.11 (verified on 3.11.16), `pqcrypto==1.0.0`, and Node.js 26.13.1 on `PATH` after `pip install -r requirements.txt`. The suite is `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1`.
 
 Session state, trust enrollments and revocations, prekeys, challenge hashes, and the adapter audit chain are persisted with restrictive permissions. Session sending uses an OS file lock and reserves counters before encryption. Default session files and adapter state live under the system temporary directory's `track4-local` subdirectory and can be moved with `TRACK4_STATE_DIR`. Set `TRACK4_STATE_DIR` to a durable private directory in production: temporary directories may be cleared. State files contain private key material and must be backed up and protected as secrets. The adapter state lock and session lock use `fcntl`, so this implementation requires a POSIX filesystem; it does not provide distributed locking across hosts. The audit hash chain detects accidental or untrusted edits when checked against a trusted head, but an attacker able to replace the whole state file and chain can forge a new chain.
 
@@ -107,49 +107,72 @@ Session state, trust enrollments and revocations, prekeys, challenge hashes, and
 
 ## 🚀 Clean-Machine Quickstart Guide
 
-The Track 4 crypto path requires Python 3.9+, `pqcrypto==1.0.0`, and Node.js on PATH.
+The Track 4 crypto path requires Python 3.11, `pqcrypto==1.0.0`, and Node.js on
+`PATH`. Python 3.11 is the supported interpreter: the pinned wheels are
+installed and the gates are run on 3.11.16.
 
 ### Prerequisites
-* Python 3.9+ (`python3 --version`)
-* Optional: Docker & Docker Compose (`docker compose version`)
+* Python 3.11 (`python3.11 --version`); `make setup` uses `BASE_PYTHON=python3.11`
+* Node.js (`node --version`; verified on 26.13.1)
+* Git
+* Optional: Docker & Docker Compose (`docker compose version`) for `make up`
 
 ### One-Command Make Targets
 ```bash
-# 1. Install pinned requirements & pre-push hooks
+# 1. Create .venv, install pinned requirements, and enable the pre-push hook
 make setup
 
-# 2. Run the full test suite (crypto, audit, detector, lifecycle, identity/key management)
+# 2. Run the full test suite from the repository root
 make test
 
-# 3. Run performance & cryptographic overhead benchmarks
+# 3. Run lint, type, CLI, and test gates
+make gates
+
+# 4. Run reproducible performance measurements
 make bench
 
-# 4. Run the 5-minute deterministic walkthrough demo for judges
+# 5. Run the 5-minute deterministic walkthrough demo for judges
 make demo
 
-# 5. Boot the multi-node container sandbox (Docker)
+# 6. Boot the multi-node container sandbox (Docker)
 make up
 
-# 6. Shut down containers and clean temporary artifacts
+# 7. Shut down containers and clean temporary artifacts
 make clean
 ```
 
+`make setup` is idempotent. It creates `.venv` with `python3.11`, installs
+`requirements.txt`, and sets `core.hooksPath=.githooks`. Every other target
+uses `.venv/bin/python`; override with `make test PYTHON=/path/to/python` only
+if that interpreter already has the pinned dependencies. If `python3.11` is not
+on your `PATH`, install it first or pass `BASE_PYTHON=/path/to/python3.11`.
+
 ### Manual Execution (No Make Required)
+
+#### Create the environment and install dependencies
+```bash
+python3.11 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+git config core.hooksPath .githooks
+```
 
 #### Run the Full Test Suite
 ```bash
-python3 -m pytest tests/ -v
+.venv/bin/python -m pytest . -q
 ```
 
 #### Run Benchmarks
 ```bash
-python3 scripts/benchmark.py
+.venv/bin/python scripts/benchmark.py
 ```
 
 #### Run Judge Walkthrough Demo
 ```bash
 ./scripts/run_demo.sh
 ```
+The demo script uses `.venv/bin/python` by default and exits with a clear error
+if it is missing. Set `PYTHON=/path/to/python` to override.
 
 #### Demo Video
 The 5-minute recording is a human-supplied artifact. The shot list, narration

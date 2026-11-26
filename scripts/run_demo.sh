@@ -17,6 +17,15 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 
+# Use the project virtualenv unless the caller supplies an interpreter.
+PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"
+if [ ! -x "$PYTHON" ]; then
+    echo "ERROR: Python interpreter '$PYTHON' not found." >&2
+    echo "Run 'make setup' first, or set PYTHON=/path/to/python3.11." >&2
+    exit 1
+fi
+export PATH="$(dirname "$PYTHON"):$PATH"
+
 TEMP_DATA_DIR="$(mktemp -d -t tbv_demo_XXXXXX)"
 PIDS=()
 
@@ -52,7 +61,7 @@ for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     nid="${spec%%:*}"
     port="${spec##*:}"
     NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" \
-        python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
+        "$PYTHON" -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
     PIDS+=("$pid")
     echo "  🚀 Starting $nid on http://127.0.0.1:$port (pid: $pid)..."
@@ -69,7 +78,7 @@ echo "  ✅ All sandbox nodes online and responding."
 
 # Operator CLI Status
 echo ""
-python3 -m demo.node.operator_cli status
+"$PYTHON" -m demo.node.operator_cli status
 
 # ------------------------------------------------------------------------------
 # STEP 2: Enroll Identities & Send Protected PQC Envelope
@@ -79,7 +88,7 @@ echo "======================================================================"
 echo "▶ STEP 2: Enrolling Identities & Sending PQC-Protected Message"
 echo "======================================================================"
 
-python3 - << 'EOF'
+"$PYTHON" - << 'EOF'
 import json, urllib.request, base64
 from demo.node.crypto_provider import MLKEMKeyExchange
 
@@ -145,7 +154,7 @@ echo "======================================================================"
 echo "▶ STEP 3: Key Rotation with Grace Period & Post-Cutoff Rejection"
 echo "======================================================================"
 
-python3 - << 'EOF'
+"$PYTHON" - << 'EOF'
 import json, urllib.request, time
 
 # 1. Fetch current key on node-a
@@ -207,7 +216,7 @@ echo "======================================================================"
 echo "▶ STEP 4: Cross-Node Key Revocation & Device Re-Enrollment"
 echo "======================================================================"
 
-python3 - << 'EOF'
+"$PYTHON" - << 'EOF'
 import json, urllib.request, base64
 from demo.node.crypto_provider import MLKEMKeyExchange
 
@@ -263,7 +272,7 @@ echo "======================================================================"
 echo "▶ STEP 5: Demonstrating Crash Recovery (WAL) & Damaged Backup Rejection"
 echo "======================================================================"
 
-python3 - << 'EOF'
+"$PYTHON" - << 'EOF'
 import os, tempfile, json
 from src.identity.key_manager import KeyManager, KeyStateEnum
 from src.identity.recovery import WALManager
@@ -314,7 +323,7 @@ echo "▶ STEP 6: Cryptographic Log Chain Verification & Explainable Alerts"
 echo "======================================================================"
 
 # Simulate attacks to trigger explainable alerts
-python3 - << 'EOF'
+"$PYTHON" - << 'EOF'
 import json, urllib.request
 
 # Trigger lateral movement policy alert
@@ -337,11 +346,11 @@ except Exception:
 EOF
 
 # Operator CLI: Verify Audit Log Hash Chains
-python3 -m demo.node.operator_cli verify-logs
+"$PYTHON" -m demo.node.operator_cli verify-logs
 
 # Operator CLI: View Explainable Alerts
 echo ""
-python3 -m demo.node.operator_cli alerts
+"$PYTHON" -m demo.node.operator_cli alerts
 
 echo ""
 echo "======================================================================"
