@@ -66,7 +66,7 @@ make demo
 ```
 
 Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18
-and Node.js 26.13.1. The full suite passed 250 tests, and the local HTTP demo
+and Node.js 26.13.1. The full suite passed 253 tests, and the local HTTP demo
 passed all 12 checklist objectives. The demo uses localhost ports 8001–8003
 and 8005. The remaining Python 3.11 test warning comes from Starlette's
 deprecated AnyIO `BlockingPortal` alias. On Python 3.15, FastAPI and Starlette
@@ -117,11 +117,20 @@ Operator CLI (run while nodes are up):
 
 ```bash
 python3 -m demo.node.operator_cli status
-python3 -m demo.node.operator_cli rotate --identity node-a --role admin
-python3 -m demo.node.operator_cli revoke --key-id <KEY_ID> --reason "compromised"
+python3 -m demo.node.operator_cli rotate --identity node-a
+python3 -m demo.node.operator_cli revoke --identity node-a --key-id <KEY_ID> --reason "compromised"
 python3 -m demo.node.operator_cli verify-logs
 python3 -m demo.node.operator_cli alerts
 ```
+
+`make demo` generates fresh credentials and binds its services to loopback. When running demo nodes separately, configure distinct random bearer tokens for each purpose:
+
+- `DEMO_OPERATOR_TOKEN` authorizes key rotation and revocation. Set the same token in the CLI's environment when targeting that node. Successful actions are logged as `demo-operator`.
+- `DEMO_PEER_ENROLL_TOKEN` authorizes registration of a trusted `GET /keys/public` bundle with `POST /peers`. Refresh the bundle after recipient key rotation.
+- `DEMO_RECIPIENT_TOKEN` authorizes reads from that node's `GET /inbox/{receipt_id}`. Use a different recipient token for each node. `POST /receive` verifies and accepts a signed envelope and returns an opaque receipt, which grants no read access by itself.
+- `DEMO_REVOCATION_SYNC_TOKEN` authorizes only peer revocation updates. Configure it across the trusted nodes when enabling `PEER_NODES`. Use a protected transport for bearer credentials outside loopback.
+
+Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
 
 5-minute demo video: **TODO: paste the public link here and in `docs/project_brief.pdf`.**
 
@@ -162,7 +171,11 @@ checklist and labelled fixture for submission evidence.
 
 ## Performance
 
-`make bench` (`scripts/benchmark.py`) measures envelope sign+encrypt and verify+decrypt latency (p50, p95, p99), ML-KEM and ML-DSA operations, revocation propagation to the nodes and rule-engine throughput. Results depend on the machine; run it to get your own numbers. Reference output from the authors' machine is in `reports/` and `prototypes/person_a/benchmark-results.json`.
+`make bench` measures cryptographic operation latency and the protected HTTP workflow from send through durable receipt to authenticated inbox read. It also reports detector throughput and Python allocation overhead.
+
+On macOS arm64 with Python 3.15.2 and the pinned dependencies, reusing the envelope schema validator lowered the median HTTP delivery time from **8.24 ms to 5.52 ms** and increased serial throughput from **111.6 to 159.7 deliveries/s**. These are medians from three local in-process runs per configuration, each with 30 warmup messages and 300 measured deliveries. The standalone crypto-only benchmark measured **3.49 ms p50** across 500 envelopes.
+
+Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
 
 ## Documentation
 

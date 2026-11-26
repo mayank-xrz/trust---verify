@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,7 +27,10 @@ DEFAULT_NODES = {
 }
 
 
-def http_request(url: str, method: str = "GET", payload: Optional[dict] = None, timeout: float = 3.0) -> Tuple[int, Dict[str, Any]]:
+def http_request(
+    url: str, method: str = "GET", payload: Optional[dict] = None, timeout: float = 3.0,
+    *, token: Optional[str] = None,
+) -> Tuple[int, Dict[str, Any]]:
     try:
         data_bytes = json.dumps(payload).encode("utf-8") if payload else None
         req = urllib.request.Request(
@@ -35,6 +39,8 @@ def http_request(url: str, method: str = "GET", payload: Optional[dict] = None, 
             headers={"Content-Type": "application/json"},
             method=method,
         )
+        if token:
+            req.add_unredirected_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             body = resp.read().decode("utf-8")
             return resp.status, json.loads(body) if body else {}
@@ -71,14 +77,17 @@ class OperatorCLI:
         print("=" * 70)
         return results
 
-    def rotate(self, identity: str = "node-a", role: str = "admin") -> Dict[str, Any]:
-        base_url = self.nodes.get(identity, "http://localhost:8001")
+    def rotate(self, identity: str = "node-a") -> Dict[str, Any]:
+        base_url = self.nodes.get(identity)
+        if base_url is None:
+            print(f"Unknown node '{identity}'")
+            return {"error": "Unknown node"}
         print(f"🔄 Triggering atomic key rotation on '{identity}' ({base_url})...")
 
         code, data = http_request(
             f"{base_url}/keys/rotate",
             method="POST",
-            payload={"role": role, "requested_by": "operator_cli", "identity": identity},
+            token=os.environ.get("DEMO_OPERATOR_TOKEN"),
         )
 
         if code == 200:
@@ -93,15 +102,22 @@ class OperatorCLI:
             print(f"❌ Key Rotation Failed (HTTP {code}): {data.get('detail', data)}")
             return {"error": data, "code": code}
 
-    def revoke(self, key_id: str, reason: str = "Manual compromise revocation", role: str = "admin") -> Dict[str, Any]:
+    def revoke(
+        self, key_id: str, reason: str = "Manual compromise revocation", identity: Optional[str] = None,
+    ) -> Dict[str, Any]:
         print(f"🚫 Initiating cross-node key revocation for '{key_id}'...")
         # Broadcast via primary authority / node-a
-        base_url = self.nodes.get("key-authority", self.nodes.get("node-a", "http://localhost:8001"))
+        identity = identity or ("key-authority" if "key-authority" in self.nodes else "node-a")
+        base_url = self.nodes.get(identity)
+        if base_url is None:
+            print(f"Unknown node '{identity}'")
+            return {"error": "Unknown node"}
 
         code, data = http_request(
             f"{base_url}/keys/revoke",
             method="POST",
-            payload={"key_id": key_id, "reason": reason, "role": role},
+            payload={"key_id": key_id, "reason": reason},
+            token=os.environ.get("DEMO_OPERATOR_TOKEN"),
         )
 
         if code == 200:
@@ -175,12 +191,12 @@ def main():
     # rotate
     rotate_parser = subparsers.add_parser("rotate", help="Trigger key rotation on an identity node")
     rotate_parser.add_argument("--identity", default="node-a", help="Target node identity (default: node-a)")
-    rotate_parser.add_argument("--role", default="admin", help="Role authorizing rotation (default: admin)")
 
     # revoke
     revoke_parser = subparsers.add_parser("revoke", help="Trigger cross-node revocation broadcast")
     revoke_parser.add_argument("--key-id", required=True, help="Key ID to revoke")
     revoke_parser.add_argument("--reason", default="Manual administrative revocation", help="Revocation reason")
+    revoke_parser.add_argument("--identity", help="Node that owns the key (default: key authority or node-a)")
 
     # verify-logs
     subparsers.add_parser("verify-logs", help="Verify audit log hash chains across nodes")
@@ -194,9 +210,9 @@ def main():
     if args.command == "status":
         cli.status()
     elif args.command == "rotate":
-        cli.rotate(identity=args.identity, role=args.role)
+        return int("error" in cli.rotate(identity=args.identity))
     elif args.command == "revoke":
-        cli.revoke(key_id=args.key_id, reason=args.reason)
+        return int("error" in cli.revoke(key_id=args.key_id, reason=args.reason, identity=args.identity))
     elif args.command == "verify-logs":
         cli.verify_logs()
     elif args.command == "alerts":
@@ -204,4 +220,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

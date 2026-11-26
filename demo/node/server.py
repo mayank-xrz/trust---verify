@@ -22,20 +22,23 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import jsonschema
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 from pydantic import BaseModel, Field
 
 from demo.node.adapters import NodeAdapters
+from demo.node.inbox import RecipientInbox
 from demo.node.sandbox_api import SandboxController, create_sandbox_router
 from demo.node.ui import render_dashboard_html
 from src.crypto.primitives import CryptoError, unb64
+from src.crypto.replay_cache import CounterOutOfWindowError, ReplayRejectedError
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
@@ -57,6 +60,9 @@ def _load_schema(filename: str) -> Dict[str, Any]:
 ENVELOPE_SCHEMA = _load_schema("envelope.schema.json")
 KEY_STATE_SCHEMA = _load_schema("key_state.schema.json")
 AUDIT_EVENT_SCHEMA = _load_schema("audit_event.schema.json")
+
+ENVELOPE_VALIDATOR = jsonschema.validators.validator_for(ENVELOPE_SCHEMA)(ENVELOPE_SCHEMA)
+ENVELOPE_VALIDATOR.check_schema(ENVELOPE_SCHEMA)
 
 
 # Request/Response Models
@@ -80,16 +86,27 @@ class SendRequest(BaseModel):
     recipient_id: str
     payload: Dict[str, Any]
 
-class RotateKeyRequest(BaseModel):
-    role: str = "admin"
-    requested_by: str = "operator"
-    identity: Optional[str] = None
-
 class RevokeKeyRequest(BaseModel):
     key_id: str
     reason: str = "administrative revocation"
     target_node_id: Optional[str] = None
-    role: str = "admin"
+
+
+class DeliveryReceipt(BaseModel):
+    status: str
+    receipt_id: str
+    message_id: str
+    sequence: int
+    record_hash: str
+
+
+def _require_bearer(authorization: Optional[str], token: Optional[str], scope: str) -> None:
+    if not token:
+        raise HTTPException(status_code=503, detail=f"{scope} is disabled")
+    scheme, _, credential = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not secrets.compare_digest(credential.encode(), token.encode()):
+        raise HTTPException(status_code=401, detail=f"{scope} requires a bearer token",
+                            headers={"WWW-Authenticate": "Bearer"})
 
 
 def _schema_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
@@ -98,6 +115,8 @@ def _schema_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
     )
     header = {field: envelope.get(field) for field in ("sender_id", "recipient_id", "session_id")}
     header["seq_num"] = envelope.get("sequence_number")
+    if type(header["seq_num"]) is not int or not 0 <= header["seq_num"] < 2**63:
+        raise ValueError("Invalid envelope sequence number")
     suite = envelope.get("algorithm_suite")
     if suite != {"kem": "ML-KEM-768", "sig": "ML-DSA-65", "aead": "AES-256-GCM"}:
         raise ValueError("Unsupported envelope algorithms")
@@ -116,7 +135,7 @@ def _schema_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
         sig_alg=suite["sig"],
         kem_alg=suite["kem"],
     )
-    jsonschema.validate(instance=result, schema=ENVELOPE_SCHEMA)
+    ENVELOPE_VALIDATOR.validate(result)
     return result
 
 
@@ -126,6 +145,9 @@ def create_app(
     grace_period_seconds: Optional[float] = None,
     peer_nodes: Optional[List[str]] = None,
     peer_enroll_token: Optional[str] = None,
+    operator_token: Optional[str] = None,
+    recipient_token: Optional[str] = None,
+    revocation_sync_token: Optional[str] = None,
 ) -> FastAPI:
     # Resolve configuration from environment variables or params
     node_id = node_id or os.environ.get("NODE_ID", "node-a")
@@ -135,20 +157,27 @@ def create_app(
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
     peer_enroll_token = peer_enroll_token or os.environ.get("DEMO_PEER_ENROLL_TOKEN")
+    operator_token = operator_token or os.environ.get("DEMO_OPERATOR_TOKEN")
+    recipient_token = recipient_token or os.environ.get("DEMO_RECIPIENT_TOKEN")
+    revocation_sync_token = revocation_sync_token or os.environ.get("DEMO_REVOCATION_SYNC_TOKEN")
+    credentials = [token for token in (peer_enroll_token, operator_token, recipient_token, revocation_sync_token) if token]
+    if len(credentials) != len(set(credentials)):
+        raise ValueError("Demo peer, operator, recipient and sync credentials must be distinct")
 
     app = FastAPI(title=f"Trust-But-Verify Node Service [{node_id}]", version="1.0.0")
 
     # Initialize typed adapter cluster
-    os.makedirs(data_dir, exist_ok=True)
+    os.makedirs(data_dir, mode=0o700, exist_ok=True)
     adapters = NodeAdapters(node_id=node_id, data_dir=data_dir, grace_period_sec=grace_period_sec)
 
     boot_time = time.time()
     crypto = adapters.crypto
     identity = adapters.identity
     audit = adapters.audit
-    if crypto.is_mock or identity.is_mock:
-        raise RuntimeError("Protected transport requires real crypto and lifecycle providers")
+    if crypto.is_mock or identity.is_mock or audit.is_mock:
+        raise RuntimeError("Protected transport requires real crypto, lifecycle and audit providers")
     key_lock = threading.Lock()
+    inbox = RecipientInbox(Path(data_dir) / f"{node_id}_inbox.sqlite3", node_id)
 
     # In-memory peer bindings and operational metrics
     enrolled_nodes: Dict[str, Dict[str, Any]] = {}
@@ -180,6 +209,24 @@ def create_app(
         boot_time=boot_time,
     )
     app.include_router(create_sandbox_router(sandbox))
+
+    def require_operator(request: Request, authorization: Optional[str] = Header(default=None)) -> str:
+        try:
+            _require_bearer(authorization, operator_token, "Key administration")
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                audit.logger.log_event(
+                    service=node_id, action="OPERATOR_AUTH_DENIED", subject="unauthenticated",
+                    resource=request.url.path, status="DENIED",
+                )
+                recent_alerts.append({
+                    "alert_id": f"alert-operator-{time.time_ns()}",
+                    "rule_name": "UNAUTHORIZED_KEY_ADMINISTRATION",
+                    "severity": "HIGH",
+                    "description": f"Unauthenticated request to {request.url.path}",
+                })
+            raise
+        return "demo-operator"
 
     def active_key():
         with key_lock:
@@ -213,6 +260,7 @@ def create_app(
                 "verify_audit_logs": "/logs/verify",
                 "send_envelope": "POST /send",
                 "receive_envelope": "POST /receive",
+                "read_inbox": "GET /inbox/{receipt_id}",
                 "rotate_key": "POST /keys/rotate",
                 "revoke_key": "POST /keys/revoke",
                 "enroll_device": "POST /enroll",
@@ -259,11 +307,7 @@ def create_app(
 
     @app.post("/peers")
     def enroll_peer(keys: PeerKeys, authorization: Optional[str] = Header(default=None)):
-        if not peer_enroll_token:
-            raise HTTPException(status_code=503, detail="Peer enrollment is disabled")
-        expected = f"Bearer {peer_enroll_token}".encode("utf-8")
-        if not authorization or not secrets.compare_digest(authorization.encode("utf-8"), expected):
-            raise HTTPException(status_code=401, detail="Peer enrollment requires an operator token")
+        _require_bearer(authorization, peer_enroll_token, "Peer enrollment")
         try:
             unb64(keys.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
             unb64(keys.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE)
@@ -382,7 +426,7 @@ def create_app(
 
         return {"status": "dispatched", "envelope": raw_env}
 
-    @app.post("/receive")
+    @app.post("/receive", response_model=DeliveryReceipt)
     def receive_message(envelope: Dict[str, Any]):
         t0 = time.perf_counter()
         try:
@@ -421,13 +465,14 @@ def create_app(
             raise HTTPException(status_code=403, detail="Sender transport keys are not enrolled")
 
         try:
-            plaintext = crypto.messaging.open_for_recipient(
-                envelope=envelope,
-                kem=crypto.kem,
-                verifier_sig=crypto.sig,
-                sender_public_key=unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE),
-                resolve_private_key=recipient_private_key,
+            sender_public_key = unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
+            crypto.messaging.decrypt_for_recipient(
+                envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
             )
+            try:
+                receipt_id = inbox.accept(envelope, sender_public_key)
+            except (ReplayRejectedError, CounterOutOfWindowError) as exc:
+                raise crypto.ReplayAttackError(str(exc)) from exc
             latency = (time.perf_counter() - t0) * 1000.0
             crypto_latencies.append(latency)
             message_stats["received"] += 1
@@ -438,21 +483,15 @@ def create_app(
                 subject=sender_id,
                 resource="/receive",
                 status="SUCCESS",
-                metadata={"session_id": envelope.get("session_id")},
+                metadata={"session_id": envelope["session_id"], "message_id": envelope["message_id"]},
             )
-
-            try:
-                dec_payload = json.loads(plaintext.decode("utf-8"))
-            except Exception:
-                dec_payload = {"raw": base64.b64encode(plaintext).decode()}
-
-            return {
-                "status": "delivered",
-                "message_id": envelope.get("message_id", envelope.get("session_id")),
-                "sequence": getattr(rec, "sequence", 0),
-                "record_hash": getattr(rec, "entry_hash", getattr(rec, "record_hash", "")),
-                "payload": dec_payload,
-            }
+            return DeliveryReceipt(
+                status="delivered",
+                receipt_id=receipt_id,
+                message_id=envelope["message_id"],
+                sequence=rec.sequence,
+                record_hash=rec.entry_hash,
+            )
 
         except (crypto.RecipientMismatchError, crypto.ReplayAttackError, crypto.MessageTamperedError, KeyError, TypeError, ValueError) as e:
             message_stats["rejected"] += 1
@@ -486,25 +525,31 @@ def create_app(
                 recent_alerts.append(getattr(a, "to_dict", lambda: a)())
             raise HTTPException(status_code=400, detail=str(e))
 
-    @app.post("/keys/rotate")
-    def rotate_key(req: RotateKeyRequest):
-        if req.role != "admin":
-            recent_alerts.append({
-                "alert_id": f"alert-priv-{time.time_ns()}",
-                "rule_name": "UNAUTHORIZED_PRIVILEGE_ELEVATION",
-                "severity": "CRITICAL",
-                "description": f"Non-admin role '{req.role}' attempted key rotation",
-            })
-            audit.logger.log_event(
-                service=node_id,
-                action="ROTATE_KEY_DENIED",
-                subject=req.requested_by,
-                resource="/keys/rotate",
-                status="DENIED",
-                metadata={"role": req.role},
+    @app.get("/inbox/{receipt_id}")
+    def read_inbox(receipt_id: uuid.UUID, authorization: Optional[str] = Header(default=None)):
+        _require_bearer(authorization, recipient_token, "Recipient inbox")
+        delivery = inbox.get(receipt_id.hex)
+        if delivery is None:
+            raise HTTPException(status_code=404, detail="Receipt not found")
+        envelope, sender_public_key = delivery
+        try:
+            plaintext = crypto.messaging.decrypt_for_recipient(
+                envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
             )
-            raise HTTPException(status_code=403, detail="Unauthorized: admin role required for key rotation")
+        except (CryptoError, crypto.RecipientMismatchError, crypto.MessageTamperedError) as exc:
+            raise HTTPException(status_code=410, detail="Delivered message is no longer readable") from exc
 
+        try:
+            payload = json.loads(plaintext.decode("utf-8"))
+        except (ValueError, UnicodeError):
+            payload = {"raw": base64.b64encode(plaintext).decode("ascii")}
+        return JSONResponse(
+            {"message_id": envelope["message_id"], "payload": payload},
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post("/keys/rotate")
+    def rotate_key(actor: str = Depends(require_operator)):
         new_pub, new_priv = crypto.kem.generate_keypair()
         with key_lock:
             new_rec, old_rec = identity.key_manager.rotate_key(new_pub, new_priv)
@@ -512,57 +557,71 @@ def create_app(
         audit.logger.log_event(
             service=node_id,
             action="ROTATE_KEY_SUCCESS",
-            subject=req.requested_by,
+            subject=actor,
             resource="/keys/rotate",
             status="SUCCESS",
-            metadata={"new_key_id": getattr(new_rec, "key_id", ""), "old_key_id": getattr(old_rec, "key_id", None)},
+            metadata={"new_key_id": new_rec.key_id, "old_key_id": old_rec.key_id if old_rec else None},
         )
         return {
             "status": "rotated",
-            "active_key": new_rec.to_dict() if hasattr(new_rec, "to_dict") else {"key_id": getattr(new_rec, "key_id", "")},
-            "grace_key": old_rec.to_dict() if (old_rec and hasattr(old_rec, "to_dict")) else None,
+            "active_key": new_rec.to_dict(),
+            "grace_key": old_rec.to_dict() if old_rec else None,
         }
 
-    @app.post("/keys/revoke")
-    def revoke_key(req: RevokeKeyRequest):
-        nonlocal last_revocation_ms
-        if req.role != "admin":
-            raise HTTPException(status_code=403, detail="Unauthorized: admin role required for revocation")
-
-        t0 = time.perf_counter()
-        target = req.target_node_id or node_id
-        rev_ev = identity.revocation.create_revocation(req.key_id, target, req.reason, signer=crypto.sig)
+    def apply_key_revocation(req: RevokeKeyRequest, actor: str):
         with key_lock:
+            event = identity.revocation.create_revocation(
+                req.key_id, req.target_node_id or node_id, req.reason, signer=crypto.sig
+            )
             identity.key_manager.revoke_key(req.key_id, req.reason)
-
-        # Broadcast to peers if configured
-        for peer_url in peers_list:
-            try:
-                p_req = urllib.request.Request(
-                    f"{peer_url.rstrip('/')}/keys/revoke",
-                    data=json.dumps({"key_id": req.key_id, "reason": req.reason, "role": "admin"}).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                )
-                with urllib.request.urlopen(p_req, timeout=1.0):
-                    pass
-            except Exception:
-                pass
-
-        last_revocation_ms = (time.perf_counter() - t0) * 1000.0
-
         audit.logger.log_event(
             service=node_id,
             action="REVOKE_KEY_SUCCESS",
-            subject=req.role,
+            subject=actor,
             resource=f"/keys/{req.key_id}",
             status="SUCCESS",
-            metadata={"revocation_id": getattr(rev_ev, "revocation_id", str(uuid.uuid4())), "reason": req.reason},
+            metadata={"revocation_id": event.revocation_id, "reason": req.reason},
         )
+        return event
+
+    @app.post("/internal/keys/revoke")
+    def sync_revocation(req: RevokeKeyRequest, authorization: Optional[str] = Header(default=None)):
+        _require_bearer(authorization, revocation_sync_token, "Peer revocation")
+        apply_key_revocation(req, "demo-revocation-peer")
+        return {"status": "acknowledged", "node_id": node_id}
+
+    @app.post("/keys/revoke")
+    def revoke_key(req: RevokeKeyRequest, actor: str = Depends(require_operator)):
+        nonlocal last_revocation_ms
+        t0 = time.perf_counter()
+        rev_ev = apply_key_revocation(req, actor)
+
+        acknowledged = 0
+        if revocation_sync_token:
+            payload = req.model_dump()
+            payload["target_node_id"] = rev_ev.target_node_id
+            for peer_url in peers_list:
+                try:
+                    p_req = urllib.request.Request(
+                        f"{peer_url.rstrip('/')}/internal/keys/revoke",
+                        data=json.dumps(payload).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                    )
+                    p_req.add_unredirected_header("Authorization", f"Bearer {revocation_sync_token}")
+                    with urllib.request.urlopen(p_req, timeout=1.0) as response:
+                        if response.status == 200:
+                            acknowledged += 1
+                except (OSError, ValueError):
+                    continue
+
+        last_revocation_ms = (time.perf_counter() - t0) * 1000.0
         return {
             "status": "revoked",
             "key_id": req.key_id,
             "propagation_latency_ms": round(last_revocation_ms, 2),
-            "revocation": rev_ev.to_dict() if hasattr(rev_ev, "to_dict") else {"key_id": req.key_id},
+            "peer_acknowledgements": acknowledged,
+            "peer_failures": len(peers_list) - acknowledged,
+            "revocation": rev_ev.to_dict(),
         }
 
     @app.get("/logs/verify")

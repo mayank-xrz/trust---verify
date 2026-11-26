@@ -18,9 +18,9 @@
 | 12 | 15 Brief Scenario Integration Tests + E2E Demo | **Done** | [test_brief_scenarios.py](../tests/integration/test_brief_scenarios.py), [demo_run.md](../reports/demo_run.md) |
 | 13 | Track 4 Adapter v1 (`validate.py`) + Docs & Threat Model | **Done** | [track4_service.py](../track4_service.py), [THREAT_MODEL.md](../docs/threat_model.md) |
 
-## 2. Revocation Latency Table (`reports/revocation_latency.md`, M=20, seed=42)
-- `push_plus_pull`: min `7.732 ms`, median `10.801 ms`, p95 `16.675 ms`, p99 `16.811 ms`, max `16.845 ms`.
-- `pull_only_250ms`: min `6.631 ms`, median `8.796 ms`, p95 `14.506 ms`, p99 `23.48 ms`, max `25.724 ms`.
+## 2. Revocation Latency
+
+The [revocation latency report](revocation_latency.md) records 20 trials per scenario with seed 42. It reports explicit device denials and watermark convergence across three in-process nodes with a shared SQLite database.
 
 ## 3. Crash-Point Outcome Table
 - `rotate.before_start` -> no rotation row (`v1` active, data decryptable)

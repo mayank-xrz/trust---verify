@@ -1,8 +1,11 @@
 """HTTP tests of the demo node's recipient-specific protected transport."""
 
+import json
 import secrets
+import sqlite3
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,27 +20,34 @@ class TestIntegrationE2E(unittest.TestCase):
         state = tempfile.TemporaryDirectory(prefix="tbv_integration_")
         self.addCleanup(state.cleanup)
         self.state = Path(state.name)
-        token = secrets.token_urlsafe(32)
-        self.operator = {"Authorization": f"Bearer {token}"}
-        self.client_a, self.client_b, self.client_c = (
-            self.create_node(node, token) for node in ("node-a", "node-b", "node-c")
-        )
-        self.token = token
+        self.peer_token = secrets.token_urlsafe(32)
+        self.operator_token = secrets.token_urlsafe(32)
+        self.sync_token = secrets.token_urlsafe(32)
+        nodes = ("node-a", "node-b", "node-c")
+        self.recipient_tokens = {node: secrets.token_urlsafe(32) for node in nodes}
+        self.client_a, self.client_b, self.client_c = (self.create_node(node) for node in nodes)
 
-    def create_node(self, node_id, token):
+    @staticmethod
+    def bearer(token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def create_node(self, node_id):
         client = TestClient(
             create_app(
                 node_id=node_id,
                 data_dir=str(self.state / node_id),
                 grace_period_seconds=30,
-                peer_enroll_token=token,
+                peer_enroll_token=self.peer_token,
+                operator_token=self.operator_token,
+                recipient_token=self.recipient_tokens[node_id],
+                revocation_sync_token=self.sync_token,
             )
         )
         self.addCleanup(client.close)
         return client
 
     def enroll_peer(self, client, bundle):
-        response = client.post("/peers", json=bundle, headers=self.operator)
+        response = client.post("/peers", json=bundle, headers=self.bearer(self.peer_token))
         self.assertEqual(response.status_code, 200, response.text)
 
     def connect(self, sender, receiver):
@@ -52,11 +62,25 @@ class TestIntegrationE2E(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["envelope"]
 
-    def assert_delivered(self, receiver, envelope, payload):
+    def receive(self, receiver, envelope):
         response = receiver.post("/receive", json=envelope)
         self.assertEqual(response.status_code, 200, response.text)
+        receipt = response.json()
+        self.assertEqual(set(receipt), {"status", "receipt_id", "message_id", "sequence", "record_hash"})
+        self.assertEqual(receipt["message_id"], envelope["message_id"])
+        self.assertEqual(receipt["status"], "delivered")
+        self.assertTrue(receipt["record_hash"])
+        return f"/inbox/{receipt['receipt_id']}"
+
+    def assert_readable(self, receiver, path, payload):
+        token = self.recipient_tokens[receiver.app.state.node_id]
+        response = receiver.get(path, headers=self.bearer(token))
+        self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["payload"], payload)
-        self.assertTrue(response.json()["record_hash"])
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def assert_delivered(self, receiver, envelope, payload):
+        self.assert_readable(receiver, self.receive(receiver, envelope), payload)
 
     def assert_rejected(self, receiver, envelope, detail, status=400):
         response = receiver.post("/receive", json=envelope)
@@ -81,14 +105,14 @@ class TestIntegrationE2E(unittest.TestCase):
         self.enroll_peer(self.client_a, bundle)
         invalid_bundle = dict(bundle, kem_public_key_b64=bundle["signing_public_key_b64"])
         self.assertEqual(
-            self.client_a.post("/peers", json=invalid_bundle, headers=self.operator).status_code,
+            self.client_a.post("/peers", json=invalid_bundle, headers=self.bearer(self.peer_token)).status_code,
             422,
         )
         conflicting_bundle = dict(
             bundle, signing_public_key_b64=self.client_c.get("/keys/public").json()["signing_public_key_b64"]
         )
         self.assertEqual(
-            self.client_a.post("/peers", json=conflicting_bundle, headers=self.operator).status_code,
+            self.client_a.post("/peers", json=conflicting_bundle, headers=self.bearer(self.peer_token)).status_code,
             409,
         )
 
@@ -111,7 +135,7 @@ class TestIntegrationE2E(unittest.TestCase):
         self.assert_delivered(self.client_b, first, payload)
         self.assert_delivered(self.client_b, second, payload)
         self.assert_delivered(self.client_c, third, payload)
-        self.assert_rejected(self.client_b, first, "Duplicate message_id")
+        self.assert_rejected(self.client_b, first, "Duplicate message rejected")
 
     def test_envelope_requires_signed_key_id_and_kem_ciphertext(self):
         self.connect(self.client_a, self.client_b)
@@ -130,20 +154,25 @@ class TestIntegrationE2E(unittest.TestCase):
         old_bundle = self.client_b.get("/keys/public").json()
         old_message = self.send(self.client_a, "node-b", {"phase": "grace"})
         late_message = self.send(self.client_a, "node-b", {"phase": "after cutoff"})
-        rotate = self.client_b.post("/keys/rotate", json={"role": "admin"})
+        rotate = self.client_b.post("/keys/rotate", headers=self.bearer(self.operator_token))
         self.assertEqual(rotate.status_code, 200, rotate.text)
         new_bundle = self.client_b.get("/keys/public").json()
         self.assertNotEqual(new_bundle["kem_key_id"], old_bundle["kem_key_id"])
         cutoff = self.client_b.app.state.key_manager.keys[old_bundle["kem_key_id"]].grace_period_cutoff
 
-        restarted = self.create_node("node-b", self.token)
+        restarted = self.create_node("node-b")
         self.enroll_peer(restarted, self.client_a.get("/keys/public").json())
-        self.assert_delivered(restarted, old_message, {"phase": "grace"})
+        old_receipt = self.receive(restarted, old_message)
+        self.assert_readable(restarted, old_receipt, {"phase": "grace"})
         with patch("src.identity.key_manager.time.time", return_value=cutoff):
             self.assert_rejected(restarted, late_message, "Recipient key is expired")
+            self.assertEqual(
+                restarted.get(old_receipt, headers=self.bearer(self.recipient_tokens["node-b"])).status_code,
+                410,
+            )
 
         self.enroll_peer(self.client_a, new_bundle)
-        stale = self.client_a.post("/peers", json=old_bundle, headers=self.operator)
+        stale = self.client_a.post("/peers", json=old_bundle, headers=self.bearer(self.peer_token))
         self.assertEqual(stale.status_code, 409)
         current = self.send(self.client_a, "node-b", {"phase": "new key"})
         self.assert_delivered(restarted, current, {"phase": "new key"})
@@ -154,17 +183,64 @@ class TestIntegrationE2E(unittest.TestCase):
         addressed_to_b = self.send(self.client_a, "node-b", {"message": "in flight"})
         addressed_to_c = self.send(self.client_a, "node-c", {"message": "unaffected"})
         revoked = self.client_b.post(
-            "/keys/revoke", json={"key_id": addressed_to_b["key_id"], "role": "admin"}
+            "/keys/revoke", json={"key_id": addressed_to_b["key_id"]},
+            headers=self.bearer(self.operator_token),
         )
         self.assertEqual(revoked.status_code, 200, revoked.text)
         self.assert_rejected(self.client_b, addressed_to_b, "Recipient key is revoked")
         self.assert_delivered(self.client_c, addressed_to_c, {"message": "unaffected"})
 
-        self.assertEqual(self.client_b.post("/keys/rotate", json={"role": "admin"}).status_code, 200)
+        self.assertEqual(
+            self.client_b.post("/keys/rotate", headers=self.bearer(self.operator_token)).status_code, 200
+        )
         self.enroll_peer(self.client_a, self.client_b.get("/keys/public").json())
         new_message = self.send(self.client_a, "node-b", {"message": "replacement key"})
         self.assert_delivered(self.client_b, new_message, {"message": "replacement key"})
 
-    def test_unauthorized_key_rotation_rejected(self):
-        response = self.client_a.post("/keys/rotate", json={"role": "guest"})
-        self.assertEqual(response.status_code, 403)
+    def test_key_administration_requires_its_own_credential_and_records_operator(self):
+        client = self.client_a
+        key_id = client.get("/health").json()["active_key_id"]
+        body = {"role": "admin", "requested_by": "unverified", "key_id": key_id}
+        for headers in ({}, self.bearer(self.peer_token), self.bearer(self.sync_token)):
+            self.assertEqual(client.post("/keys/rotate", json=body, headers=headers).status_code, 401)
+            self.assertEqual(client.post("/keys/revoke", json=body, headers=headers).status_code, 401)
+        self.assertEqual(client.get("/health").json()["active_key_id"], key_id)
+
+        operator = self.bearer(self.operator_token)
+        self.assertEqual(client.post("/internal/keys/revoke", json=body, headers=operator).status_code, 401)
+        self.assertEqual(client.post("/keys/rotate", json=body, headers=operator).status_code, 200)
+        self.assertEqual(client.post("/keys/revoke", json=body, headers=operator).status_code, 200)
+        with Path(client.app.state.audit_logger.log_file_path).open() as log:
+            records = [json.loads(line) for line in log if line.strip() and not line.startswith("#")]
+        actors = {record["action"]: record["subject"] for record in records}
+        self.assertEqual(actors["ROTATE_KEY_SUCCESS"], "demo-operator")
+        self.assertEqual(actors["REVOKE_KEY_SUCCESS"], "demo-operator")
+        self.assertEqual(actors["OPERATOR_AUTH_DENIED"], "unauthenticated")
+
+    def test_receipt_is_public_and_inbox_requires_the_intended_recipients_credential(self):
+        self.connect(self.client_a, self.client_b)
+        payload = {"message": "only node-b can read this"}
+        envelope = self.send(self.client_a, "node-b", payload)
+        path = self.receive(self.client_b, envelope)
+        for headers in ({}, self.bearer(self.operator_token), self.bearer(self.recipient_tokens["node-c"])):
+            self.assertEqual(self.client_b.get(path, headers=headers).status_code, 401)
+        self.assert_readable(self.client_b, path, payload)
+        with sqlite3.connect(self.state / "node-b" / "node-b_inbox.sqlite3") as db:
+            stored, = db.execute("SELECT envelope FROM deliveries").fetchone()
+        self.assertNotIn(payload["message"], stored)
+
+    def test_concurrent_delivery_and_replay_after_receiver_restart(self):
+        self.connect(self.client_a, self.client_b)
+        payload = {"message": "accept once"}
+        envelope = self.send(self.client_a, "node-b", payload)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses = list(pool.map(lambda _: self.client_b.post("/receive", json=envelope), range(2)))
+        self.assertEqual(sorted(response.status_code for response in responses), [200, 400])
+        receipt = next(response.json()["receipt_id"] for response in responses if response.is_success)
+        self.client_b.close()
+
+        restarted = self.create_node("node-b")
+        self.enroll_peer(restarted, self.client_a.get("/keys/public").json())
+        self.assert_rejected(restarted, envelope, "Duplicate message rejected")
+        self.assert_readable(restarted, f"/inbox/{receipt}", payload)
+        self.assert_delivered(restarted, self.send(self.client_a, "node-b", payload), payload)
