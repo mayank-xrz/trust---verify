@@ -18,11 +18,30 @@ except ImportError:
     OQS_AVAILABLE = False
 
 
+# RFC 3526 2048-bit MODP Prime for secure mathematical fallback signature
+_PRIME_HEX = (
+    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
+    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
+    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
+    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
+    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
+    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
+    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
+    "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
+    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
+    "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
+    "15728E5A8AACAA68FFFFFFFFFFFFFFFF"
+)
+_MODP_P = int(_PRIME_HEX, 16)
+_MODP_G = 2
+_MODP_Q = (_MODP_P - 1) // 2
+
+
 class MLDSASignature:
     """ML-DSA-65 Digital Signature provider."""
 
     ALGORITHM = "ML-DSA-65"
-    FALLBACK_ALGORITHM = "MOCK-DSA-65"
+    FALLBACK_ALGORITHM = "SCHNORR-MODP-2048"
 
     def __init__(self, algorithm: str = ALGORITHM, use_fallback: bool = not OQS_AVAILABLE):
         self.use_fallback = use_fallback or not OQS_AVAILABLE
@@ -48,8 +67,11 @@ class MLDSASignature:
                 self.use_fallback = True
                 self.algorithm = self.FALLBACK_ALGORITHM
 
-        private_key = secrets.token_bytes(64)
-        public_key = hashlib.sha3_256(b"ML-DSA-65-PUBKEY:" + private_key).digest()
+        # Pure-python Schnorr keypair generation over RFC 3526 MODP group
+        x = secrets.randbelow(_MODP_Q - 2) + 1
+        y = pow(_MODP_G, x, _MODP_P)
+        private_key = x.to_bytes(256, "big")
+        public_key = y.to_bytes(256, "big")
         self._private_key = private_key
         self._public_key = public_key
         return public_key, private_key
@@ -67,10 +89,15 @@ class MLDSASignature:
             except Exception:
                 pass
 
-        # Robust HMAC-SHA3-512 based standard simulation
-        sig_mac = hmac.new(priv, message, hashlib.sha3_512).digest()
-        pub = self._public_key or hashlib.sha3_256(b"ML-DSA-65-PUBKEY:" + priv).digest()
-        return pub + sig_mac
+        # Asymmetric Schnorr signature over RFC 3526 MODP group
+        x = int.from_bytes(priv, "big")
+        y = pow(_MODP_G, x, _MODP_P)
+        k = secrets.randbelow(_MODP_Q - 2) + 1
+        r = pow(_MODP_G, k, _MODP_P)
+        h = hashlib.sha256(r.to_bytes(256, "big") + y.to_bytes(256, "big") + message).digest()
+        e = int.from_bytes(h, "big") % _MODP_Q
+        s = (k - x * e) % _MODP_Q
+        return e.to_bytes(32, "big") + s.to_bytes(256, "big")
 
     def verify(self, message: bytes, signature: bytes, public_key: bytes) -> bool:
         """Verify signature against message and public key."""
@@ -81,19 +108,19 @@ class MLDSASignature:
             except Exception:
                 pass
 
-        if len(signature) < 64:
+        if len(signature) != 288 or len(public_key) != 256:
             return False
 
-        embedded_pub = signature[:32]
-        sig_mac = signature[32:]
-        if embedded_pub != public_key[:32]:
+        try:
+            e = int.from_bytes(signature[:32], "big")
+            s = int.from_bytes(signature[32:], "big")
+            y = int.from_bytes(public_key, "big")
+            if not (1 <= y < _MODP_P):
+                return False
+
+            r_v = (pow(_MODP_G, s, _MODP_P) * pow(y, e, _MODP_P)) % _MODP_P
+            h_v = hashlib.sha256(r_v.to_bytes(256, "big") + y.to_bytes(256, "big") + message).digest()
+            e_v = int.from_bytes(h_v, "big") % _MODP_Q
+            return e_v == e
+        except Exception:
             return False
-
-        # If private key is available locally, verify MAC; otherwise verify token structure
-        if self._private_key:
-            expected = hmac.new(self._private_key, message, hashlib.sha3_512).digest()
-            return hmac.compare_digest(expected, sig_mac)
-
-        # For external verifiers in mock mode, check integrity against pubkey commitment
-        expected_digest = hashlib.sha3_512(b"TBV-SIG-VERIFY:" + public_key + message).digest()
-        return len(sig_mac) == 64

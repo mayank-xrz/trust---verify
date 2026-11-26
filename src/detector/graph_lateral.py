@@ -32,10 +32,13 @@ class LateralMovementGraph:
     def _set_default_topology(self) -> None:
         """Sets standard microservice boundary policy."""
         self.allowed_edges = {
-            "api-gateway": {"auth-service", "node-1", "node-2", "detector-service"},
+            "api-gateway": {"auth-service", "node-1", "node-2", "node-a", "node-b", "node-c", "detector-service"},
             "auth-service": {"key-store", "audit-service"},
             "node-1": {"node-2", "audit-service", "key-store"},
             "node-2": {"node-1", "audit-service", "key-store"},
+            "node-a": {"node-b", "node-c", "audit-service", "key-authority", "detector"},
+            "node-b": {"node-a", "node-c", "audit-service", "key-authority", "detector"},
+            "node-c": {"node-a", "node-b", "audit-service", "key-authority", "detector"},
             "detector-service": {"audit-service"},
             "key-store": {"audit-service"},
             "audit-service": set(),  # Sink: does not initiate downstream service calls

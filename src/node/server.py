@@ -214,6 +214,8 @@ def create_app(node_id: str = "node-a", data_dir: str = "/tmp/tbv_data") -> Fast
     app.state.key_manager = key_manager
     app.state.audit_logger = audit_logger
     app.state.messaging = messaging
+    app.state.sig_provider = sig_provider
+    app.state.kem_provider = kem_provider
     app.state.peer_shared_keys = peer_shared_keys
     app.state.peer_public_keys = peer_public_keys
     app.state.enrolled_nodes = enrolled_nodes
@@ -237,6 +239,8 @@ def create_app(node_id: str = "node-a", data_dir: str = "/tmp/tbv_data") -> Fast
             "role": req.role,
             "enrolled_at": time.time_ns(),
         }
+        if req.public_key_b64:
+            peer_public_keys[req.node_id] = base64.b64decode(req.public_key_b64)
         rec = audit_logger.log_event(
             service=node_id,
             action="DEVICE_ENROLLMENT",
