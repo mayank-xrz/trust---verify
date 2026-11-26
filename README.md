@@ -151,6 +151,13 @@ python3 scripts/benchmark.py
 ./scripts/run_demo.sh
 ```
 
+#### Demo Video
+The 5-minute recording is a human-supplied artifact. The shot list, narration
+points, and upload checklist are in [`docs/DEMO_VIDEO.md`](docs/DEMO_VIDEO.md).
+Set `DEMO_VIDEO_URL` to the final URL once it exists. While the variable is
+unset, the README and brief must say **video pending** and must not link to a
+placeholder domain.
+
 ---
 
 ## 📊 Performance & Detection Benchmarks
