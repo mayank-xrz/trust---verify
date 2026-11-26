@@ -112,8 +112,25 @@ class IdentityService:
         self.emitter = emitter
         self.token_authority = token_authority
 
+    def get_enrollment_target(self, enrollment_id: str) -> tuple[str, str]:
+        """Return the immutable ``(user_id, kind)`` target of an enrollment.
+
+        Authorization must resolve the target before the single-use nonce is
+        consumed, so this read is deliberately separate from ``enroll_device``.
+        """
+        with self.session_factory() as session:
+            enrollment = session.get(Enrollment, enrollment_id)
+            if not enrollment:
+                raise NotFound("Enrollment not found")
+            return str(enrollment.user_id), str(enrollment.kind)
+
     def start_enrollment(
-        self, user_id: str, kind: str = "first", ttl_seconds: int = 300
+        self,
+        user_id: str,
+        kind: str = "first",
+        ttl_seconds: int = 300,
+        initiated_by: str | None = None,
+        initiated_by_admin: bool = False,
     ) -> dict[str, str]:
         """Issue a single-use expiring enrollment nonce for an active user."""
         now = self.clock.now()
@@ -137,6 +154,20 @@ class IdentityService:
                     created_at=now,
                 )
             )
+            self.emitter.emit(
+                session,
+                actor_id=initiated_by or user_id,
+                device_id=None,
+                action="enrollment.started",
+                target=enrollment_id,
+                outcome="allow",
+                reason_code="ENROLLMENT_STARTED",
+                metadata={
+                    "kind": kind,
+                    "target_user_id": user_id,
+                    "actor_is_admin": initiated_by_admin,
+                },
+            )
             return {"enrollment_id": enrollment_id, "nonce": nonce}
 
     def enroll_device(
@@ -148,6 +179,7 @@ class IdentityService:
         public_key_b64: str,
         proof_of_possession_b64: str,
         public_key_alg: str = "Ed25519",
+        initiated_by: str | None = None,
     ) -> dict[str, Any]:
         """Verify nonce + PoP signature, reject duplicates/revoked fingerprints, and enroll."""
         now = self.clock.now()
@@ -159,13 +191,13 @@ class IdentityService:
             def _reject(exc: Exception, reason_code: str) -> NoReturn:
                 self.emitter.emit(
                     session,
-                    actor_id=enrollment.user_id,
+                    actor_id=initiated_by or enrollment.user_id,
                     device_id=None,
                     action="device.enroll.rejected",
                     target=enrollment_id,
                     outcome="deny",
                     reason_code=reason_code,
-                    metadata={"label": label},
+                    metadata={"label": label, "target_user_id": enrollment.user_id},
                 )
                 session.commit()
                 raise exc
@@ -226,13 +258,13 @@ class IdentityService:
 
             self.emitter.emit(
                 session,
-                actor_id=user.user_id,
+                actor_id=initiated_by or user.user_id,
                 device_id=device_id,
                 action="device.enrolled",
                 target=device_id,
                 outcome="allow",
                 reason_code="ENROLLED",
-                metadata={"label": label, "fingerprint": fp},
+                metadata={"label": label, "fingerprint": fp, "target_user_id": user.user_id},
             )
             return {
                 "device_id": device_id,
