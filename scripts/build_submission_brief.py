@@ -67,7 +67,7 @@ def render_page(canvas, source, number, video):
             text = line[2:] if indent else line
             font, size, leading, space = "Helvetica", 10.5, 15, 6
         text = escape(text)
-        if video.startswith(("https://", "http://")):
+        if video.startswith(("https://", "http://")) or (SOURCE.parent / video).is_file():
             text = text.replace(escape(video), f'<link href="{escape(video, {chr(34): "&quot;"})}" color="#08736F">{escape(video)}</link>')
         style = ParagraphStyle("brief", fontName=font, fontSize=size, leading=leading,
                                textColor=navy, alignment=TA_LEFT)
@@ -99,7 +99,12 @@ def main():
     canvas.save()
     readme = ROOT / "README.md"
     text = readme.read_text(encoding="utf-8")
-    label = f"<{video}>" if video.startswith(("http://", "https://")) else f"`{video}`"
+    if video.startswith(("http://", "https://")):
+        label = f"<{video}>"
+    elif (SOURCE.parent / video).is_file():
+        label = f"[Walkthrough video](docs/{video})"
+    else:
+        label = f"`{video}`"
     updated, count = re.subn(r"^5-minute demo video:.*$", lambda _: f"5-minute demo video: {label}", text, flags=re.M)
     if count != 1:
         raise ValueError("README should have one 5-minute demo video line")

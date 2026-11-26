@@ -163,7 +163,11 @@ python3 -m demo.node.operator_cli alerts
 
 Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
 
-5-minute demo video: `VIDEO_URL`
+5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
+
+[Live run results](reports/demo_run.md)
+
+The live assessment runs three loopback node processes with separate state directories. It verifies protected delivery, rotation grace and cutoff, receiver-side denial after recipient-key revocation, and rejection of new sends under the revoked key on both peers. It then checks unaffected traffic, delivery with a replacement key, and the audit chains. The peer acknowledgement includes an audit sequence for that specific revocation. This push-only demo has no heartbeat or catch-up for offline peers. Its recipient-key lifecycle and the device-authorization benchmark below are separate entry points.
 
 ## Checklist coverage
 
@@ -207,7 +211,7 @@ checklist and labelled fixture for submission evidence.
 
 `make bench` measures cryptographic operation latency and the protected HTTP workflow from send through durable receipt to authenticated inbox read. It also reports detector throughput and Python allocation overhead.
 
-On macOS arm64 with Python 3.15.2 and the pinned dependencies, reusing the envelope schema validator lowered the median HTTP delivery time from **8.24 ms to 5.52 ms** and increased serial throughput from **111.6 to 159.7 deliveries/s**. These are medians from three local in-process runs per configuration, each with 30 warmup messages and 300 measured deliveries. The standalone crypto-only benchmark measured **3.49 ms p50** across 500 envelopes.
+On macOS arm64 with Python 3.15.2, three local in-process HTTP runs with 30 warmup messages and 300 measured deliveries each gave a median-of-runs **5.95 ms p50** and **149.4 serial deliveries/s**. Each delivery includes sealing, receipt persistence, and authenticated inbox read. The separate crypto-only sign/encrypt and verify/decrypt round trip measured **3.51 ms p50** and **285.3 envelopes/s** across 500 envelopes.
 
 Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
 

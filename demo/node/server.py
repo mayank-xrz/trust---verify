@@ -92,6 +92,11 @@ class RevokeKeyRequest(BaseModel):
     target_node_id: Optional[str] = None
 
 
+class PeerRevocation(RevokeKeyRequest):
+    target_node_id: str
+    revocation_id: str
+
+
 class DeliveryReceipt(BaseModel):
     status: str
     receipt_id: str
@@ -176,7 +181,7 @@ def create_app(
     audit = adapters.audit
     if crypto.is_mock or identity.is_mock or audit.is_mock:
         raise RuntimeError("Protected transport requires real crypto, lifecycle and audit providers")
-    key_lock = threading.Lock()
+    key_lock = threading.RLock()
     inbox = RecipientInbox(Path(data_dir) / f"{node_id}_inbox.sqlite3", node_id)
 
     # In-memory peer bindings and operational metrics
@@ -410,15 +415,25 @@ def create_app(
             )
             raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
 
+        plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
         with key_lock:
             peer = trusted_peers.get(recipient_id)
-        if peer is None:
-            raise HTTPException(status_code=403, detail="Recipient transport keys are not enrolled")
-        plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
-        raw_env = crypto.messaging.seal_for_recipient(
-            recipient_id, plaintext_bytes, peer.kem_key_id,
-            unb64(peer.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE), crypto.kem, crypto.sig,
-        )
+            if peer is None:
+                raise HTTPException(status_code=403, detail="Recipient transport keys are not enrolled")
+            if inbox.is_peer_key_revoked(recipient_id, peer.kem_key_id):
+                audit.logger.log_event(
+                    service=node_id,
+                    action="REVOKED_PEER_KEY_BLOCKED",
+                    subject=sender_id,
+                    resource=f"node://{recipient_id}",
+                    status="DENIED",
+                    metadata={"key_id": peer.kem_key_id},
+                )
+                raise HTTPException(status_code=409, detail="Peer recipient key is revoked")
+            raw_env = crypto.messaging.seal_for_recipient(
+                recipient_id, plaintext_bytes, peer.kem_key_id,
+                unb64(peer.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE), crypto.kem, crypto.sig,
+            )
         envelope = _schema_envelope(raw_env)
         for field in ("seq_num", "associated_data", "sig_alg", "kem_alg"):
             raw_env[field] = envelope[field]
@@ -478,13 +493,14 @@ def create_app(
 
         try:
             sender_public_key = unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
-            crypto.messaging.decrypt_for_recipient(
-                envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
-            )
-            try:
-                receipt_id = inbox.accept(envelope, sender_public_key)
-            except (ReplayRejectedError, CounterOutOfWindowError) as exc:
-                raise crypto.ReplayAttackError(str(exc)) from exc
+            with key_lock:
+                crypto.messaging.decrypt_for_recipient(
+                    envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
+                )
+                try:
+                    receipt_id = inbox.accept(envelope, sender_public_key)
+                except (ReplayRejectedError, CounterOutOfWindowError) as exc:
+                    raise crypto.ReplayAttackError(str(exc)) from exc
             latency = (time.perf_counter() - t0) * 1000.0
             crypto_latencies.append(latency)
             message_stats["received"] += 1
@@ -581,11 +597,14 @@ def create_app(
         }
 
     def apply_key_revocation(req: RevokeKeyRequest, actor: str):
+        if req.target_node_id not in (None, node_id):
+            raise HTTPException(status_code=400, detail="Revoke a key on its owning node")
         with key_lock:
+            if not identity.key_manager.revoke_key(req.key_id, req.reason):
+                raise HTTPException(status_code=404, detail="Unknown local recipient key")
             event = identity.revocation.create_revocation(
-                req.key_id, req.target_node_id or node_id, req.reason, signer=crypto.sig
+                req.key_id, node_id, req.reason, signer=crypto.sig
             )
-            identity.key_manager.revoke_key(req.key_id, req.reason)
         audit.logger.log_event(
             service=node_id,
             action="REVOKE_KEY_SUCCESS",
@@ -596,11 +615,27 @@ def create_app(
         )
         return event
 
-    @app.post("/internal/keys/revoke")
-    def sync_revocation(req: RevokeKeyRequest, authorization: Optional[str] = Header(default=None)):
+    def require_revocation_peer(authorization: Optional[str] = Header(default=None)):
         _require_bearer(authorization, revocation_sync_token, "Peer revocation")
-        apply_key_revocation(req, "demo-revocation-peer")
-        return {"status": "acknowledged", "node_id": node_id}
+
+    @app.post("/internal/keys/revoke", dependencies=[Depends(require_revocation_peer)])
+    def sync_revocation(req: PeerRevocation):
+        with key_lock:
+            inbox.revoke_peer_key(req.target_node_id, req.key_id)
+        record = audit.logger.log_event(
+            service=node_id,
+            action="PEER_REVOCATION_APPLIED",
+            subject=req.target_node_id,
+            resource=f"/keys/{req.key_id}",
+            status="SUCCESS",
+            metadata={"revocation_id": req.revocation_id},
+        )
+        return {
+            "status": "applied",
+            "node_id": node_id,
+            "revocation_id": req.revocation_id,
+            "audit_sequence": record.sequence,
+        }
 
     @app.post("/keys/revoke")
     def revoke_key(req: RevokeKeyRequest, actor: str = Depends(require_operator)):
@@ -608,10 +643,11 @@ def create_app(
         t0 = time.perf_counter()
         rev_ev = apply_key_revocation(req, actor)
 
-        acknowledged = 0
+        receipts = {}
         if revocation_sync_token:
             payload = req.model_dump()
             payload["target_node_id"] = rev_ev.target_node_id
+            payload["revocation_id"] = rev_ev.revocation_id
             for peer_url in peers_list:
                 try:
                     p_req = urllib.request.Request(
@@ -621,8 +657,16 @@ def create_app(
                     )
                     p_req.add_unredirected_header("Authorization", f"Bearer {revocation_sync_token}")
                     with urllib.request.urlopen(p_req, timeout=1.0) as response:
-                        if response.status == 200:
-                            acknowledged += 1
+                        receipt = json.load(response)
+                        if (
+                            isinstance(receipt, dict)
+                            and receipt.get("status") == "applied"
+                            and receipt.get("revocation_id") == rev_ev.revocation_id
+                            and isinstance(receipt.get("node_id"), str)
+                            and receipt["node_id"] != node_id
+                            and isinstance(receipt.get("audit_sequence"), int)
+                        ):
+                            receipts[receipt["node_id"]] = receipt
                 except (OSError, ValueError):
                     continue
 
@@ -631,8 +675,9 @@ def create_app(
             "status": "revoked",
             "key_id": req.key_id,
             "propagation_latency_ms": round(last_revocation_ms, 2),
-            "peer_acknowledgements": acknowledged,
-            "peer_failures": len(peers_list) - acknowledged,
+            "peer_acknowledgements": len(receipts),
+            "peer_failures": len(peers_list) - len(receipts),
+            "peer_receipts": list(receipts.values()),
             "revocation": rev_ev.to_dict(),
         }
 

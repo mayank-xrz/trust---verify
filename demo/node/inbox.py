@@ -38,6 +38,26 @@ class RecipientInbox:
                 """
             )
 
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS revoked_peer_keys (
+                    peer_id TEXT NOT NULL,
+                    key_id TEXT NOT NULL,
+                    PRIMARY KEY (peer_id, key_id)
+                )
+                """
+            )
+
+    def revoke_peer_key(self, peer_id: str, key_id: str) -> None:
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("INSERT OR IGNORE INTO revoked_peer_keys VALUES (?, ?)", (peer_id, key_id))
+
+    def is_peer_key_revoked(self, peer_id: str, key_id: str) -> bool:
+        with closing(sqlite3.connect(self.path)) as db:
+            return db.execute(
+                "SELECT 1 FROM revoked_peer_keys WHERE peer_id=? AND key_id=?", (peer_id, key_id)
+            ).fetchone() is not None
+
     def accept(self, envelope: dict[str, Any], sender_public_key: bytes) -> str:
         """Record an authenticated envelope and its replay state as one delivery."""
         receipt_id = uuid.uuid4().hex

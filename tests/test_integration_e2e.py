@@ -198,6 +198,36 @@ class TestIntegrationE2E(unittest.TestCase):
         new_message = self.send(self.client_a, "node-b", {"message": "replacement key"})
         self.assert_delivered(self.client_b, new_message, {"message": "replacement key"})
 
+    def test_peer_revocation_blocks_new_sends_after_restart(self):
+        old = self.client_b.get("/keys/public").json()
+        self.enroll_peer(self.client_a, old)
+        event = {
+            "key_id": old["kem_key_id"],
+            "target_node_id": "node-b",
+            "revocation_id": "test-revocation",
+        }
+        for _ in range(2):
+            response = self.client_a.post(
+                "/internal/keys/revoke", json=event, headers=self.bearer(self.sync_token),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["revocation_id"], event["revocation_id"])
+
+        restarted = self.create_node("node-a")
+        self.enroll_peer(restarted, old)
+        blocked = restarted.post(
+            "/send", json={"recipient_id": "node-b", "payload": {}},
+            headers=self.bearer(self.operator_token),
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["detail"], "Peer recipient key is revoked")
+
+        rotated = self.client_b.post("/keys/rotate", headers=self.bearer(self.operator_token))
+        self.assertEqual(rotated.status_code, 200, rotated.text)
+        self.connect(restarted, self.client_b)
+        payload = {"message": "replacement key"}
+        self.assert_delivered(self.client_b, self.send(restarted, "node-b", payload), payload)
+
     def test_key_administration_requires_its_own_credential_and_records_operator(self):
         client = self.client_a
         key_id = client.get("/health").json()["active_key_id"]

@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export DEMO_SANDBOX_ENABLED=1
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
-for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
+for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_REVOCATION_SYNC_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
     value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
     export "$credential=$value"
 done
@@ -57,7 +57,11 @@ for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     nid="${spec%%:*}"
     port="${spec##*:}"
     recipient_credential="DEMO_RECIPIENT_TOKEN_${nid#node-}"
-    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" PEER_NODES="" \
+    peers=""
+    if [[ "$nid" == node-b ]]; then
+        peers="http://127.0.0.1:8001,http://127.0.0.1:8003"
+    fi
+    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" PEER_NODES="$peers" \
         DEMO_RECIPIENT_TOKEN="${!recipient_credential:-}" \
         python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
@@ -86,8 +90,10 @@ echo ""
 python3 -m demo.node.operator_cli status
 
 # Steps 2-4 exercise the same protected transport before, during, and after key changes.
-python3 - <<'PYTHON'
+python3 - "$TEMP_DATA_DIR" <<'PYTHON'
 import json
+import sys
+from pathlib import Path
 import os
 import time
 from urllib.error import HTTPError
@@ -114,8 +120,8 @@ def enroll(local_node, peer):
     return bundle
 
 
-def send(recipient, payload):
-    return call("node-a", "/send", {
+def send(recipient, payload, sender="node-a"):
+    return call(sender, "/send", {
         "target_node_url": NODES[recipient],
         "recipient_id": recipient,
         "payload": payload,
@@ -165,17 +171,41 @@ time.sleep(2.2)
 expect_denial("node-b", late, "Recipient key is expired")
 print("  Old key accepted in grace and expired on cutoff. New key delivered during grace.")
 
-print("\n▶ STEP 4: Revoke node-b's current key and verify node-c stays reachable")
-in_flight = send("node-b", {"message": "Undelivered before revocation"})
-call("node-b", "/keys/revoke", {"key_id": in_flight["key_id"]}, OPERATOR)
+print("\n▶ STEP 4: Verify receiver denial, durable peer application, and unaffected traffic")
+enroll("node-c", "node-b")
+in_flight = send("node-b", {"message": "First delivery after revocation"})
+started = time.perf_counter()
+result = call("node-b", "/keys/revoke", {"key_id": in_flight["key_id"]}, OPERATOR)
+receipts = {receipt["node_id"]: receipt for receipt in result["peer_receipts"]}
+assert result["peer_failures"] == 0 and set(receipts) == {"node-a", "node-c"}, result
 expect_denial("node-b", in_flight, "Recipient key is revoked")
+elapsed = (time.perf_counter() - started) * 1000
+print(f"  node-b denied first delivery under the revoked key (observed after {elapsed:.2f} ms).")
+print(f"  Operator request to peer acknowledgements: {result['propagation_latency_ms']:.2f} ms.")
+for peer, receipt in sorted(receipts.items()):
+    try:
+        send("node-b", {"message": "New send after revocation"}, sender=peer)
+    except HTTPError as exc:
+        assert exc.code == 409 and json.load(exc)["detail"] == "Peer recipient key is revoked"
+    else:
+        raise RuntimeError(f"{peer} sealed a message under the revoked key")
+    path = Path(sys.argv[1]) / peer / f"{peer}_audit.log"
+    events = [json.loads(line) for line in path.read_text().splitlines() if not line.startswith("#")]
+    record = next(event for event in events if event["sequence"] == receipt["audit_sequence"])
+    assert record["action"] == "PEER_REVOCATION_APPLIED"
+    assert record["metadata"]["revocation_id"] == result["revocation"]["revocation_id"]
+    print(f"  {peer} blocked a fresh send. Verified peer application audit sequence {record['sequence']}.")
+
 unaffected = {"message": "Unaffected recipient"}
 expect_delivery("node-c", send("node-c", unaffected), unaffected)
 call("node-b", "/keys/rotate", {}, OPERATOR)
 enroll("node-a", "node-b")
 replacement = {"message": "Delivered with the replacement key"}
 expect_delivery("node-b", send("node-b", replacement), replacement)
-print("  Revoked key denied, node-c unaffected, node-b restored with a replacement key.")
+print("  node-c delivered unaffected traffic. node-b delivered with its replacement key.")
+for node in NODES:
+    assert call(node, "/logs/verify", headers=OPERATOR)["is_valid"], f"Invalid audit chain on {node}"
+
 PYTHON
 
 # ------------------------------------------------------------------------------
@@ -237,27 +267,41 @@ echo "======================================================================"
 echo "▶ STEP 6: Cryptographic Log Chain Verification & Explainable Alerts"
 echo "======================================================================"
 
-# Simulate attacks to trigger explainable alerts
+# Check that local policy denials produce the expected explainable alerts.
 python3 - << 'EOF'
-import json, os, urllib.request
+import json
+import os
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
-# Trigger lateral movement policy alert
-try:
-    req = urllib.request.Request("http://127.0.0.1:8001/send",
-        data=json.dumps({"target_node_url": "http://127.0.0.1:8005", "recipient_id": "key-store", "payload": {"exploit": "lateral_hop"}}).encode(),
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['DEMO_OPERATOR_TOKEN']}"})
-    urllib.request.urlopen(req)
-except Exception:
-    pass
+base = "http://127.0.0.1:8001"
+operator = {"Authorization": f"Bearer {os.environ['DEMO_OPERATOR_TOKEN']}"}
+for path, payload, status in (
+    ("/send", {"recipient_id": "key-store", "payload": {"message": "policy check"}}, 403),
+    ("/keys/rotate", {}, 401),
+):
+    request = Request(
+        base + path, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", **(operator if path == "/send" else {})},
+    )
+    try:
+        urlopen(request, timeout=5).close()
+    except HTTPError as exc:
+        if exc.code != status:
+            raise
+    else:
+        raise RuntimeError(f"{path} should have returned HTTP {status}")
 
-# Trigger privilege escalation alert
-try:
-    req = urllib.request.Request("http://127.0.0.1:8001/keys/rotate",
-        data=json.dumps({"role": "guest"}).encode(),
-        headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(req)
-except Exception:
-    pass
+with urlopen(Request(base + "/metrics", headers=operator), timeout=5) as response:
+    alerts = json.load(response)["alerts"]
+rules = {alert["rule_name"] for alert in alerts}
+expected = {"LATERAL_MOVEMENT_VIOLATION", "UNAUTHORIZED_KEY_ADMINISTRATION"}
+if not expected <= rules:
+    raise RuntimeError(f"Missing policy alerts: {expected - rules}")
+for port in (8001, 8002, 8003):
+    with urlopen(Request(f"http://127.0.0.1:{port}/logs/verify", headers=operator), timeout=5) as response:
+        if not json.load(response)["is_valid"]:
+            raise RuntimeError(f"Audit chain verification failed on port {port}")
 EOF
 
 # Operator CLI: Verify Audit Log Hash Chains
