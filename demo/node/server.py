@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
 import sys
 import threading
 import time
@@ -48,6 +49,24 @@ KEY_STATE_SCHEMA = _load_schema("key_state.schema.json")
 AUDIT_EVENT_SCHEMA = _load_schema("audit_event.schema.json")
 
 
+def _load_cluster_key() -> bytes:
+    """Return the sandbox cluster key.
+
+    ``DEMO_CLUSTER_KEY_B64`` is generated per demo run by ``run_demo.sh``. If it
+    is absent, generate an ephemeral key for this process. There is deliberately
+    no hard-coded fallback: nodes with different ephemeral keys cannot exchange
+    messages, which is the correct fail-closed behaviour for a misconfigured
+    sandbox.
+    """
+    raw = os.environ.get("DEMO_CLUSTER_KEY_B64", "").strip()
+    if raw:
+        key = base64.b64decode(raw, validate=True)
+        if len(key) != 32:
+            raise ValueError("DEMO_CLUSTER_KEY_B64 must decode to exactly 32 bytes")
+        return key
+    return secrets.token_bytes(32)
+
+
 # Request/Response Models
 class EnrollRequest(BaseModel):
     node_id: str
@@ -77,11 +96,13 @@ def create_app(
     data_dir: Optional[str] = None,
     grace_period_seconds: Optional[float] = None,
     peer_nodes: Optional[List[str]] = None,
+    cluster_key: Optional[bytes] = None,
 ) -> FastAPI:
     # Resolve configuration from environment variables or params
     node_id = node_id or os.environ.get("NODE_ID", "node-a")
     data_dir = data_dir or os.environ.get("DATA_DIR", f"/tmp/tbv_data_{node_id}")
     grace_period_sec = float(grace_period_seconds or os.environ.get("GRACE_PERIOD_SECONDS", "5.0"))
+    cluster_key = cluster_key or _load_cluster_key()
 
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
@@ -117,6 +138,7 @@ def create_app(
     app.state.kem_provider = crypto.kem
     app.state.peer_shared_keys = peer_shared_keys
     app.state.peer_public_keys = peer_public_keys
+    app.state.cluster_key = cluster_key
     app.state.enrolled_nodes = enrolled_nodes
     app.state.recent_alerts = recent_alerts
 
@@ -205,12 +227,15 @@ def create_app(
             except jsonschema.ValidationError as e:
                 raise HTTPException(status_code=422, detail=f"Key state schema validation failed: {e.message}")
 
-        enrolled_nodes[req.node_id] = key_state_record
         if req.public_key_b64:
             try:
-                peer_public_keys[req.node_id] = base64.b64decode(req.public_key_b64)
-            except Exception:
-                peer_public_keys[req.node_id] = req.public_key_b64.encode()
+                peer_public_keys[req.node_id] = base64.b64decode(req.public_key_b64, validate=True)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"public_key_b64 is not valid base64: {exc}",
+                ) from exc
+        enrolled_nodes[req.node_id] = key_state_record
 
         rec = audit.logger.log_event(
             service=node_id,
@@ -255,7 +280,7 @@ def create_app(
             raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
 
         # 2. Prepare envelope
-        shared_key = peer_shared_keys.get(recipient_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
+        shared_key = peer_shared_keys.get(recipient_id) or cluster_key
         plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
 
         seq = message_stats["sent"] + 1
@@ -348,7 +373,27 @@ def create_app(
                 message_stats["rejected"] += 1
                 raise HTTPException(status_code=422, detail=f"Envelope schema validation failed: {e.message}")
 
-        # 2. Lateral movement check
+        # 2. Identity must be enrolled before any cryptographic work.  There is
+        # no default verification key: an unknown sender is rejected rather than
+        # verified against an attacker-known placeholder.
+        if sender_id not in peer_public_keys:
+            message_stats["rejected"] += 1
+            audit.logger.log_event(
+                service=node_id,
+                action="UNKNOWN_SENDER_BLOCKED",
+                subject=sender_id,
+                resource="/receive",
+                status="DENIED",
+                metadata={"reason": "sender identity is not enrolled"},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=f"Sender '{sender_id}' is not enrolled on {node_id}",
+            )
+        sender_pubkey = peer_public_keys[sender_id]
+        shared_key = peer_shared_keys.get(sender_id) or cluster_key
+
+        # 3. Lateral movement check
         viol = audit.lateral_graph.check_call(sender_id, node_id, "RECEIVE_MESSAGE")
         if viol:
             message_stats["rejected"] += 1
@@ -379,10 +424,7 @@ def create_app(
             message_stats["rejected"] += 1
             raise HTTPException(status_code=400, detail=f"Key '{target_key_id}' is revoked")
 
-        # 4. Decrypt and verify
-        shared_key = peer_shared_keys.get(sender_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
-        sender_pubkey = peer_public_keys.get(sender_id, b"DEFAULT-PUBKEY-32BYTES-MOCK!!!!")
-
+        # 5. Decrypt and verify
         # Normalize envelope fields for unpacker
         if "seq_num" in envelope and "sequence_number" not in envelope:
             envelope["sequence_number"] = envelope["seq_num"]

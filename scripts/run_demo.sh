@@ -26,6 +26,11 @@ if [ ! -x "$PYTHON" ]; then
 fi
 export PATH="$(dirname "$PYTHON"):$PATH"
 
+# Ephemeral sandbox cluster key shared by every node in this run.  No key is
+# committed; a fresh one is generated each invocation.
+DEMO_CLUSTER_KEY_B64="$("$PYTHON" -c 'import base64,secrets;print(base64.b64encode(secrets.token_bytes(32)).decode())')"
+export DEMO_CLUSTER_KEY_B64
+
 TEMP_DATA_DIR="$(mktemp -d -t tbv_demo_XXXXXX)"
 PIDS=()
 
