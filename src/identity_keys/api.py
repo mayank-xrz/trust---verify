@@ -135,12 +135,13 @@ def create_app(
         resolved_clock,
         node_id=resolved_node,
         stale_after_ms=int(os.environ.get("STALE_AFTER_MS", "2000")),
+        heartbeat_interval_ms=int(os.environ.get("HEARTBEAT_INTERVAL_MS", "0")),
+        audit_emitter=emitter,
     )
     reenroll_svc = ReenrollmentService(session_factory, resolved_clock, emitter)
 
     app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})")
     app.state.engine = engine
-    app.state.session_factory = session_factory
     app.state.token_authority = token_auth
     app.state.identity_svc = identity_svc
     app.state.authz_svc = authz_svc
@@ -149,6 +150,16 @@ def create_app(
     app.state.revocation_svc = revocation_svc
     app.state.sync_mgr = sync_mgr
     app.state.reenroll_svc = reenroll_svc
+
+    @app.on_event("startup")
+    def _start_sync_heartbeat() -> None:
+        # Periodic independent poll so a node converges even when push
+        # broadcasts are blocked.  Disabled when HEARTBEAT_INTERVAL_MS <= 0.
+        sync_mgr.start_heartbeat()
+
+    @app.on_event("shutdown")
+    def _stop_sync_heartbeat() -> None:
+        sync_mgr.stop_heartbeat()
 
     def require_actor(authorization: str | None = Header(default=None)) -> ActorContext:
         if not authorization or not authorization.startswith("Bearer "):

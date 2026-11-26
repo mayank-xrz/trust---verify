@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import enum
 import os
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -518,16 +519,94 @@ class NodeSyncManager:
         clock: Clock,
         node_id: str,
         stale_after_ms: int = 2000,
+        heartbeat_interval_ms: int | None = None,
+        audit_emitter: AuditEmitter | None = None,
     ) -> None:
         self.session_factory = session_factory
         self.clock = clock
         self.node_id = node_id
         self.stale_after_ms = stale_after_ms
+        self.heartbeat_interval_ms = heartbeat_interval_ms
+        self.audit_emitter = audit_emitter
         self.watermark: int = 0
         self.last_sync_at: datetime | None = None
         self.db_reachable: bool = True
         self.revoked_devices: set[str] = set()
         self.revoked_keys: set[str] = set()
+        # Per-node enforcement lag: commit_seq -> milliseconds from the
+        # authoritative revocation commit to this node applying it.
+        self.enforcement_deltas: dict[int, float] = {}
+        self.heartbeat_count: int = 0
+        self.last_heartbeat_at: datetime | None = None
+        self._heartbeat_thread: threading.Thread | None = None
+        self._heartbeat_stop = threading.Event()
+
+    def heartbeat_tick(self) -> int:
+        """Perform one independent heartbeat poll and record the tick.
+
+        This is the unit the background heartbeat thread repeatedly executes.
+        It is separate from ``pull_revocations`` so callers/tests can drive a
+        deterministic single tick without a sleeping thread.
+        """
+        watermark = self.pull_revocations()
+        self.heartbeat_count += 1
+        self.last_heartbeat_at = self.clock.now()
+        return watermark
+
+    def start_heartbeat(self) -> bool:
+        """Start a daemon thread that polls revocations every interval.
+
+        Returns True if a heartbeat is running (newly started or already
+        running), False if no interval is configured.  Polling is independent
+        of any push notification, so a node still converges when broadcasts
+        are blocked.
+        """
+        if not self.heartbeat_interval_ms or self.heartbeat_interval_ms <= 0:
+            return False
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return True
+        self._heartbeat_stop = threading.Event()
+        interval_s = self.heartbeat_interval_ms / 1000.0
+
+        def _loop() -> None:
+            while not self._heartbeat_stop.wait(interval_s):
+                try:
+                    self.heartbeat_tick()
+                except Exception:
+                    # pull_revocations already fails closed on DB errors; never
+                    # let a transient error kill the heartbeat thread.
+                    self.db_reachable = False
+
+        self._heartbeat_thread = threading.Thread(
+            target=_loop,
+            name=f"sync-heartbeat-{self.node_id}",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+        return True
+
+    def stop_heartbeat(self, timeout: float = 2.0) -> None:
+        """Stop the background heartbeat thread, if running."""
+        self._heartbeat_stop.set()
+        thread = self._heartbeat_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout)
+        self._heartbeat_thread = None
+
+    def heartbeat_status(self) -> dict[str, Any]:
+        return {
+            "node_id": self.node_id,
+            "heartbeat_interval_ms": self.heartbeat_interval_ms,
+            "heartbeat_running": bool(
+                self._heartbeat_thread is not None and self._heartbeat_thread.is_alive()
+            ),
+            "heartbeat_count": self.heartbeat_count,
+            "last_heartbeat_at": (
+                self.last_heartbeat_at.isoformat() if self.last_heartbeat_at else None
+            ),
+            "enforcement_deltas": dict(self.enforcement_deltas),
+        }
+
 
     def pull_revocations(self) -> int:
         """Pull revocations > watermark ordered by commit_seq and advance watermark."""
@@ -552,6 +631,31 @@ class NodeSyncManager:
                     elif row.target_type == "key_version":
                         self.revoked_keys.add(row.target_id)
                     self.watermark = row.commit_seq
+                    delta_ms = max(
+                        0.0,
+                        (now - _as_utc(row.committed_at)).total_seconds() * 1000.0,
+                    )
+                    self.enforcement_deltas[row.commit_seq] = delta_ms
+                    if self.audit_emitter is not None:
+                        self.audit_emitter.emit(
+                            session,
+                            actor_id="system",
+                            device_id=None,
+                            action="revocation.enforced",
+                            target=row.target_id,
+                            outcome="SUCCESS",
+                            reason_code=row.reason_code,
+                            metadata={
+                                "node_id": self.node_id,
+                                "commit_seq": row.commit_seq,
+                                "target_type": row.target_type,
+                                "delta_ms": round(delta_ms, 3),
+                                "watermark": self.watermark,
+                                "source": "heartbeat"
+                                if self.heartbeat_interval_ms
+                                else "pull",
+                            },
+                        )
 
                 st = session.get(NodeSyncState, self.node_id)
                 if st is None:
