@@ -46,7 +46,7 @@ def create_app(
     clock: Clock | None = None,
 ) -> FastAPI:
     """Create a FastAPI node instance backed by the authoritative DB."""
-    resolved_node = node_id or os.environ.get("NODE_ID", "node-a")
+    resolved_node: str = node_id or os.environ.get("NODE_ID") or "node-a"
     resolved_clock = clock or SystemClock()
     engine = create_db_engine(database_url)
     session_factory = create_session_factory(engine)

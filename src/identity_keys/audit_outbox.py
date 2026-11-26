@@ -72,8 +72,10 @@ class AuditDispatcher:
         self.session_factory = session_factory
         self.clock = clock
         self.node_id = node_id
-        path = log_file_path or os.environ.get(
-            "AUDIT_LOG_PATH", f"/tmp/tbv_data/{node_id}_audit.log"
+        path = (
+            log_file_path
+            or os.environ.get("AUDIT_LOG_PATH")
+            or f"/tmp/tbv_data/{node_id}_audit.log"
         )
         self.logger = AuditLogger(node_id=node_id, log_file_path=path)
 

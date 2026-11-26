@@ -1,4 +1,4 @@
-"""Service layer for identity enrollment, verification, fail-closed authorization, and key metadata."""
+"""Service layer for enrollment, verification, fail-closed authz, and key metadata."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -43,7 +43,9 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def transition_device_status(device: Device, new_status: str, now: datetime, reason: str | None = None) -> None:
+def transition_device_status(
+    device: Device, new_status: str, now: datetime, reason: str | None = None
+) -> None:
     """Single legal state-transition function for Device rows."""
     allowed_map = {
         "pending": {"enrolled", "revoked"},
@@ -119,7 +121,7 @@ class IdentityService:
             if not enrollment:
                 raise NotFound("Enrollment not found")
 
-            def _reject(exc: Exception, reason_code: str) -> None:
+            def _reject(exc: Exception, reason_code: str) -> NoReturn:
                 self.emitter.emit(
                     session,
                     actor_id=enrollment.user_id,
@@ -134,7 +136,10 @@ class IdentityService:
                 raise exc
 
             if enrollment.status != "pending" or enrollment.nonce != nonce:
-                _reject(NotAuthorized("Enrollment nonce invalid or already used", "NONCE_REPLAYED"), "NONCE_REPLAYED")
+                _reject(
+                    NotAuthorized("Enrollment nonce invalid or already used", "NONCE_REPLAYED"),
+                    "NONCE_REPLAYED",
+                )
             if now >= _as_utc(enrollment.expires_at):
                 _reject(NotAuthorized("Enrollment nonce expired", "NONCE_EXPIRED"), "NONCE_EXPIRED")
 
@@ -145,7 +150,10 @@ class IdentityService:
             pub_bytes = b64d(public_key_b64)
             sig_bytes = b64d(proof_of_possession_b64)
             if not ed25519_verify(pub_bytes, nonce.encode("utf-8"), sig_bytes):
-                _reject(NotAuthorized("Invalid proof-of-possession signature", "INVALID_POP"), "INVALID_POP")
+                _reject(
+                    NotAuthorized("Invalid proof-of-possession signature", "INVALID_POP"),
+                    "INVALID_POP",
+                )
 
             fp = public_key_fingerprint(pub_bytes)
             existing = session.execute(
@@ -154,10 +162,15 @@ class IdentityService:
             if existing is not None:
                 if existing.status == "revoked":
                     _reject(
-                        Revoked("Public key fingerprint belongs to a revoked device", "REVOKED_KEY_REUSE"),
+                        Revoked(
+                            "Public key fingerprint belongs to a revoked device",
+                            "REVOKED_KEY_REUSE",
+                        ),
                         "REVOKED_KEY_REUSE",
                     )
-                _reject(Conflict("Duplicate public key", "DUPLICATE_PUBLIC_KEY"), "DUPLICATE_PUBLIC_KEY")
+                _reject(
+                    Conflict("Duplicate public key", "DUPLICATE_PUBLIC_KEY"), "DUPLICATE_PUBLIC_KEY"
+                )
 
             device_id = str(uuid.uuid4())
             device = Device(
@@ -387,16 +400,25 @@ class KeyMetadataService:
             with tx_session(self.session_factory) as session:
                 req_user = session.get(User, requester.user_id)
                 req_dev = session.get(Device, requester.device_id)
-                if not req_user or req_user.status != "active" or not req_dev or req_dev.status != "enrolled":
+                if (
+                    not req_user
+                    or req_user.status != "active"
+                    or not req_dev
+                    or req_dev.status != "enrolled"
+                ):
                     raise NotAuthorized("Requester is not active/enrolled")
 
                 # Only self or admin role can query target user's device public keys
                 is_admin = (
                     session.execute(
                         select(Permission.name)
-                        .join(RolePermission, RolePermission.permission_id == Permission.permission_id)
+                        .join(
+                            RolePermission, RolePermission.permission_id == Permission.permission_id
+                        )
                         .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                        .where(UserRole.user_id == requester.user_id, Permission.name == "key:rotate")
+                        .where(
+                            UserRole.user_id == requester.user_id, Permission.name == "key:rotate"
+                        )
                     ).first()
                     is not None
                 )

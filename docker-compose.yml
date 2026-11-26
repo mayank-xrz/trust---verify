@@ -1,31 +1,24 @@
-version: "3.8"
+version: "3.9"
 
 services:
-  node-1:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8081
-        CMD ["python3", "-m", "src.node.server", "node-1", "8081"]
-    container_name: tbv-node-1
-    ports:
-      - "8081:8081"
+  postgres:
+    image: postgres:16-alpine
+    container_name: tbv-postgres
     environment:
-      - NODE_ID=node-1
-      - PORT=8081
+      POSTGRES_USER: ${POSTGRES_USER:-tbv}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tbv_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-tbv_identity}
+    ports:
+      - "5432:5432"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health')"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tbv} -d ${POSTGRES_DB:-tbv_identity}"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
     networks:
       - tbv-sandbox-net
 
-  node-2:
+  node-a:
     build:
       context: .
       dockerfile_inline: |
@@ -33,45 +26,29 @@ services:
         WORKDIR /app
         COPY . /app
         RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8082
-        CMD ["python3", "-m", "src.node.server", "node-2", "8082"]
-    container_name: tbv-node-2
+        EXPOSE 8101
+        CMD ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
+    container_name: tbv-node-a
     ports:
-      - "8082:8082"
+      - "8101:8101"
     environment:
-      - NODE_ID=node-2
-      - PORT=8082
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health')"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    networks:
-      - tbv-sandbox-net
-
-  detector:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8085
-        CMD ["python3", "-m", "src.node.server", "detector-service", "8085"]
-    container_name: tbv-detector
-    ports:
-      - "8085:8085"
-    environment:
-      - NODE_ID=detector-service
-      - PORT=8085
+      NODE_ID: node-a
+      NODE_PORT: 8101
+      WRAP_KEY_REF: local-wrap-key-node-a
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: 5000
     depends_on:
-      - node-1
-      - node-2
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8101/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - tbv-sandbox-net
 
-  audit-aggregator:
+  node-b:
     build:
       context: .
       dockerfile_inline: |
@@ -79,11 +56,55 @@ services:
         WORKDIR /app
         COPY . /app
         RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8086
-        CMD ["python3", "-m", "src.node.server", "audit-service", "8086"]
-    container_name: tbv-audit-aggregator
+        EXPOSE 8102
+        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
+    container_name: tbv-node-b
     ports:
-      - "8086:8086"
+      - "8102:8102"
+    environment:
+      NODE_ID: node-b
+      NODE_PORT: 8102
+      WRAP_KEY_REF: local-wrap-key-node-b
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: 5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8102/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tbv-sandbox-net
+
+  node-c:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.11-slim
+        WORKDIR /app
+        COPY . /app
+        RUN pip install --no-cache-dir -r requirements.txt || true
+        EXPOSE 8103
+        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
+    container_name: tbv-node-c
+    ports:
+      - "8103:8103"
+    environment:
+      NODE_ID: node-c
+      NODE_PORT: 8103
+      WRAP_KEY_REF: local-wrap-key-node-c
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: 5000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8103/healthz')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
     networks:
       - tbv-sandbox-net
 

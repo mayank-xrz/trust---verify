@@ -84,8 +84,10 @@ def ml_kem_768_encaps(public_key_bytes: bytes) -> tuple[bytes, bytes]:
     import pqcrypto.kem.ml_kem_768 as _ml_kem
 
     if hasattr(_ml_kem, "encaps"):
-        return _ml_kem.encaps(public_key_bytes)
-    return _ml_kem.encrypt(public_key_bytes)
+        ct, ss = _ml_kem.encaps(public_key_bytes)
+    else:
+        ct, ss = _ml_kem.encrypt(public_key_bytes)
+    return bytes(ct), bytes(ss)
 
 
 def hmac_sha256_hex(key: bytes, data: bytes) -> str:
