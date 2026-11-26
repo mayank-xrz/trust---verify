@@ -27,6 +27,7 @@ from .crypto import (
 from .db import tx_session
 from .errors import Conflict, NotAuthorized, NotFound, StateUnavailable
 from .key_lifecycle import (
+    create_rotation_cutoff,
     load_wrap_master_key,
     transition_key,
     unwrap_key_material,
@@ -366,13 +367,23 @@ class RotationService:
             # Transition old ACTIVE -> GRACE (or RETIRED if zero grace)
             if old_active_id is not None:
                 if grace_seconds > 0:
-                    transition_key(
+                    cutoff_at = now4 + timedelta(seconds=grace_seconds)
+                    old_kv = transition_key(
                         session,
                         old_active_id,
                         "GRACE",
                         rotation_id,
                         now4,
-                        grace_until=now4 + timedelta(seconds=grace_seconds),
+                        grace_until=cutoff_at,
+                    )
+                    create_rotation_cutoff(
+                        session,
+                        key_set_id=key_set_id,
+                        key_version_id=old_kv.key_version_id,
+                        version=old_kv.version,
+                        scope=old_kv.scope,
+                        grace_until=cutoff_at,
+                        signed_at=now4,
                     )
                 else:
                     transition_key(session, old_active_id, "RETIRED", rotation_id, now4)

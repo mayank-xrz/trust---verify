@@ -16,9 +16,10 @@ from .clock import Clock
 from .crypto import b64d, ed25519_verify, public_key_fingerprint
 from .db import tx_session
 from .errors import Conflict, IllegalTransition, NotAuthorized, NotFound, Revoked, StateUnavailable
-from .key_lifecycle import is_key_acceptable
+from .key_lifecycle import is_key_acceptable, verify_rotation_cutoff
 from .models import (
     AuthChallenge,
+    ClockHighWater,
     Device,
     Enrollment,
     KeyVersion,
@@ -42,6 +43,39 @@ class AuthzDecision:
 
 def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+CLOCK_ROLLBACK_REASON = "CLOCK_ROLLBACK_DETECTED"
+
+
+def check_and_advance_clock_high_water(
+    session: Session, node_id: str, now: datetime, monotonic_ns: int
+) -> bool:
+    """Detect a wall-clock rewind against the persisted per-node high-water mark.
+
+    Returns ``False`` (fail closed) when ``now`` is earlier than the highest
+    timestamp this node has already observed.  On success the high-water mark is
+    advanced and persisted in the caller's transaction.
+    """
+    row = session.get(ClockHighWater, node_id)
+    if row is not None and _as_utc(now) < _as_utc(row.wall_high_water):
+        return False
+    if row is None:
+        session.add(
+            ClockHighWater(
+                node_id=node_id,
+                wall_high_water=now,
+                monotonic_high_water=monotonic_ns,
+                updated_at=now,
+            )
+        )
+        return True
+    if _as_utc(now) > _as_utc(row.wall_high_water):
+        row.wall_high_water = now
+    if monotonic_ns > row.monotonic_high_water:
+        row.monotonic_high_water = monotonic_ns
+    row.updated_at = now
+    return True
 
 
 def transition_device_status(
@@ -238,6 +272,22 @@ class IdentityService:
         """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
         with tx_session(self.session_factory) as session:
+            if not check_and_advance_clock_high_water(
+                session, self.emitter.node_id, now, self.clock.monotonic_ns()
+            ):
+                self.emitter.emit(
+                    session,
+                    actor_id="system",
+                    device_id=device_id,
+                    action="clock.rollback_detected",
+                    target=self.emitter.node_id,
+                    outcome="deny",
+                    reason_code=CLOCK_ROLLBACK_REASON,
+                )
+                session.commit()
+                raise NotAuthorized(
+                    "Clock rollback detected", reason_code=CLOCK_ROLLBACK_REASON
+                )
             if key_version_id is not None:
                 kv = session.get(KeyVersion, key_version_id)
                 if kv is None:
@@ -256,6 +306,21 @@ class IdentityService:
                     session.commit()
                     raise NotAuthorized(f"Auth key rejected: {k_reason}", reason_code=k_reason)
                 if k_reason == "KEY_GRACE_VALID":
+                    cutoff_ok, cutoff_reason = verify_rotation_cutoff(session, kv)
+                    if not cutoff_ok:
+                        self.emitter.emit(
+                            session,
+                            actor_id="system",
+                            device_id=device_id,
+                            action="key.rejected_after_cutoff",
+                            target=key_version_id,
+                            outcome="deny",
+                            reason_code=cutoff_reason,
+                        )
+                        session.commit()
+                        raise NotAuthorized(
+                            f"Auth key rejected: {cutoff_reason}", reason_code=cutoff_reason
+                        )
                     self.emitter.emit(
                         session,
                         actor_id="system",
@@ -335,6 +400,22 @@ class AuthzService:
         now = self.clock.now()
         try:
             with tx_session(self.session_factory) as session:
+                if not check_and_advance_clock_high_water(
+                    session, self.node_id, now, self.clock.monotonic_ns()
+                ):
+                    self.emitter.emit(
+                        session,
+                        actor_id=actor_context.user_id,
+                        device_id=actor_context.device_id,
+                        action="clock.rollback_detected",
+                        target=self.node_id,
+                        outcome="deny",
+                        reason_code=CLOCK_ROLLBACK_REASON,
+                        correlation_id=correlation_id,
+                    )
+                    return AuthzDecision(
+                        False, CLOCK_ROLLBACK_REASON, key_version_id, decision_id
+                    )
                 if key_version_id is not None:
                     kv = session.get(KeyVersion, key_version_id)
                     if kv is None:
@@ -363,6 +444,21 @@ class AuthzService:
                         )
                         return AuthzDecision(False, k_reason, key_version_id, decision_id)
                     if k_reason == "KEY_GRACE_VALID":
+                        cutoff_ok, cutoff_reason = verify_rotation_cutoff(session, kv)
+                        if not cutoff_ok:
+                            self.emitter.emit(
+                                session,
+                                actor_id=actor_context.user_id,
+                                device_id=actor_context.device_id,
+                                action="key.rejected_after_cutoff",
+                                target=key_version_id,
+                                outcome="deny",
+                                reason_code=cutoff_reason,
+                                correlation_id=correlation_id,
+                            )
+                            return AuthzDecision(
+                                False, cutoff_reason, key_version_id, decision_id
+                            )
                         self.emitter.emit(
                             session,
                             actor_id=actor_context.user_id,
@@ -382,6 +478,7 @@ class AuthzService:
                     session, user, device, resource, actor_context, permission
                 )
                 self._last_authoritative_mono_ns = self.clock.monotonic_ns()
+                bound_key_version = key_version_id or res_kv_id
                 self.emitter.emit(
                     session,
                     actor_id=actor_context.user_id,
@@ -391,12 +488,16 @@ class AuthzService:
                     outcome="allow" if allowed else "deny",
                     reason_code=reason_code,
                     correlation_id=correlation_id,
-                    metadata={"decision_id": decision_id},
+                    metadata={
+                        "decision_id": decision_id,
+                        "key_version": bound_key_version,
+                        "key_version_id": bound_key_version,
+                    },
                 )
                 return AuthzDecision(
                     allowed=allowed,
                     reason_code=reason_code,
-                    key_version_id=key_version_id or res_kv_id,
+                    key_version_id=bound_key_version,
                     decision_id=decision_id,
                 )
         except Exception:

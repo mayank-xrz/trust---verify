@@ -87,6 +87,7 @@ def build_aad(
     epoch: int,
     chunk_index: int = 0,
     chunk_count: int = 1,
+    key_version: Optional[str] = None,
 ) -> bytes:
     """Build deterministic canonical AAD bytes binding all required metadata."""
     aad_obj = {
@@ -100,6 +101,7 @@ def build_aad(
         "epoch": epoch,
         "chunk_index": chunk_index,
         "chunk_count": chunk_count,
+        "key_version": key_version or "",
     }
     return json.dumps(aad_obj, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
 
@@ -124,6 +126,7 @@ def _canonical_signature_input(envelope: Dict[str, Any]) -> bytes:
         envelope.get("whole_message_hash", ""),
         envelope.get("commit_tag", ""),
         str(envelope.get("pad_bucket", 0)),
+        str(envelope.get("key_version", "")),
     ]
     return b"track4/v1/envelope\x00" + b"|".join(f.encode("utf-8") for f in fields)
 
@@ -146,6 +149,7 @@ def seal_envelope(
     nonce: Optional[bytes] = None,
     whole_message_hash: Optional[str] = None,
     pad_bucket: int = 0,
+    key_version: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Encrypt plaintext with key-committing AES-256-GCM and sign with ML-DSA-65."""
     if len(session_key) < 32:
@@ -166,6 +170,7 @@ def seal_envelope(
         epoch=epoch,
         chunk_index=chunk_index,
         chunk_count=chunk_count,
+        key_version=key_version,
     )
 
     body_to_encrypt = _pad_iso7816(plaintext, pad_bucket) if pad_bucket > 0 else plaintext
@@ -189,6 +194,7 @@ def seal_envelope(
         "whole_message_hash": whole_message_hash or hashlib.sha256(plaintext).hexdigest(),
         "pad_bucket": pad_bucket,
         "commit_tag": commit_tag,
+        "key_version": key_version or "",
         "nonce": base64.b64encode(iv).decode("ascii"),
         "ciphertext": base64.b64encode(ciphertext).decode("ascii"),
         "aad": base64.b64encode(aad_bytes).decode("ascii"),
@@ -251,6 +257,7 @@ def open_envelope(
             epoch=int(envelope["epoch"]),
             chunk_index=int(envelope.get("chunk_index", 0)),
             chunk_count=int(envelope.get("chunk_count", 1)),
+            key_version=str(envelope.get("key_version", "")) or None,
         )
     except Exception as exc:
         emit_crypto_event(

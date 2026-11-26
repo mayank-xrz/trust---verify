@@ -359,3 +359,37 @@ class TrustAnchor(Base):
     revocation_commit_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     revocation_head_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class RotationCutoff(Base):
+    """ML-DSA-65 signed grace cutoff for a rotated key version."""
+
+    __tablename__ = "rotation_cutoffs"
+
+    cutoff_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    key_set_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("key_versions.key_version_id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    grace_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    key_authority_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    signer_key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    body_json: Mapped[str] = mapped_column(Text, nullable=False)
+    signature: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+
+
+class ClockHighWater(Base):
+    """Per-node authoritative wall/monotonic clock high-water mark."""
+
+    __tablename__ = "clock_high_water"
+
+    node_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    wall_high_water: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    monotonic_high_water: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
