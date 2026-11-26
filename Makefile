@@ -1,4 +1,4 @@
-.PHONY: help setup up down test chaos bench demo clean
+.PHONY: help setup up down test check chaos bench demo clean
 
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
@@ -10,6 +10,7 @@ help:
 	@echo "  make up    - Spin up sandbox cluster with Docker Compose"
 	@echo "  make down  - Stop and tear down sandbox cluster"
 	@echo "  make test  - Run full test suite"
+	@echo "  make check - Verify the two-page brief and README links"
 	@echo "  make chaos - Run lifecycle & crash chaos tests"
 	@echo "  make bench - Run latency & throughput benchmarks"
 	@echo "  make demo  - Run 5-minute judge walkthrough demo"
@@ -26,6 +27,9 @@ down:
 
 test:
 	$(PYTHON) -m pytest tests/ -v
+
+check:
+	$(PYTHON) -m scripts.check_submission
 
 chaos:
 	$(PYTHON) -m pytest tests/test_lifecycle_chaos.py -v || $(PYTHON) -m unittest tests/test_lifecycle_chaos.py -v

@@ -59,7 +59,7 @@ benign and 30 suspicious events. The second has 1,040 benign and 36 suspicious e
 Both alert policies missed six suspicious report-archive downloads on the second
 fixture. Counting LOW notices also counts benign stale-key events as false alerts.
 
-The separate localhost HTTP demo measured **0.7012 ms median** over 21 requests.
+The separate authenticated localhost HTTP demo measured **0.8994 ms median** over 21 requests.
 That includes request handling, audit logging, evaluation and the alert response.
 
 ## Reproduce

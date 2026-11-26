@@ -66,7 +66,7 @@ make demo
 ```
 
 Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18
-and Node.js 26.13.1. The full suite passed 253 tests, and the local HTTP demo
+and Node.js 26.13.1. The full suite passed 262 tests, and the local HTTP demo
 passed all 12 checklist objectives. The demo uses localhost ports 8001–8003
 and 8005. The remaining Python 3.11 test warning comes from Starlette's
 deprecated AnyIO `BlockingPortal` alias. On Python 3.15, FastAPI and Starlette
@@ -163,7 +163,7 @@ python3 -m demo.node.operator_cli alerts
 
 Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
 
-5-minute demo video: **TODO: paste the public link here and in `docs/project_brief.pdf`.**
+5-minute demo video: `VIDEO_URL`
 
 ## Checklist coverage
 
@@ -210,6 +210,15 @@ checklist and labelled fixture for submission evidence.
 On macOS arm64 with Python 3.15.2 and the pinned dependencies, reusing the envelope schema validator lowered the median HTTP delivery time from **8.24 ms to 5.52 ms** and increased serial throughput from **111.6 to 159.7 deliveries/s**. These are medians from three local in-process runs per configuration, each with 30 warmup messages and 300 measured deliveries. The standalone crypto-only benchmark measured **3.49 ms p50** across 500 envelopes.
 
 Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
+
+## Submission brief
+
+Install the optional [submission tools](requirements-submission.txt) with
+`pip install -r requirements-submission.txt`. Set `VIDEO_URL` at the top of
+[the brief source](docs/project_brief.md), then run
+`python -m scripts.build_submission_brief` to update both the PDF and this
+README's video line. Run `make check` to validate the PDF and README links.
+External link validation uses the network.
 
 ## Documentation
 
