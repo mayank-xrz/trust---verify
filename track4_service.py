@@ -169,7 +169,7 @@ def _check_timezone_policy(state, actor, request):
     return None
 
 
-def verify_chain(audit_log):
+def verify_chain(audit_log, anchor=None):
     prev_hash = GENESIS_HASH
     for idx, entry in enumerate(audit_log):
         if not isinstance(entry, dict):
@@ -181,7 +181,35 @@ def verify_chain(audit_log):
         if entry.get("entry_hash") != expected:
             return False
         prev_hash = expected
+    if anchor is not None:
+        exp_count = int(anchor.get("seq_count", 0))
+        if len(audit_log) < exp_count:
+            return False
+        if exp_count > 0:
+            if audit_log[0].get("entry_hash") != anchor.get("genesis_hash"):
+                return False
+            last_seq = int(anchor.get("last_seq", -1))
+            if last_seq < 0 or last_seq >= len(audit_log) or audit_log[last_seq].get("entry_hash") != anchor.get("last_hash"):
+                return False
     return True
+
+
+def _save_audit_anchor(root, audit_log):
+    anchor = {
+        "seq_count": len(audit_log),
+        "genesis_hash": audit_log[0]["entry_hash"] if audit_log else GENESIS_HASH,
+        "last_seq": len(audit_log) - 1,
+        "last_hash": audit_log[-1]["entry_hash"] if audit_log else GENESIS_HASH,
+    }
+    _atomic_write_text(root / ".audit_anchor.json", json.dumps(anchor, separators=(",", ":")))
+
+
+def _load_audit_anchor(root):
+    anchor_path = root / ".audit_anchor.json"
+    if not anchor_path.exists():
+        return None
+    with anchor_path.open(encoding="utf-8") as stream:
+        return json.load(stream)
 
 
 def _lookup_read_decision(audit_log, request_id):
@@ -201,7 +229,9 @@ def dispatch(request):
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = root / "state.json"
         state = load(path)
-        if not verify_chain(state.get("audit_log", [])):
+        op = request.get("op")
+        anchor = None if op == "setup" else _load_audit_anchor(root)
+        if not verify_chain(state.get("audit_log", []), anchor=anchor):
             raise CryptoError("audit chain verification failed")
         # The judged adapter keeps enrollment and prekey state in the same deterministic directory.
         registry = TrustRegistry(root / "trust_registry.json")
@@ -231,6 +261,7 @@ def dispatch(request):
                 }
             _append_audit(new_state, "setup", None, None, None, "allow")
             save(path, new_state)
+            _save_audit_anchor(root, new_state["audit_log"])
             return {"ready": True}
         if op == "revoke":
             actor = request.get("actor")
@@ -239,6 +270,7 @@ def dispatch(request):
             state["disabled"] = sorted(set(state["disabled"]) | {actor})
             _append_audit(state, "revoke", actor, None, None, "allow")
             save(path, state)
+            _save_audit_anchor(root, state["audit_log"])
             registry.revoke(actor)
             return {}
         if op == "audit":
@@ -268,6 +300,7 @@ def dispatch(request):
                 decision = "allow" if allowed else "deny"
                 _append_audit(state, "read", actor, asset, request_id, decision, threat=tz_threat)
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 if not allowed:
                     return {"decision": "deny"}
                 storage_key = _load_storage_key(root)

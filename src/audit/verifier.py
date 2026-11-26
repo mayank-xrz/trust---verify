@@ -54,20 +54,57 @@ class VerificationResult:
 
 
 class AuditLogVerifier:
-    """Validates full cryptographic integrity of the audit log."""
+    """Validates full cryptographic integrity of the audit log, including out-of-band anchors."""
 
     def __init__(
         self,
         verifier_sig: Optional[Any] = None,
         public_key: Optional[bytes] = None,
         require_signatures: bool = False,
+        require_signed_checkpoint: bool = False,
     ):
         self.verifier_sig = verifier_sig
         self.public_key = public_key
         self.require_signatures = require_signatures
+        self.require_signed_checkpoint = require_signed_checkpoint or require_signatures
 
-    def verify_file(self, log_file_path: str) -> VerificationResult:
-        """Parses log file from line 1 and verifies hash chain and signatures."""
+    @staticmethod
+    def save_anchor(log_file_path: str, anchor_path: str) -> Dict[str, Any]:
+        """Persist out-of-band genesis and tip hashes so whole-log replacement is detectable."""
+        entries: List[Dict[str, Any]] = []
+        with open(log_file_path, "r", encoding="utf-8") as f:
+            for raw in f:
+                s = raw.strip()
+                if s and not s.startswith("#"):
+                    entries.append(json.loads(s))
+        anchor = {
+            "total_records": len(entries),
+            "genesis_hash": entries[0]["entry_hash"] if entries else GENESIS_HASH,
+            "last_seq": entries[-1]["sequence"] if entries else -1,
+            "last_hash": entries[-1]["entry_hash"] if entries else GENESIS_HASH,
+        }
+        with open(anchor_path, "w", encoding="utf-8") as f:
+            json.dump(anchor, f, sort_keys=True)
+        return anchor
+
+    def verify_file(
+        self,
+        log_file_path: str,
+        *,
+        anchor: Optional[Dict[str, Any]] = None,
+        anchor_path: Optional[str] = None,
+    ) -> VerificationResult:
+        """Parses log file from line 1 and verifies hash chain, signatures, and optional out-of-band anchor."""
+        if anchor is None and anchor_path is not None:
+            if not os.path.exists(anchor_path):
+                return VerificationResult(
+                    is_valid=False,
+                    total_records=0,
+                    verified_checkpoints=0,
+                    first_error=f"Anchor file not found: {anchor_path}",
+                )
+            with open(anchor_path, "r", encoding="utf-8") as af:
+                anchor = json.load(af)
         if not os.path.exists(log_file_path):
             return VerificationResult(
                 is_valid=False,
@@ -80,6 +117,8 @@ class AuditLogVerifier:
         expected_seq = 0
         total_records = 0
         verified_checkpoints = 0
+        genesis_entry_hash: Optional[str] = None
+        seen_hashes: Dict[int, str] = {}
         details = []
 
         with open(log_file_path, "r", encoding="utf-8") as f:
@@ -214,9 +253,58 @@ class AuditLogVerifier:
                         )
                     verified_checkpoints += 1
 
+                if genesis_entry_hash is None:
+                    genesis_entry_hash = claimed_entry_hash
+                seen_hashes[seq] = claimed_entry_hash
                 expected_prev_hash = claimed_entry_hash
                 expected_seq += 1
                 total_records += 1
+
+        if (self.require_signed_checkpoint or (self.verifier_sig and self.public_key)) and total_records > 0 and verified_checkpoints == 0:
+            err = "No signed checkpoint found; whole-file replacement cannot be ruled out."
+            return VerificationResult(
+                is_valid=False,
+                total_records=total_records,
+                verified_checkpoints=verified_checkpoints,
+                first_error=err,
+                corrupted_sequence=0,
+                details=[err],
+            )
+
+        if anchor is not None:
+            exp_total = int(anchor.get("total_records", 0))
+            if total_records < exp_total:
+                err = f"Whole-log truncation/replacement detected: expected >= {exp_total} records, got {total_records}."
+                return VerificationResult(
+                    is_valid=False,
+                    total_records=total_records,
+                    verified_checkpoints=verified_checkpoints,
+                    first_error=err,
+                    corrupted_sequence=0,
+                    details=[err],
+                )
+            if exp_total > 0:
+                if genesis_entry_hash != anchor.get("genesis_hash"):
+                    err = "Whole-log replacement detected: genesis hash does not match out-of-band anchor."
+                    return VerificationResult(
+                        is_valid=False,
+                        total_records=total_records,
+                        verified_checkpoints=verified_checkpoints,
+                        first_error=err,
+                        corrupted_sequence=0,
+                        details=[err],
+                    )
+                last_seq = int(anchor.get("last_seq", -1))
+                if last_seq >= 0 and seen_hashes.get(last_seq) != anchor.get("last_hash"):
+                    err = f"Whole-log replacement detected: anchored hash at seq {last_seq} mismatch."
+                    return VerificationResult(
+                        is_valid=False,
+                        total_records=total_records,
+                        verified_checkpoints=verified_checkpoints,
+                        first_error=err,
+                        corrupted_sequence=last_seq,
+                        details=[err],
+                    )
 
         details.append(f"Successfully verified {total_records} chained records with {verified_checkpoints} checkpoints.")
         return VerificationResult(

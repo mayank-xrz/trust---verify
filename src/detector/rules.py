@@ -169,12 +169,17 @@ class ContextRuleEngine:
         burst_threshold: int = 15,
         burst_window_sec: float = 1.0,
         change_tickets: Optional[ChangeTicketRegistry] = None,
+        slow_sensitive_threshold: int = 4,
+        slow_window_sec: float = 300.0,
     ):
         self.burst_threshold = burst_threshold
         self.burst_window_sec = burst_window_sec
         self.change_tickets = change_tickets
+        self.slow_sensitive_threshold = slow_sensitive_threshold
+        self.slow_window_sec = slow_window_sec
         # subject -> deque of timestamps
         self.subject_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
+        self.sensitive_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
 
     def evaluate_event(self, event: Dict[str, Any]) -> List[RuleAlert]:
         """Evaluates single event against all explainable rules."""
@@ -218,5 +223,33 @@ class ContextRuleEngine:
                         evidence={"call_count": len(dq), "window_sec": self.burst_window_sec},
                     )
                 )
+
+            # 4. Low-and-slow sensitive access check (catches attackers staying below burst threshold on allowed edges)
+            act_u = str(event.get("action", "")).upper()
+            res_l = str(event.get("resource", "")).lower()
+            is_sensitive = (
+                any(tok in act_u for tok in ("SECRET", "EXPORT", "DUMP", "KEY_ACCESS"))
+                or "/secrets" in res_l
+                or "/keys/" in res_l
+            )
+            if is_sensitive:
+                sdq = self.sensitive_history[subject]
+                sdq.append(now_sec)
+                while sdq and (now_sec - sdq[0] > self.slow_window_sec):
+                    sdq.popleft()
+                if len(sdq) >= self.slow_sensitive_threshold:
+                    alerts.append(
+                        RuleAlert(
+                            alert_id=f"alert-slow-{event.get('event_id', '')[:8]}",
+                            rule_name="LOW_AND_SLOW_SENSITIVE_ACCESS",
+                            severity="HIGH",
+                            timestamp_ns=event.get("timestamp_ns", time.time_ns()),
+                            subject=subject,
+                            service=event.get("service", ""),
+                            resource=event.get("resource", ""),
+                            description=f"Subject '{subject}' made {len(sdq)} sensitive access calls within {self.slow_window_sec}s",
+                            evidence={"sensitive_count": len(sdq), "window_sec": self.slow_window_sec},
+                        )
+                    )
 
         return alerts
