@@ -6,8 +6,8 @@ hand-edit the table.
 
 ## Provenance
 
-- Date (UTC): 2026-11-26T21:37:07Z
-- Commit: `bcc5b69fc58ada3a0d746b19d0f753d884b219f6`
+- Date (UTC): 2026-11-26T22:07:48Z
+- Commit: `0b92419e1eba9ac432d845ee6401c13efbe98efe`
 - Command: `.venv/bin/python scripts/benchmark.py`
 - OS: macOS-26.7.3-arm64-arm-64bit
 - CPU: Apple M5
@@ -20,14 +20,47 @@ hand-edit the table.
 
 | Component | Path | p50 | p95 | p99 | Throughput |
 | :--- | :--- | ---: | ---: | ---: | ---: |
-| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | 3.43 ms | 3.51 ms | 3.58 ms | 290.59 ops/s |
-| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | 0.09 ms | 0.10 ms | 0.10 ms | 11112.09 ops/s |
-| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | 0.09 ms | 0.09 ms | 0.10 ms | 11538.60 ops/s |
-| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | 3.47 ms | 3.56 ms | 3.63 ms | 286.78 ops/s |
-| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | 9.90 ms | 16.71 ms | 26.81 ms | M=20 |
-| Detector rule evaluation | `src/detector/rules.py` | — | — | — | 1521799.47 events/s |
+| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | 3.27 ms | 3.29 ms | 3.31 ms | 305.78 ops/s |
+| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | 0.09 ms | 0.09 ms | 0.09 ms | 11527.68 ops/s |
+| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | 0.08 ms | 0.09 ms | 0.09 ms | 11742.46 ops/s |
+| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | 3.33 ms | 3.38 ms | 3.39 ms | 300.48 ops/s |
+| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | 10.73 ms | 16.50 ms | 23.70 ms | M=20 |
+| Detector rule evaluation | `src/detector/rules.py` | — | — | — | 1542020.05 events/s |
 
 Revocation method: Single-coordinator time.monotonic_ns() from commit to the last of 3 nodes denying with DEVICE_REVOKED; 5 ms parallel probe; TestClient + SQLite on one host.
+
+## Run-to-run spread (p50)
+
+| Component | p50 range across runs |
+| :--- | ---: |
+| Envelope seal | 3.2670–3.2692 ms |
+| Envelope open | 0.0861–0.0867 ms |
+| ML-KEM-768 | 0.0842–0.0849 ms |
+| ML-DSA-65 | 3.3239–3.3284 ms |
+| Revocation (all probes) | 6.53–25.50 ms |
+
+## Methodology & limitations
+
+- **In-process microbenchmarks.** Each operation is called directly in this
+  Python process. The numbers exclude HTTP/TLS, serialization, network, and
+  database round-trips except where explicitly noted.
+- **Warm-up and runs.** 50 warm-up iterations per
+  benchmark, then 3 independent measured runs. p50/p95/p99
+  are computed within each run and the table reports the median across runs.
+  Throughput is iterations divided by wall-clock time for the run.
+- **Tail estimates are coarse.** p99 is derived from a few hundred samples per
+  run. Treat it as an order-of-magnitude tail indicator, not a precise SLA.
+- **Single host.** All numbers come from one machine (Apple M5,
+  macOS-26.7.3-arm64-arm-64bit). CPU frequency scaling, background load, and the Python build
+  affect results. Re-run `scripts/benchmark.py` on the target host; do not treat
+  these as universal constants.
+- **Revocation is local.** Single-coordinator time.monotonic_ns() from commit to the last of 3 nodes denying with DEVICE_REVOKED; 5 ms parallel probe; TestClient + SQLite on one host.
+- **Detector accuracy is synthetic only.** The labelled set is hand-built for
+  rule regression tests, not a production corpus.
+- **Memory is a high-water mark.** RSS includes imports; the delta can be zero
+  after allocator reuse. `tracemalloc` covers Python allocations only.
+- **No confidence intervals.** No statistical significance or cross-machine
+  comparison is claimed.
 
 ## Detector evaluation (SYNTHETIC ONLY)
 
@@ -49,8 +82,8 @@ Do not cite these numbers as production accuracy.
 ## Memory
 
 - Method: resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc peak
-- RSS before: 101.77 MB
-- RSS high-water after: 101.77 MB
+- RSS before: 102.52 MB
+- RSS high-water after: 102.52 MB
 - RSS delta: 0.00 MB
 - tracemalloc peak: 0.02 MB
 - Iterations: 200

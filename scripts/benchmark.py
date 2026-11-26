@@ -12,6 +12,14 @@ Methodology (P0-3 / P2-3):
 - Detector accuracy is reported only for the **synthetic** labelled set from
   ``scripts/eval_detector.py`` and is labelled as such.
 
+Limitations (do not over-claim):
+- These are single-host, in-process microbenchmarks. They exclude HTTP/TLS,
+  serialization, network, and database round-trips except where noted.
+- p99 from a few hundred samples is a coarse tail estimate; run-to-run spread
+  is reported so readers can see the noise.
+- No confidence intervals or cross-machine comparisons are claimed. Re-run on
+  the target host before quoting a number for capacity planning.
+
 Outputs:
 - ``reports/measurements.json`` — machine-readable results + provenance.
 - ``docs/MEASUREMENTS.md`` — human-readable source of truth.
@@ -426,6 +434,15 @@ def _fmt(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _spread(block: Dict[str, Any]) -> str:
+    """Return the min-max p50 across measured runs, or an em dash."""
+    runs = block.get("per_run") or []
+    p50s = [r["p50_ms"] for r in runs if "p50_ms" in r]
+    if not p50s:
+        return "—"
+    return f"{min(p50s):.4f}–{max(p50s):.4f} ms"
+
+
 def render_markdown(results: Dict[str, Any]) -> str:
     prov = results["provenance"]
     env = results["envelope"]
@@ -446,6 +463,9 @@ warm-up iterations, {prov['measured_runs']} measured runs, median of per-run
 p50/p95/p99 and throughput. Measured {prov['date_utc']} on {prov['cpu']},
 {prov['os']}, Python {prov['python']}, Node {prov['node']}, commit
 `{prov['commit']}`. Run `.venv/bin/python scripts/benchmark.py` to reproduce.
+These are single-host, in-process microbenchmarks; see
+[`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) for methodology, run-to-run
+spread, and limitations.
 
 | Component | Path | p50 | p95 | p99 | Throughput |
 | :--- | :--- | ---: | ---: | ---: | ---: |
@@ -516,6 +536,39 @@ hand-edit the table.
 
 Revocation method: {rev['method']}
 
+## Run-to-run spread (p50)
+
+| Component | p50 range across runs |
+| :--- | ---: |
+| Envelope seal | {_spread(env['seal'])} |
+| Envelope open | {_spread(env['open'])} |
+| ML-KEM-768 | {_spread(kem)} |
+| ML-DSA-65 | {_spread(sig)} |
+| Revocation (all probes) | {_fmt(rev['min_ms'])}–{_fmt(rev['max_ms'])} ms |
+
+## Methodology & limitations
+
+- **In-process microbenchmarks.** Each operation is called directly in this
+  Python process. The numbers exclude HTTP/TLS, serialization, network, and
+  database round-trips except where explicitly noted.
+- **Warm-up and runs.** {prov['warmup_iterations']} warm-up iterations per
+  benchmark, then {prov['measured_runs']} independent measured runs. p50/p95/p99
+  are computed within each run and the table reports the median across runs.
+  Throughput is iterations divided by wall-clock time for the run.
+- **Tail estimates are coarse.** p99 is derived from a few hundred samples per
+  run. Treat it as an order-of-magnitude tail indicator, not a precise SLA.
+- **Single host.** All numbers come from one machine ({prov['cpu']},
+  {prov['os']}). CPU frequency scaling, background load, and the Python build
+  affect results. Re-run `scripts/benchmark.py` on the target host; do not treat
+  these as universal constants.
+- **Revocation is local.** {rev['method']}
+- **Detector accuracy is synthetic only.** The labelled set is hand-built for
+  rule regression tests, not a production corpus.
+- **Memory is a high-water mark.** RSS includes imports; the delta can be zero
+  after allocator reuse. `tracemalloc` covers Python allocations only.
+- **No confidence intervals.** No statistical significance or cross-machine
+  comparison is claimed.
+
 ## Detector evaluation (SYNTHETIC ONLY)
 
 The dataset is **synthetic** and hand-labelled; it is not a real-world corpus.
@@ -582,6 +635,10 @@ def main() -> int:
             "statistic": "median of per-run p50/p95/p99 and throughput",
             "memory": "resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc",
             "detector_accuracy": "synthetic labelled dataset only",
+            "scope": "single-host in-process microbenchmarks; excludes network/HTTP/DB except where noted",
+            "tail_estimate": "p99 is coarse for a few hundred samples per run",
+            "confidence_intervals": "none claimed; no cross-machine comparison",
+            "spread": "per-run p50 range reported in docs/MEASUREMENTS.md",
         },
         "envelope": benchmark_envelope(envelope_iterations),
         "kem": benchmark_kem(prim_iterations),

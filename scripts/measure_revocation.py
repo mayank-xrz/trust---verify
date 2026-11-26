@@ -22,7 +22,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.seed_sandbox import seed_database  # noqa: E402
-from src.identity_keys.api import create_app  # noqa: E402
 from src.identity_keys.clock import SystemClock  # noqa: E402
 from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair  # noqa: E402
 from src.identity_keys.db import create_db_engine, create_session_factory  # noqa: E402
@@ -77,6 +76,10 @@ def run_scenario(
         os.environ["CLUSTER_SYNC_SECRET"] = "bench-sync-secret"
         os.environ["ADMIN_ENROLL_TOKEN"] = "bench-admin-token"
         admin_headers = {"X-Admin-Enroll-Token": "bench-admin-token"}
+
+        # Import after the fail-closed signing seed is set: importing the API
+        # module builds a default app that requires the seed.
+        from src.identity_keys.api import create_app
 
         clock = SystemClock()
         clients = {

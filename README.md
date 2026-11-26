@@ -216,18 +216,21 @@ placeholder domain.
 Single source of truth: [`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) and
 [`reports/measurements.json`](reports/measurements.json). Method: 50
 warm-up iterations, 3 measured runs, median of per-run
-p50/p95/p99 and throughput. Measured 2026-11-26T21:37:07Z on Apple M5,
+p50/p95/p99 and throughput. Measured 2026-11-26T22:07:48Z on Apple M5,
 macOS-26.7.3-arm64-arm-64bit, Python 3.11.16, Node v26.13.1, commit
-`bcc5b69fc58ada3a0d746b19d0f753d884b219f6`. Run `.venv/bin/python scripts/benchmark.py` to reproduce.
+`0b92419e1eba9ac432d845ee6401c13efbe98efe`. Run `.venv/bin/python scripts/benchmark.py` to reproduce.
+These are single-host, in-process microbenchmarks; see
+[`docs/MEASUREMENTS.md`](docs/MEASUREMENTS.md) for methodology, run-to-run
+spread, and limitations.
 
 | Component | Path | p50 | p95 | p99 | Throughput |
 | :--- | :--- | ---: | ---: | ---: | ---: |
-| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | 3.43 ms | 3.51 ms | 3.58 ms | 290.59 ops/s |
-| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | 0.09 ms | 0.10 ms | 0.10 ms | 11112.09 ops/s |
-| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | 0.09 ms | 0.09 ms | 0.10 ms | 11538.60 ops/s |
-| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | 3.47 ms | 3.56 ms | 3.63 ms | 286.78 ops/s |
-| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | 9.90 ms | 16.71 ms | 26.81 ms | M=20 |
-| Detector rule evaluation | `src/detector/rules.py` | — | — | — | 1521799.47 events/s |
+| Envelope seal (ML-DSA-65 + AES-256-GCM) | `src/crypto/envelope.py` | 3.27 ms | 3.29 ms | 3.31 ms | 305.78 ops/s |
+| Envelope open (verify + decrypt) | `src/crypto/envelope.py` | 0.09 ms | 0.09 ms | 0.09 ms | 11527.68 ops/s |
+| ML-KEM-768 keygen + encaps + decaps | `src/crypto/primitives.py` | 0.08 ms | 0.09 ms | 0.09 ms | 11742.46 ops/s |
+| ML-DSA-65 sign + verify | `src/crypto/primitives.py` | 3.33 ms | 3.38 ms | 3.39 ms | 300.48 ops/s |
+| Revocation propagation (3 nodes) | `src/identity_keys/revocation.py` | 10.73 ms | 16.50 ms | 23.70 ms | M=20 |
+| Detector rule evaluation | `src/detector/rules.py` | — | — | — | 1542020.05 events/s |
 
 **Detector accuracy is synthetic only.** The 125-event labelled set
 is hand-built for rule regression tests, not a production corpus. Confusion
@@ -235,7 +238,7 @@ matrix: TP=25, FP=0, TN=100, FN=0; precision
 1.00, recall 1.00, F1 1.00, FP/1k
 0.00. See `scripts/eval_detector.py`.
 
-Memory: RSS high-water 101.77 MB
+Memory: RSS high-water 102.52 MB
 (delta 0.00 MB), tracemalloc peak
 0.02 MB for 200 seal/open
 operations. RSS includes imports and is a high-water mark.

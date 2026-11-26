@@ -1,24 +1,24 @@
 {
   "detector": {
     "iterations_per_run": 5000,
-    "latency_per_event_us": 0.6571,
+    "latency_per_event_us": 0.6485,
     "path": "src/detector/rules.py",
     "per_run": [
       {
-        "latency_per_event_us": 0.654,
-        "throughput_events_sec": 1529130.08
+        "latency_per_event_us": 0.6485,
+        "throughput_events_sec": 1542020.05
       },
       {
-        "latency_per_event_us": 0.6756,
-        "throughput_events_sec": 1480129.41
+        "latency_per_event_us": 0.6416,
+        "throughput_events_sec": 1558542.76
       },
       {
-        "latency_per_event_us": 0.6571,
-        "throughput_events_sec": 1521799.47
+        "latency_per_event_us": 0.6531,
+        "throughput_events_sec": 1531276.32
       }
     ],
     "runs": 3,
-    "throughput_events_sec": 1521799.47,
+    "throughput_events_sec": 1542020.05,
     "warmup_iterations": 50
   },
   "detector_eval": {
@@ -40,127 +40,131 @@
   "envelope": {
     "open": {
       "iterations_per_run": 200,
-      "mean_ms": 0.0899,
-      "p50_ms": 0.0889,
-      "p95_ms": 0.0956,
-      "p99_ms": 0.1028,
+      "mean_ms": 0.0867,
+      "p50_ms": 0.0864,
+      "p95_ms": 0.0885,
+      "p99_ms": 0.0914,
       "per_run": [
         {
-          "mean_ms": 0.1003,
-          "p50_ms": 0.0903,
-          "p95_ms": 0.1998,
-          "p99_ms": 0.226,
-          "throughput_ops_sec": 9962.66
+          "mean_ms": 0.0873,
+          "p50_ms": 0.0867,
+          "p95_ms": 0.0896,
+          "p99_ms": 0.0973,
+          "throughput_ops_sec": 11442.19
         },
         {
-          "mean_ms": 0.0899,
-          "p50_ms": 0.0889,
-          "p95_ms": 0.0945,
-          "p99_ms": 0.1008,
-          "throughput_ops_sec": 11112.09
+          "mean_ms": 0.0867,
+          "p50_ms": 0.0864,
+          "p95_ms": 0.0885,
+          "p99_ms": 0.0914,
+          "throughput_ops_sec": 11527.68
         },
         {
-          "mean_ms": 0.0897,
-          "p50_ms": 0.0889,
-          "p95_ms": 0.0956,
-          "p99_ms": 0.1028,
-          "throughput_ops_sec": 11131.52
+          "mean_ms": 0.0864,
+          "p50_ms": 0.0861,
+          "p95_ms": 0.0872,
+          "p99_ms": 0.0892,
+          "throughput_ops_sec": 11570.59
         }
       ],
       "runs": 3,
-      "throughput_ops_sec": 11112.09,
+      "throughput_ops_sec": 11527.68,
       "warmup_iterations": 50
     },
     "path": "src/crypto/envelope.py",
     "seal": {
       "iterations_per_run": 200,
-      "mean_ms": 3.4409,
-      "p50_ms": 3.4329,
-      "p95_ms": 3.5076,
-      "p99_ms": 3.5758,
+      "mean_ms": 3.2702,
+      "p50_ms": 3.2681,
+      "p95_ms": 3.294,
+      "p99_ms": 3.3136,
       "per_run": [
         {
-          "mean_ms": 3.4409,
-          "p50_ms": 3.4329,
-          "p95_ms": 3.5025,
-          "p99_ms": 3.5758,
-          "throughput_ops_sec": 290.59
+          "mean_ms": 3.2702,
+          "p50_ms": 3.2681,
+          "p95_ms": 3.2896,
+          "p99_ms": 3.3018,
+          "throughput_ops_sec": 305.78
         },
         {
-          "mean_ms": 3.4516,
-          "p50_ms": 3.4356,
-          "p95_ms": 3.5633,
-          "p99_ms": 3.623,
-          "throughput_ops_sec": 289.71
+          "mean_ms": 3.2702,
+          "p50_ms": 3.267,
+          "p95_ms": 3.294,
+          "p99_ms": 3.3136,
+          "throughput_ops_sec": 305.79
         },
         {
-          "mean_ms": 3.4379,
-          "p50_ms": 3.431,
-          "p95_ms": 3.5076,
-          "p99_ms": 3.5671,
-          "throughput_ops_sec": 290.86
+          "mean_ms": 3.2735,
+          "p50_ms": 3.2692,
+          "p95_ms": 3.3074,
+          "p99_ms": 3.3286,
+          "throughput_ops_sec": 305.48
         }
       ],
       "runs": 3,
-      "throughput_ops_sec": 290.59,
+      "throughput_ops_sec": 305.78,
       "warmup_iterations": 50
     }
   },
   "kem": {
     "iterations_per_run": 200,
-    "mean_ms": 0.0866,
-    "p50_ms": 0.0854,
-    "p95_ms": 0.094,
-    "p99_ms": 0.104,
+    "mean_ms": 0.0851,
+    "p50_ms": 0.0843,
+    "p95_ms": 0.0866,
+    "p99_ms": 0.092,
     "path": "src/crypto/primitives.py (pqcrypto ML-KEM-768)",
     "per_run": [
       {
-        "mean_ms": 0.0866,
-        "p50_ms": 0.0854,
-        "p95_ms": 0.0937,
-        "p99_ms": 0.104,
-        "throughput_ops_sec": 11538.6
+        "mean_ms": 0.0852,
+        "p50_ms": 0.0849,
+        "p95_ms": 0.0866,
+        "p99_ms": 0.0931,
+        "throughput_ops_sec": 11729.4
       },
       {
-        "mean_ms": 0.0865,
-        "p50_ms": 0.0854,
-        "p95_ms": 0.094,
-        "p99_ms": 0.1029,
-        "throughput_ops_sec": 11557.94
+        "mean_ms": 0.0851,
+        "p50_ms": 0.0842,
+        "p95_ms": 0.0885,
+        "p99_ms": 0.0916,
+        "throughput_ops_sec": 11742.46
       },
       {
-        "mean_ms": 0.0877,
-        "p50_ms": 0.0863,
-        "p95_ms": 0.0958,
-        "p99_ms": 0.1359,
-        "throughput_ops_sec": 11389.93
+        "mean_ms": 0.0845,
+        "p50_ms": 0.0843,
+        "p95_ms": 0.0856,
+        "p99_ms": 0.092,
+        "throughput_ops_sec": 11825.75
       }
     ],
     "runs": 3,
-    "throughput_ops_sec": 11538.6,
+    "throughput_ops_sec": 11742.46,
     "warmup_iterations": 50
   },
   "memory": {
     "iterations": 200,
     "method": "resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc peak",
     "note": "RSS is a process high-water mark and includes imports; delta may be 0 after allocator reuse.",
-    "rss_after_mb": 101.766,
-    "rss_before_mb": 101.766,
+    "rss_after_mb": 102.516,
+    "rss_before_mb": 102.516,
     "rss_delta_mb": 0.0,
     "tracemalloc_peak_mb": 0.02
   },
   "methodology": {
+    "confidence_intervals": "none claimed; no cross-machine comparison",
     "detector_accuracy": "synthetic labelled dataset only",
     "measured_runs": 3,
     "memory": "resource.getrusage(RUSAGE_SELF).ru_maxrss + tracemalloc",
+    "scope": "single-host in-process microbenchmarks; excludes network/HTTP/DB except where noted",
+    "spread": "per-run p50 range reported in docs/MEASUREMENTS.md",
     "statistic": "median of per-run p50/p95/p99 and throughput",
+    "tail_estimate": "p99 is coarse for a few hundred samples per run",
     "warmup_iterations": 50
   },
   "provenance": {
     "command": ".venv/bin/python scripts/benchmark.py",
-    "commit": "bcc5b69fc58ada3a0d746b19d0f753d884b219f6",
+    "commit": "0b92419e1eba9ac432d845ee6401c13efbe98efe",
     "cpu": "Apple M5",
-    "date_utc": "2026-11-26T21:37:07Z",
+    "date_utc": "2026-11-26T22:07:48Z",
     "measured_runs": 3,
     "node": "v26.13.1",
     "os": "macOS-26.7.3-arm64-arm-64bit",
@@ -171,74 +175,74 @@
   "revocation": {
     "cluster_nodes": 3,
     "m_runs": 20,
-    "max_ms": 29.341,
+    "max_ms": 25.504,
     "method": "Single-coordinator time.monotonic_ns() from commit to the last of 3 nodes denying with DEVICE_REVOKED; 5 ms parallel probe; TestClient + SQLite on one host.",
-    "min_ms": 7.11,
-    "p50_ms": 9.904,
-    "p95_ms": 16.706,
-    "p99_ms": 26.814,
+    "min_ms": 6.532,
+    "p50_ms": 10.726,
+    "p95_ms": 16.495,
+    "p99_ms": 23.702,
     "path": "src/identity_keys/revocation.py",
     "per_node": {
       "node-a": {
         "count": 20,
-        "max_ms": 20.496,
-        "median_ms": 8.537,
-        "min_ms": 5.656,
-        "p95_ms": 16.086,
-        "p99_ms": 19.614
+        "max_ms": 18.754,
+        "median_ms": 6.678,
+        "min_ms": 4.94,
+        "p95_ms": 15.899,
+        "p99_ms": 18.183
       },
       "node-b": {
         "count": 20,
-        "max_ms": 29.341,
-        "median_ms": 7.004,
-        "min_ms": 5.477,
-        "p95_ms": 11.527,
-        "p99_ms": 25.778
+        "max_ms": 25.504,
+        "median_ms": 8.14,
+        "min_ms": 5.098,
+        "p95_ms": 16.495,
+        "p99_ms": 23.702
       },
       "node-c": {
         "count": 20,
-        "max_ms": 23.124,
-        "median_ms": 9.733,
-        "min_ms": 6.734,
-        "p95_ms": 16.395,
-        "p99_ms": 21.778
+        "max_ms": 22.676,
+        "median_ms": 9.608,
+        "min_ms": 5.329,
+        "p95_ms": 16.01,
+        "p99_ms": 21.343
       }
     }
   },
-  "rss_end_mb": 101.766,
-  "rss_start_mb": 34.281,
+  "rss_end_mb": 102.516,
+  "rss_start_mb": 34.391,
   "signature": {
     "iterations_per_run": 200,
-    "mean_ms": 3.4868,
-    "p50_ms": 3.4743,
-    "p95_ms": 3.5626,
-    "p99_ms": 3.6333,
+    "mean_ms": 3.328,
+    "p50_ms": 3.3254,
+    "p95_ms": 3.3793,
+    "p99_ms": 3.3868,
     "path": "src/crypto/primitives.py (pqcrypto ML-DSA-65)",
     "per_run": [
       {
-        "mean_ms": 3.4464,
-        "p50_ms": 3.4374,
-        "p95_ms": 3.5459,
-        "p99_ms": 3.6174,
-        "throughput_ops_sec": 290.14
+        "mean_ms": 3.328,
+        "p50_ms": 3.3239,
+        "p95_ms": 3.3793,
+        "p99_ms": 3.3868,
+        "throughput_ops_sec": 300.48
       },
       {
-        "mean_ms": 3.4876,
-        "p50_ms": 3.4743,
-        "p95_ms": 3.5655,
-        "p99_ms": 3.6348,
-        "throughput_ops_sec": 286.71
+        "mean_ms": 3.3266,
+        "p50_ms": 3.3254,
+        "p95_ms": 3.3643,
+        "p99_ms": 3.3833,
+        "throughput_ops_sec": 300.59
       },
       {
-        "mean_ms": 3.4868,
-        "p50_ms": 3.4784,
-        "p95_ms": 3.5626,
-        "p99_ms": 3.6333,
-        "throughput_ops_sec": 286.78
+        "mean_ms": 3.3326,
+        "p50_ms": 3.3284,
+        "p95_ms": 3.3811,
+        "p99_ms": 3.3974,
+        "throughput_ops_sec": 300.06
       }
     ],
     "runs": 3,
-    "throughput_ops_sec": 286.78,
+    "throughput_ops_sec": 300.48,
     "warmup_iterations": 50
   }
 }

@@ -87,27 +87,27 @@
     <table>
       <tr><th>Path</th><th>p50</th><th>p95</th><th>p99</th><th>Throughput</th></tr>
       <tr><td>Envelope seal (ML-DSA-65 + AES-256-GCM)</td>
-          <td>3.43 ms</td><td>3.51 ms</td>
-          <td>3.58 ms</td><td>290.59 ops/s</td></tr>
+          <td>3.27 ms</td><td>3.29 ms</td>
+          <td>3.31 ms</td><td>305.78 ops/s</td></tr>
       <tr><td>Envelope open (verify + decrypt)</td>
-          <td>0.09 ms</td><td>0.10 ms</td>
-          <td>0.10 ms</td><td>11112.09 ops/s</td></tr>
-      <tr><td>ML-KEM-768 keygen + encaps + decaps</td>
           <td>0.09 ms</td><td>0.09 ms</td>
-          <td>0.10 ms</td><td>11538.60 ops/s</td></tr>
+          <td>0.09 ms</td><td>11527.68 ops/s</td></tr>
+      <tr><td>ML-KEM-768 keygen + encaps + decaps</td>
+          <td>0.08 ms</td><td>0.09 ms</td>
+          <td>0.09 ms</td><td>11742.46 ops/s</td></tr>
       <tr><td>ML-DSA-65 sign + verify</td>
-          <td>3.47 ms</td><td>3.56 ms</td>
-          <td>3.63 ms</td><td>286.78 ops/s</td></tr>
+          <td>3.33 ms</td><td>3.38 ms</td>
+          <td>3.39 ms</td><td>300.48 ops/s</td></tr>
       <tr><td>Revocation propagation, 3 nodes (M=20)</td>
-          <td>9.90 ms</td><td>16.71 ms</td>
-          <td>26.81 ms</td><td>TestClient + SQLite</td></tr>
+          <td>10.73 ms</td><td>16.50 ms</td>
+          <td>23.70 ms</td><td>TestClient + SQLite</td></tr>
       <tr><td>Detector rule evaluation</td>
           <td colspan="3">deterministic in-process</td>
-          <td>1521799.47 events/s</td></tr>
+          <td>1542020.05 events/s</td></tr>
     </table>
-    <p class="note">Measured 2026-11-26T21:37:07Z on Apple M5,
+    <p class="note">Measured 2026-11-26T22:07:48Z on Apple M5,
     macOS-26.7.3-arm64-arm-64bit, Python 3.11.16,
-    Node v26.13.1, commit <code>bcc5b69fc58a</code>.
+    Node v26.13.1, commit <code>0b92419e1eba</code>.
     Method: 50 warm-up iterations, 3 runs,
     median. Source: <code>docs/MEASUREMENTS.md</code>.</p>
     <p class="note"><strong>Detector accuracy is synthetic only.</strong>
