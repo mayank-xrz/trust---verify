@@ -2,38 +2,44 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://trust-but-verify.dev/schemas/audit_event.schema.json",
   "title": "AuditEvent",
-  "description": "Tamper-evident structured audit event schema linked by cryptographic hash chains.",
+  "description": "Injection-safe structured audit record linked by cryptographic hash chains.",
   "type": "object",
   "required": [
-    "sequence",
     "event_id",
-    "timestamp_ns",
-    "node_id",
+    "timestamp",
+    "actor_id",
     "service",
     "action",
-    "subject",
     "resource",
     "status",
     "metadata",
     "prev_hash",
-    "entry_hash"
+    "record_hash"
   ],
   "properties": {
-    "sequence": {
+    "event_id": {
+      "type": "string"
+    },
+    "timestamp": {
       "type": "integer",
       "minimum": 0
-    },
-    "event_id": {
-      "type": "string",
-      "format": "uuid"
     },
     "timestamp_ns": {
       "type": "integer",
       "minimum": 0
     },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "actor_id": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
     "node_id": {
-      "type": "string",
-      "pattern": "^[a-zA-Z0-9_-]{3,64}$"
+      "type": "string"
     },
     "service": {
       "type": "string"
@@ -41,15 +47,12 @@
     "action": {
       "type": "string"
     },
-    "subject": {
-      "type": "string"
-    },
     "resource": {
       "type": "string"
     },
     "status": {
       "type": "string",
-      "enum": ["SUCCESS", "DENIED", "SUSPICIOUS", "ERROR"]
+      "enum": ["SUCCESS", "DENIED", "SUSPICIOUS", "ERROR", "success", "denied", "suspicious", "error"]
     },
     "metadata": {
       "type": "object"
@@ -61,14 +64,20 @@
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
+    "record_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "entry_hash": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$"
     },
+    "sig": {
+      "type": ["string", "null"]
+    },
     "signature": {
-      "type": "string",
-      "contentEncoding": "base64"
+      "type": ["string", "null"]
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }

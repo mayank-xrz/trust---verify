@@ -1,29 +1,28 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://trust-but-verify.dev/schemas/envelope.schema.json",
-  "title": "SecureMessageEnvelope",
+  "title": "PQCMessageEnvelope",
   "description": "Cryptographically bound, post-quantum authenticated secure messaging envelope.",
   "type": "object",
   "required": [
     "version",
-    "message_id",
     "sender_id",
     "recipient_id",
-    "sequence_number",
-    "timestamp_ns",
-    "algorithm_suite",
-    "ciphertext",
+    "seq_num",
+    "session_id",
+    "kem_ciphertext",
     "nonce",
+    "ciphertext",
+    "associated_data",
     "signature"
   ],
   "properties": {
     "version": {
       "type": "string",
-      "enum": ["1.0.0"]
+      "enum": ["1.0.0", "1.0"]
     },
     "message_id": {
-      "type": "string",
-      "format": "uuid"
+      "type": "string"
     },
     "sender_id": {
       "type": "string",
@@ -33,61 +32,52 @@
       "type": "string",
       "pattern": "^[a-zA-Z0-9_-]{3,64}$"
     },
-    "session_id": {
-      "type": "string",
-      "minLength": 16,
-      "maxLength": 128
+    "seq_num": {
+      "type": "integer",
+      "minimum": 0
     },
     "sequence_number": {
       "type": "integer",
       "minimum": 0
     },
-    "timestamp_ns": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "algorithm_suite": {
-      "type": "object",
-      "required": ["kem", "sig", "aead"],
-      "properties": {
-        "kem": {
-          "type": "string",
-          "enum": ["ML-KEM-768", "ML-KEM-1024", "MOCK-KEM-768"]
-        },
-        "sig": {
-          "type": "string",
-          "enum": ["ML-DSA-65", "ML-DSA-87", "MOCK-DSA-65"]
-        },
-        "aead": {
-          "type": "string",
-          "enum": ["AES-256-GCM", "ChaCha20-Poly1305"]
-        }
-      },
-      "additionalProperties": false
-    },
-    "ephemeral_kem_public_key": {
+    "session_id": {
       "type": "string",
-      "contentEncoding": "base64"
+      "minLength": 8,
+      "maxLength": 128
     },
     "kem_ciphertext": {
-      "type": "string",
-      "contentEncoding": "base64"
+      "type": "string"
     },
-    "ciphertext": {
-      "type": "string",
-      "contentEncoding": "base64"
+    "ephemeral_kem_public_key": {
+      "type": "string"
     },
     "nonce": {
-      "type": "string",
-      "contentEncoding": "base64"
+      "type": "string"
     },
-    "signature": {
-      "type": "string",
-      "contentEncoding": "base64"
+    "ciphertext": {
+      "type": "string"
+    },
+    "associated_data": {
+      "type": "string"
     },
     "additional_authenticated_data": {
       "type": "string"
+    },
+    "signature": {
+      "type": "string"
+    },
+    "algorithm_suite": {
+      "type": "object",
+      "properties": {
+        "kem": { "type": "string" },
+        "sig": { "type": "string" },
+        "aead": { "type": "string" }
+      }
+    },
+    "timestamp_ns": {
+      "type": "integer",
+      "minimum": 0
     }
   },
-  "additionalProperties": false
+  "additionalProperties": true
 }
