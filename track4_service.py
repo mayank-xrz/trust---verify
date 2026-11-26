@@ -100,8 +100,8 @@ def _encrypt_contents(storage_key, contents):
 
 
 def _decrypt_asset(storage_key, asset_id, entry):
-    if isinstance(entry, str):
-        return entry
+    if not isinstance(entry, dict):
+        raise CryptoError("unauthenticated asset entry")
     aad = canonical({"asset": asset_id})
     try:
         plaintext = AESGCM(storage_key).decrypt(
