@@ -11,19 +11,19 @@ prompt's `f3e38a5` plus one prior detector fix); baseline suite: **218 passed**.
 | ID | Status | Commit | Evidence | Notes |
 |---|---|---|---|---|
 | P0-1 | DONE | `1c2678d` | `pytest tests -q` -> 222 passed; 4 new authz tests; takeover PoC 401; `doc-check` PASS; `run_demo.sh` PASS | ruff/mypy and `verify-logs` fail identically on the untouched baseline (see Gate notes); no new findings from this change |
-| P0-2 | TODO | — | — | Remove dead demo URL; add shot list + `DEMO_VIDEO_URL`; BLOCKED-HUMAN for the video itself |
-| P0-3 | TODO | — | — | One source of measured truth; rewrite benchmark/eval; purge stale numbers |
-| P0-4 | TODO | — | — | README + Makefile clean-machine setup |
-| P0-5 | TODO | — | — | Regenerate 2-page brief with only defensible claims |
-| P0-6 | TODO | — | — | Make `pytest .` exit 0 |
-| P1-1 | TODO | — | — | Demo node fail-closed identity |
-| P1-2 | TODO | — | — | `track4_service.py` replay/timezone/audit-chain hardening |
-| P1-3 | TODO | — | — | Admin + sandbox gate on `/internal/test/arm-crash` |
-| P1-4 | TODO | — | — | Compose/Docker hardening |
-| P1-5 | TODO | — | — | Env + token hardening |
-| P1-6 | TODO | — | — | Alert contract (`event_id`, `services[]`) |
-| P1-7 | TODO | — | — | `/readyz`, rate limits, challenge sweeper |
-| P1-8 | TODO | — | — | Documentation drift |
+| P0-2 | DONE | `9f4f06a` | `tests/test_docs_drift.py`; `README.md` and brief render "video pending" when `DEMO_VIDEO_URL` is unset | Demo video recording/upload is BLOCKED-HUMAN; see `docs/DEMO_VIDEO.md` |
+| P0-3 | DONE | `bcc5b69` + `6a1fb83` | `scripts/benchmark.py`, `scripts/eval_detector.py`, `reports/measurements.json`; detector eval labelled synthetic-only | Provenance recorded in `docs/MEASUREMENTS.md` |
+| P0-4 | DONE | `c7d436d` | `make gates` -> 233 passed at commit; `make demo` PASS; `tests/test_clean_machine_setup.py` | `make setup` creates `.venv` with `python3.11` and enables hooks |
+| P0-5 | DONE | `364bfa0` | `make brief`; PDF exactly 2 pages; dead URL removed | Brief generated from `reports/measurements.json` |
+| P0-6 | DONE | `9b25323` | `pytest .` -> 230 passed at commit | Archived sub-projects quarantined; see `docs/ARCHIVED.md` |
+| P1-1 | DONE | `73ae6fc` | 5 new tests in `tests/test_demo_identity.py`; suite 242 passed at commit; `make demo` PASS | Demo node fails closed on unknown senders; no default keys |
+| P1-2 | DONE | `fdbcfd8` | 5 new tests in `tests/test_track4_service_hardening.py`; suite 246 passed at commit | Single-use challenge per actor/asset; anchor on every mutation; UTC timestamps |
+| P1-3 | DONE | `d82cedb` | 5 new tests in `tests/test_arm_crash_gate.py`; covered by the 257-pass run after P1-4 | Requires admin token and `SANDBOX_MODE=1` |
+| P1-4 | DONE | `b84b290` | 6 static compose tests; suite 257 passed at commit | Runtime `docker compose up` BLOCKED on this host (no Docker) |
+| P1-5 | DONE | `0cb3aa5` | 6 new tests in `tests/test_env_token_hardening.py`; suite 262 passed at commit | Missing/malformed signing seeds fail closed |
+| P1-6 | DONE | `27c46fa` | 4 new tests in `tests/test_alert_contract.py`; suite 267 passed at commit; `make demo` PASS | Alerts carry `event_id` and `services[]` |
+| P1-7 | DONE | `c143757` | 4 new tests in `tests/test_readyz_and_rate_limits.py`; suite 271 passed at commit | `/readyz`, per-device auth limits, challenge sweeper |
+| P1-8 | DONE | `f0d27b0` | 5 new tests in `tests/test_docs_drift.py`; `make gates` -> 277 passed | Handoff/security docs match current endpoints and gates |
 | P2-1 | TODO | — | — | CI matrix + gates |
 | P2-2 | TODO | — | — | Missing negative/fuzz tests |
 | P2-3 | TODO | — | — | Benchmark methodology |
@@ -98,3 +98,54 @@ not fixed here to keep this commit scoped to P0-1.
 `./scripts/run_demo.sh` invokes bare `python3`; on this machine that resolves to
 Python 3.15 without project dependencies. With `.venv/bin` on `PATH` the demo
 passes end-to-end. P0-4 will make the clean-machine invocation explicit.
+
+## P0-2 through P1-8 evidence (2026-11-27)
+
+Environment: Darwin 25.6.0 arm64 (Apple M-series), Python 3.11.16,
+Node v26.13.1, git 2.55.0. All commands run in a fresh clone at `/tmp/tv-fix`.
+
+Authoritative gate run at `f0d27b0` (after P1-8):
+
+```
+$ make gates
+ruff check .                     -> All checks passed!
+mypy                             -> Success: no issues found in 20 source files
+python -m src.cli verify-logs    -> exit 0
+pytest . -q                      -> 277 passed, 302 warnings in 11.76s
+```
+
+Item-specific regression files (all included in the 277-pass run):
+
+| ID | Test file | Tests |
+|---|---|---|
+| P0-4 | `tests/test_clean_machine_setup.py` | clean-machine setup contract |
+| P1-1 | `tests/test_demo_identity.py` | 5 |
+| P1-2 | `tests/test_track4_service_hardening.py` | 5 |
+| P1-3 | `tests/test_arm_crash_gate.py` | 5 |
+| P1-4 | `tests/test_compose_hardening.py` | 7 |
+| P1-5 | `tests/test_env_token_hardening.py` | 6 |
+| P1-6 | `tests/test_alert_contract.py` | 4 |
+| P1-7 | `tests/test_readyz_and_rate_limits.py` | 4 |
+| P1-8 | `tests/test_docs_drift.py` | 5 |
+
+Demo and measurement commands:
+
+```
+$ make demo
+WALKTHROUGH DEMO COMPLETED SUCCESSFULLY   (exit 0; alerts include Event ID + Services)
+
+$ .venv/bin/python scripts/eval_detector.py
+synthetic set: TP=25 FP=0 TN=100 FN=0 F1=1.00 FP/1k=0  (labelled synthetic-only)
+
+$ make brief
+docs/project_brief.pdf                   (2 pages; no dead demo URL)
+```
+
+Known environment limitation: Docker is not installed on this host, so
+`docker compose up` was not executed. `docker compose config` and the compose
+contract are covered statically by `tests/test_compose_hardening.py`; runtime
+container validation remains a CI/manual step.
+
+P0-2 remains BLOCKED-HUMAN only for recording/uploading the 5-minute video.
+The code and published artifacts render "video pending" until
+`DEMO_VIDEO_URL` is supplied.
