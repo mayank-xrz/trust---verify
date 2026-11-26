@@ -394,7 +394,22 @@ def render_dashboard_html() -> str:
   </div>
 </div>
 
+<form id="operator-auth" style="padding:12px">
+  <label for="operator-token">Sandbox operator token</label>
+  <input id="operator-token" type="password" autocomplete="off" required>
+  <button type="submit">Connect</button>
+  <span id="operator-status" role="status">Enter the deployment's operator token.</span>
+</form>
 <script>
+let operatorToken = '';
+document.getElementById('operator-auth').addEventListener('submit', event => {
+  event.preventDefault();
+  const input = document.getElementById('operator-token');
+  operatorToken = input.value.trim();
+  input.value = '';
+  refreshState();
+});
+
 function switchTab(id, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -408,7 +423,7 @@ async function apiCall(url, body, outId) {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + operatorToken},
       body: JSON.stringify(body || {})
     });
     const data = await res.json();
@@ -422,7 +437,11 @@ async function apiCall(url, body, outId) {
 
 async function refreshState() {
   try {
-    const res = await fetch('/api/sandbox/state');
+    if (!operatorToken) return;
+    const res = await fetch('/api/sandbox/state', {headers: {'Authorization': 'Bearer ' + operatorToken}});
+    const status = document.getElementById('operator-status');
+    status.textContent = res.ok ? 'Connected.' : 'Sandbox access failed (HTTP ' + res.status + ').';
+    if (!res.ok) return;
     const s = await res.json();
 
     document.getElementById('uptime-lbl').textContent = 'uptime: ' + s.uptime_seconds + 's';

@@ -88,6 +88,27 @@ python -m src.cli verify-logs
 python -m src.cli doc-check
 ```
 
+### Demo access
+
+The interactive HTTP API is mounted only with `DEMO_SANDBOX_ENABLED=1`.
+`make demo`, the Compose demo services, Render, and Vercel enable it for their
+demo processes. For manually launched instances, set the flag and provision
+`DEMO_OPERATOR_TOKEN` with a fresh random value. Set the operator token through
+the Vercel project environment; Render generates one for new deployments.
+Enter the operator token in the web UI; the page keeps it in memory and the
+server never embeds it. The CLI reads the same token from its environment.
+
+| Route | Access decision |
+| --- | --- |
+| `/api/sandbox/*` | Feature flag and operator bearer required. Actions and state can reveal or change sandbox evidence. |
+| `POST /enroll`, `POST /send` | Operator bearer required to enroll an identity or make the node send. |
+| `POST /peers` | Dedicated peer-enrollment bearer required to change trusted public-key bindings. |
+| `POST /internal/keys/revoke` | Dedicated revocation-sync bearer required for inter-node updates. |
+| `GET /logs/verify`, `GET /metrics`, `GET /api/info` | Operator bearer required because they expose audit, detector, or deployment details. The JSON variant of `/` uses the same scope. |
+| `POST /receive`, `GET /inbox/{receipt_id}` | Receive checks the enrolled peer's signature and recipient binding; inbox reads require the recipient bearer. |
+| `GET /` (HTML), `/health`, `/keys/public` | Public UI shell, health probe, and public key discovery. Public keys must still be enrolled through the authenticated peer route. |
+| `POST /internal/test/arm-crash` | Identity API requires sandbox mode and a valid actor bearer. |
+
 ### Track 4 checklist
 
 `make demo` runs the local HTTP walkthrough and prints a pass/fail table for

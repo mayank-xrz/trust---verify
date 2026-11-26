@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from demo.node.crypto_provider import (
@@ -892,8 +892,8 @@ class SandboxController:
         return {"ok": True, "metrics": metrics}
 
 
-def create_sandbox_router(controller: SandboxController) -> APIRouter:
-    router = APIRouter(prefix="/api/sandbox", tags=["Interactive Sandbox"])
+def create_sandbox_router(controller: SandboxController, require_operator) -> APIRouter:
+    router = APIRouter(prefix="/api/sandbox", tags=["Interactive Sandbox"], dependencies=[Depends(require_operator)])
 
     @router.get("/state")
     def sandbox_state():

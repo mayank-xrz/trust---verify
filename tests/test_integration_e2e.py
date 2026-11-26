@@ -57,6 +57,7 @@ class TestIntegrationE2E(unittest.TestCase):
     def send(self, sender, recipient, payload):
         response = sender.post(
             "/send",
+            headers=self.bearer(self.operator_token),
             json={"target_node_url": f"http://{recipient}", "recipient_id": recipient, "payload": payload},
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -119,7 +120,7 @@ class TestIntegrationE2E(unittest.TestCase):
     def test_protected_transfer_for_multiple_recipients(self):
         payload = {"memo": "PQC protected transfer"}
         request = {"target_node_url": "http://node-b", "recipient_id": "node-b", "payload": payload}
-        self.assertEqual(self.client_a.post("/send", json=request).status_code, 403)
+        self.assertEqual(self.client_a.post("/send", json=request, headers=self.bearer(self.operator_token)).status_code, 403)
 
         self.enroll_peer(self.client_a, self.client_b.get("/keys/public").json())
         first = self.send(self.client_a, "node-b", payload)

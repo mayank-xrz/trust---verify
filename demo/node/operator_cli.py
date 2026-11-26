@@ -137,7 +137,7 @@ class OperatorCLI:
         for nid, base_url in self.nodes.items():
             if nid == "detector":
                 continue
-            code, data = http_request(f"{base_url}/logs/verify")
+            code, data = http_request(f"{base_url}/logs/verify", token=os.environ.get("DEMO_OPERATOR_TOKEN"))
             if code == 200 and data.get("is_valid"):
                 print(f"✅ [{nid}] Log Chain VALID ({data.get('total_records', 0)} records verified)")
                 results[nid] = {"valid": True, **data}
@@ -158,7 +158,7 @@ class OperatorCLI:
 
         # Check detector and nodes for explainable alerts
         for nid, base_url in self.nodes.items():
-            code, data = http_request(f"{base_url}/metrics")
+            code, data = http_request(f"{base_url}/metrics", token=os.environ.get("DEMO_OPERATOR_TOKEN"))
             if code == 200:
                 alerts = data.get("alerts", [])
                 for a in alerts:

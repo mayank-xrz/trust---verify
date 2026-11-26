@@ -15,6 +15,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+export DEMO_SANDBOX_ENABLED=1
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
     value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
@@ -118,7 +119,7 @@ def send(recipient, payload):
         "target_node_url": NODES[recipient],
         "recipient_id": recipient,
         "payload": payload,
-    })["envelope"]
+    }, OPERATOR)["envelope"]
 
 
 def expect_delivery(recipient, envelope, payload):
@@ -238,13 +239,13 @@ echo "======================================================================"
 
 # Simulate attacks to trigger explainable alerts
 python3 - << 'EOF'
-import json, urllib.request
+import json, os, urllib.request
 
 # Trigger lateral movement policy alert
 try:
     req = urllib.request.Request("http://127.0.0.1:8001/send",
         data=json.dumps({"target_node_url": "http://127.0.0.1:8005", "recipient_id": "key-store", "payload": {"exploit": "lateral_hop"}}).encode(),
-        headers={"Content-Type": "application/json"})
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {os.environ['DEMO_OPERATOR_TOKEN']}"})
     urllib.request.urlopen(req)
 except Exception:
     pass

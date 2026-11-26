@@ -208,7 +208,6 @@ def create_app(
         recent_alerts=recent_alerts,
         boot_time=boot_time,
     )
-    app.include_router(create_sandbox_router(sandbox))
 
     def require_operator(request: Request, authorization: Optional[str] = Header(default=None)) -> str:
         try:
@@ -227,6 +226,18 @@ def create_app(
                 })
             raise
         return "demo-operator"
+
+    if os.environ.get("DEMO_SANDBOX_ENABLED") == "1":
+        app.include_router(create_sandbox_router(sandbox, require_operator))
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def active_key():
         with key_lock:
@@ -270,13 +281,14 @@ def create_app(
         }
 
     @app.get("/api/info")
-    def api_info():
+    def api_info(_actor: str = Depends(require_operator)):
         return _service_info()
 
     @app.get("/", response_class=HTMLResponse)
-    def root(request: Request):
+    def root(request: Request, authorization: Optional[str] = Header(default=None)):
         accept = request.headers.get("accept", "")
         if "application/json" in accept and "text/html" not in accept:
+            require_operator(request, authorization)
             return JSONResponse(_service_info())
         return HTMLResponse(content=render_dashboard_html())
 
@@ -328,7 +340,7 @@ def create_app(
         return {"status": "enrolled", "node_id": keys.node_id, "kem_key_id": keys.kem_key_id}
 
     @app.post("/enroll")
-    def enroll_device(req: EnrollRequest):
+    def enroll_device(req: EnrollRequest, _actor: str = Depends(require_operator)):
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         pub_b64 = req.public_key_b64 or base64.b64encode(crypto.sig_public_key).decode("ascii")
         dev_id = req.device_id or f"dev-{req.node_id}"
@@ -373,7 +385,7 @@ def create_app(
         }
 
     @app.post("/send")
-    def send_message(req: SendRequest):
+    def send_message(req: SendRequest, _actor: str = Depends(require_operator)):
         t0 = time.perf_counter()
         sender_id = node_id
         recipient_id = req.recipient_id
@@ -625,7 +637,7 @@ def create_app(
         }
 
     @app.get("/logs/verify")
-    def verify_logs():
+    def verify_logs(_actor: str = Depends(require_operator)):
         log_path = getattr(audit.logger, "log_file_path", f"{data_dir}/{node_id}_audit.log")
         anchor_path = os.path.join(data_dir, f".{node_id}_audit_anchor.json")
         if hasattr(audit.verifier, "verify_file"):
@@ -649,7 +661,7 @@ def create_app(
         return res_dict
 
     @app.get("/metrics")
-    def node_metrics():
+    def node_metrics(_actor: str = Depends(require_operator)):
         active = active_key()
         sorted_lats = sorted(crypto_latencies) if crypto_latencies else [0.0]
         p50 = sorted_lats[int(len(sorted_lats) * 0.50)]

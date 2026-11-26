@@ -491,7 +491,11 @@ def create_app(
             "current_version": current_version,
         }
 
-    @app.post("/internal/test/arm-crash")
+    def require_sandbox_mode() -> None:
+        if os.environ.get("SANDBOX_MODE") != "1":
+            raise HTTPException(status_code=404, detail="Not Found")
+
+    @app.post("/internal/test/arm-crash", dependencies=[Depends(require_sandbox_mode), Depends(require_actor)])
     def arm_crash(req: ArmCrashRequest) -> dict[str, Any]:
         try:
             arm_crash_point(req.crash_point)
