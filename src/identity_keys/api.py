@@ -12,6 +12,8 @@ from .audit_outbox import AuditEmitter
 from .clock import Clock, SystemClock
 from .db import create_db_engine, create_session_factory
 from .errors import IdentityKeysError, NotAuthorized
+from .key_lifecycle import EnvelopeEncryptionService
+from .rotation import RotationService, arm_crash_point, verify_cluster_sync
 from .services import AuthzService, IdentityService, KeyMetadataService
 from .tokens import ActorContext, TokenAuthority
 
@@ -34,9 +36,25 @@ class VerifyIdentityRequest(BaseModel):
 class AuthorizeRequest(BaseModel):
     resource_id: str
     permission: str
+    key_version_id: str | None = None
     # Optional ignored fields to prove actor spoofing in body is never trusted
     actor_id: str | None = None
     label: str | None = None
+
+
+class InitiateRotationRequest(BaseModel):
+    key_set_id: str
+    grace_seconds: int = 30
+    idempotency_key: str
+
+
+class SyncNotificationRequest(BaseModel):
+    payload: dict[str, Any]
+    hmac: str
+
+
+class ArmCrashRequest(BaseModel):
+    crash_point: str | None = None
 
 
 def create_app(
@@ -59,9 +77,11 @@ def create_app(
         resolved_clock,
         emitter,
         node_id=resolved_node,
-        max_cache_staleness_ms=int(os.environ.get("MAX_CACHE_STALENESS_MS", "5000")),
+        max_cache_staleness_ms=int(os.environ.get("MAX_CACHE_STALENESS_MS", "500")),
     )
     metadata_svc = KeyMetadataService(session_factory)
+    rotation_svc = RotationService(session_factory, resolved_clock, emitter, node_id=resolved_node)
+    envelope_svc = EnvelopeEncryptionService(session_factory, resolved_clock, emitter)
 
     app = FastAPI(title=f"Trust-But-Verify Identity Node ({resolved_node})")
     app.state.engine = engine
@@ -69,6 +89,8 @@ def create_app(
     app.state.token_authority = token_auth
     app.state.identity_svc = identity_svc
     app.state.authz_svc = authz_svc
+    app.state.rotation_svc = rotation_svc
+    app.state.envelope_svc = envelope_svc
 
     def require_actor(authorization: str | None = Header(default=None)) -> ActorContext:
         if not authorization or not authorization.startswith("Bearer "):
@@ -135,7 +157,9 @@ def create_app(
     def authorize(
         req: AuthorizeRequest, actor: ActorContext = Depends(require_actor)
     ) -> dict[str, Any]:
-        decision = authz_svc.authorize(actor, req.resource_id, req.permission)
+        decision = authz_svc.authorize(
+            actor, req.resource_id, req.permission, key_version_id=req.key_version_id
+        )
         return {
             "allowed": decision.allowed,
             "reason_code": decision.reason_code,
@@ -143,6 +167,70 @@ def create_app(
             "decision_id": decision.decision_id,
             "node_id": resolved_node,
         }
+
+    @app.post("/rotations")
+    def create_rotation(
+        req: InitiateRotationRequest, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, str]:
+        try:
+            rot_id = rotation_svc.initiate_rotation(
+                key_set_id=req.key_set_id,
+                grace_seconds=req.grace_seconds,
+                idempotency_key=req.idempotency_key,
+                actor_ctx=actor,
+            )
+            return {"rotation_id": rot_id}
+        except IdentityKeysError as exc:
+            status = 409 if exc.reason_code in ("ROTATION_IN_FLIGHT", "VERSION_CONFLICT") else 403
+            raise HTTPException(status_code=status, detail=exc.reason_code) from exc
+
+    @app.get("/rotations/{rotation_id}")
+    def get_rotation(
+        rotation_id: str, _actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return rotation_svc.get_rotation(rotation_id)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=404, detail=exc.reason_code) from exc
+
+    @app.get("/keys/{key_set_id}/metadata")
+    def get_key_set_meta(
+        key_set_id: str, _actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, Any]:
+        try:
+            return rotation_svc.get_key_set_metadata(key_set_id)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=404, detail=exc.reason_code) from exc
+
+    @app.post("/resources/{resource_id}/rewrap")
+    def rewrap_resource(
+        resource_id: str, actor: ActorContext = Depends(require_actor)
+    ) -> dict[str, str]:
+        try:
+            return envelope_svc.rewrap_resource(resource_id, actor)
+        except IdentityKeysError as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
+
+    @app.post("/internal/sync")
+    def internal_sync(req: SyncNotificationRequest) -> dict[str, Any]:
+        if not verify_cluster_sync(req.payload, req.hmac):
+            raise HTTPException(status_code=401, detail="INVALID_CLUSTER_HMAC")
+        # Never trust push payload as truth: re-read authoritative DB state
+        ks_id = str(req.payload.get("key_set_id", ""))
+        meta = rotation_svc.get_key_set_metadata(ks_id)
+        return {
+            "synced": True,
+            "node_id": resolved_node,
+            "current_version": meta["current_version"],
+        }
+
+    @app.post("/internal/test/arm-crash")
+    def arm_crash(req: ArmCrashRequest) -> dict[str, Any]:
+        try:
+            arm_crash_point(req.crash_point)
+            return {"armed": req.crash_point}
+        except (IdentityKeysError, ValueError) as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     @app.get("/api/v1/keys/metadata/{target_user_id}")
     def get_key_metadata(

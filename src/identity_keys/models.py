@@ -155,6 +155,16 @@ class Rotation(Base):
     last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+class KeySet(Base):
+    __tablename__ = "key_sets"
+
+    key_set_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    active_key_version_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class KeyVersion(Base):
     __tablename__ = "key_versions"
     __table_args__ = (
@@ -187,6 +197,7 @@ class KeyVersion(Base):
     retired_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     revoke_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    destroyed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     rotation_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("rotations.rotation_id", ondelete="SET NULL"), nullable=True
     )
@@ -206,6 +217,9 @@ class Resource(Base):
     )
     content_ciphertext: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
     content_nonce: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    wrapped_dek: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    dek_nonce: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    dek_aad: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
 
 
 class ResourceGrant(Base):

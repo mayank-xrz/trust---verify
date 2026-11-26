@@ -16,6 +16,7 @@ from .clock import Clock
 from .crypto import b64d, ed25519_verify, public_key_fingerprint
 from .db import tx_session
 from .errors import Conflict, IllegalTransition, NotAuthorized, NotFound, Revoked, StateUnavailable
+from .key_lifecycle import is_key_acceptable
 from .models import (
     AuthChallenge,
     Device,
@@ -227,11 +228,44 @@ class IdentityService:
             return {"challenge_id": challenge_id, "challenge": challenge}
 
     def verify_identity(
-        self, *, device_id: str, challenge: str, signature_b64: str
+        self,
+        *,
+        device_id: str,
+        challenge: str,
+        signature_b64: str,
+        key_version_id: str | None = None,
     ) -> dict[str, Any]:
-        """Verify device challenge signature, active user & enrolled device; issue bearer token."""
+        """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
         with tx_session(self.session_factory) as session:
+            if key_version_id is not None:
+                kv = session.get(KeyVersion, key_version_id)
+                if kv is None:
+                    raise NotAuthorized("Unknown auth key version", reason_code="KEY_RETIRED")
+                ok, k_reason = is_key_acceptable(kv, now, purpose="auth")
+                if not ok:
+                    self.emitter.emit(
+                        session,
+                        actor_id="system",
+                        device_id=device_id,
+                        action="key.rejected_after_cutoff",
+                        target=key_version_id,
+                        outcome="deny",
+                        reason_code=k_reason,
+                    )
+                    session.commit()
+                    raise NotAuthorized(f"Auth key rejected: {k_reason}", reason_code=k_reason)
+                if k_reason == "KEY_GRACE_VALID":
+                    self.emitter.emit(
+                        session,
+                        actor_id="system",
+                        device_id=device_id,
+                        action="key.grace_used",
+                        target=key_version_id,
+                        outcome="allow",
+                        reason_code=k_reason,
+                    )
+
             ch = session.execute(
                 select(AuthChallenge).where(
                     AuthChallenge.device_id == device_id,
@@ -278,7 +312,7 @@ class AuthzService:
         clock: Clock,
         emitter: AuditEmitter,
         node_id: str,
-        max_cache_staleness_ms: int = 5000,
+        max_cache_staleness_ms: int = 500,
     ) -> None:
         self.session_factory = session_factory
         self.clock = clock
@@ -293,17 +327,58 @@ class AuthzService:
         resource_id: str,
         permission: str,
         *,
+        key_version_id: str | None = None,
         correlation_id: str | None = None,
     ) -> AuthzDecision:
-        """Evaluate user, device, role permissions, ownership/grants, and key state. Fail closed."""
+        """Evaluate user, device, auth key state, role perms, and grants. Fail closed."""
         decision_id = str(uuid.uuid4())
+        now = self.clock.now()
         try:
             with tx_session(self.session_factory) as session:
+                if key_version_id is not None:
+                    kv = session.get(KeyVersion, key_version_id)
+                    if kv is None:
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.rejected_after_cutoff",
+                            target=key_version_id,
+                            outcome="deny",
+                            reason_code="KEY_RETIRED",
+                            correlation_id=correlation_id,
+                        )
+                        return AuthzDecision(False, "KEY_RETIRED", key_version_id, decision_id)
+                    ok, k_reason = is_key_acceptable(kv, now, purpose="auth")
+                    if not ok:
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.rejected_after_cutoff",
+                            target=key_version_id,
+                            outcome="deny",
+                            reason_code=k_reason,
+                            correlation_id=correlation_id,
+                        )
+                        return AuthzDecision(False, k_reason, key_version_id, decision_id)
+                    if k_reason == "KEY_GRACE_VALID":
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.grace_used",
+                            target=key_version_id,
+                            outcome="allow",
+                            reason_code=k_reason,
+                            correlation_id=correlation_id,
+                        )
+
                 user = session.get(User, actor_context.user_id)
                 device = session.get(Device, actor_context.device_id)
                 resource = session.get(Resource, resource_id)
 
-                allowed, reason_code, key_version_id = self._evaluate(
+                allowed, reason_code, res_kv_id = self._evaluate(
                     session, user, device, resource, actor_context, permission
                 )
                 self._last_authoritative_mono_ns = self.clock.monotonic_ns()
@@ -321,7 +396,7 @@ class AuthzService:
                 return AuthzDecision(
                     allowed=allowed,
                     reason_code=reason_code,
-                    key_version_id=key_version_id,
+                    key_version_id=key_version_id or res_kv_id,
                     decision_id=decision_id,
                 )
         except Exception:
