@@ -8,10 +8,11 @@ import os
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
-from sqlalchemy import select
+from pqcrypto.sign import ml_dsa_65
+from sqlalchemy import select, text
 
 from alembic import command
+from alembic.config import Config
 from scripts.seed_sandbox import seed_database
 from src.crypto._pqcrypto_compat import sig_keygen
 from src.crypto.envelope import (
@@ -28,8 +29,6 @@ from src.identity_keys.models import AuditOutbox, Device
 from src.identity_keys.rotation import RotationService
 from src.identity_keys.services import AuthzService
 from src.identity_keys.tokens import ActorContext
-from pqcrypto.sign import ml_dsa_65
-from sqlalchemy import text
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

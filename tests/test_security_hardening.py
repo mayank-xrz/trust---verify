@@ -188,6 +188,7 @@ def test_envelope_aead_failure_does_not_poison_replay_cache(tmp_path: Path) -> N
 
 def test_token_verify_rejects_future_iat_beyond_clock_skew() -> None:
     from datetime import datetime, timedelta, timezone
+
     from src.identity_keys.clock import FakeClock
     from src.identity_keys.errors import NotAuthorized
     from src.identity_keys.tokens import TokenAuthority
@@ -203,3 +204,17 @@ def test_token_verify_rejects_future_iat_beyond_clock_skew() -> None:
 
     with pytest.raises(NotAuthorized, match="future"):
         ts_verify.verify(token, max_clock_skew_seconds=30)
+
+
+def test_demo_node_preserves_active_key_across_restart(tmp_path: Path) -> None:
+    from demo.node.adapters import NodeAdapters
+
+    data_dir = str(tmp_path / "demo_data")
+    node1 = NodeAdapters(node_id="node-restart", data_dir=data_dir)
+    key1 = node1.identity.key_manager.get_active_key()
+    assert key1 is not None
+
+    node2 = NodeAdapters(node_id="node-restart", data_dir=data_dir)
+    key2 = node2.identity.key_manager.get_active_key()
+    assert key2 is not None
+    assert key2.key_id == key1.key_id

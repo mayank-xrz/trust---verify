@@ -10,7 +10,6 @@ import dataclasses
 import time
 from typing import Any, Dict, List, Optional
 
-
 APPROVED_CHANGE_WINDOWS = frozenset({"approved", "active", "open", "scheduled"})
 
 

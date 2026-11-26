@@ -6,8 +6,6 @@ deploy bot rotating a key was alerted as `UNAUTHORIZED_PRIVILEGE_ELEVATION`.
 
 from __future__ import annotations
 
-import pytest
-
 import src.detector.rules as rules
 
 BASE_NS = 1_800_000_000 * 1_000_000_000

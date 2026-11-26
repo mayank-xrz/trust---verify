@@ -6,7 +6,7 @@ import dataclasses
 import enum
 import heapq
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List
 
 _REAL_TIME_TIME = time.time
 

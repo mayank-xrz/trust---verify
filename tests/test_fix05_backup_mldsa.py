@@ -22,7 +22,7 @@ def _envelope(path: Path) -> dict:
     return json.loads(raw[start: start + env_len].decode("utf-8"))
 
 
-def _create(bkp_env, path: Path, priv: bytes) -> dict:
+def _create(bkp_env, path: Path, priv: bytes) -> dict:  # noqa: F811
     bkp_env["bkp_svc"].create_backup(
         bkp_env["admin_ctx"],
         path,
@@ -41,7 +41,7 @@ def _rewrite(path: Path, envelope: dict) -> None:
     path.write_bytes(BACKUP_MAGIC + len(env_bytes).to_bytes(4, "big") + env_bytes + ciphertext)
 
 
-def test_backup_manifest_is_mldsa_signed(bkp_env, tmp_path: Path) -> None:
+def test_backup_manifest_is_mldsa_signed(bkp_env, tmp_path: Path) -> None:  # noqa: F811
     public_key, private_key = sig_keygen(ml_dsa_65)
     path = tmp_path / "mldsa.tbvbkp"
     envelope = _create(bkp_env, path, private_key)
@@ -56,7 +56,7 @@ def test_backup_manifest_is_mldsa_signed(bkp_env, tmp_path: Path) -> None:
     )
 
 
-def test_restore_accepts_mldsa_and_rejects_wrong_key(bkp_env, tmp_path: Path) -> None:
+def test_restore_accepts_mldsa_and_rejects_wrong_key(bkp_env, tmp_path: Path) -> None:  # noqa: F811
     public_key, private_key = sig_keygen(ml_dsa_65)
     wrong_public, _ = sig_keygen(ml_dsa_65)
     path = tmp_path / "restore.tbvbkp"
@@ -80,7 +80,7 @@ def test_restore_accepts_mldsa_and_rejects_wrong_key(bkp_env, tmp_path: Path) ->
     assert excinfo.value.reason_code == "STEP2_BAD_SIGNATURE"
 
 
-def test_tampered_manifest_fails_mldsa_verification(bkp_env, tmp_path: Path) -> None:
+def test_tampered_manifest_fails_mldsa_verification(bkp_env, tmp_path: Path) -> None:  # noqa: F811
     public_key, private_key = sig_keygen(ml_dsa_65)
     path = tmp_path / "tampered.tbvbkp"
     envelope = _create(bkp_env, path, private_key)

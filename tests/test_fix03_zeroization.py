@@ -18,7 +18,6 @@ import ctypes
 import gc
 import os
 
-import pytest
 from pqcrypto.sign import ml_dsa_65
 
 from src.crypto import handshake as handshake_module

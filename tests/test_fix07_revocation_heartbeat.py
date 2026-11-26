@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-from alembic.config import Config
 from sqlalchemy import select
 
 from alembic import command
+from alembic.config import Config
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.clock import FakeClock
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session

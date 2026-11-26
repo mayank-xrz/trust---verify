@@ -214,6 +214,13 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
+        from sqlalchemy import text
+
+        try:
+            with session_factory() as session:
+                session.execute(text("SELECT 1"))
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Database unavailable") from exc
         return {"status": "ok", "node_id": resolved_node}
 
     @app.get("/node/status")
