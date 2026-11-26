@@ -156,7 +156,11 @@ class OperatorCLI:
                 rule = a.get("rule_name", "UNKNOWN_RULE")
                 desc = a.get("description", "")
                 src_node = a.get("node", "cluster")
+                event_id = a.get("event_id", "")
+                services = a.get("services") or [src_node]
                 print(f"  • [{sev}] on {src_node} -> {rule}")
+                print(f"    Event ID: {event_id or 'N/A'}")
+                print(f"    Services: {', '.join(str(s) for s in services)}")
                 print(f"    Details: {desc}")
                 if a.get("evidence"):
                     print(f"    Evidence: {json.dumps(a.get('evidence'))}")

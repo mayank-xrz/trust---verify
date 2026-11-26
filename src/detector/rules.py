@@ -85,6 +85,10 @@ class RuleAlert:
     resource: str
     description: str
     evidence: Dict[str, Any]
+    # Alert contract: every alert is traceable to the originating audit event
+    # and names all services involved, so an operator can pivot to the log.
+    event_id: str = ""
+    services: List[str] = dataclasses.field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return dataclasses.asdict(self)
@@ -118,6 +122,8 @@ class DetectionRules:
                 resource=resource,
                 description=f"Non-admin subject '{event.get('subject')}' attempted privileged action '{action}' on '{resource}'",
                 evidence={"role": role, "action": action, "resource": resource},
+                event_id=str(event.get("event_id", "")),
+                services=[str(event.get("service", "unknown"))],
             )
         return None
 
@@ -156,6 +162,8 @@ class DetectionRules:
                 resource=event.get("resource", "crypto"),
                 description=f"Cryptographic attack detected on {event.get('service')}: {metadata.get('error', action)}",
                 evidence=metadata,
+                event_id=str(event.get("event_id", "")),
+                services=[str(event.get("service", "unknown"))],
             )
         return None
 
@@ -220,6 +228,8 @@ class ContextRuleEngine:
                         resource=event.get("resource", ""),
                         description=f"Subject '{subject}' exceeded rate limit ({len(dq)} calls within {self.burst_window_sec}s)",
                         evidence={"call_count": len(dq), "window_sec": self.burst_window_sec},
+                        event_id=str(event.get("event_id", "")),
+                        services=[str(event.get("service", ""))],
                     )
                 )
 
@@ -248,6 +258,8 @@ class ContextRuleEngine:
                             resource=event.get("resource", ""),
                             description=f"Subject '{subject}' made {len(sdq)} sensitive access calls within {self.slow_window_sec}s",
                             evidence={"sensitive_count": len(sdq), "window_sec": self.slow_window_sec},
+                            event_id=str(event.get("event_id", "")),
+                            services=[str(event.get("service", ""))],
                         )
                     )
 

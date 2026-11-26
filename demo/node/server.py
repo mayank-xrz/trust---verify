@@ -264,6 +264,8 @@ def create_app(
         if viol:
             recent_alerts.append({
                 "alert_id": f"alert-lateral-{time.time_ns()}",
+                "event_id": viol.event_ids[-1] if viol.event_ids else str(uuid.uuid4()),
+                "services": viol.services or [sender_id, recipient_id],
                 "rule_name": "LATERAL_MOVEMENT_VIOLATION",
                 "severity": "HIGH",
                 "description": getattr(viol, "reason", "Lateral movement policy violation"),
@@ -399,6 +401,8 @@ def create_app(
             message_stats["rejected"] += 1
             alert_obj = {
                 "alert_id": f"alert-lateral-{time.time_ns()}",
+                "event_id": viol.event_ids[-1] if viol.event_ids else str(uuid.uuid4()),
+                "services": viol.services or [sender_id, node_id],
                 "rule_name": "LATERAL_MOVEMENT_VIOLATION",
                 "severity": "HIGH",
                 "description": getattr(viol, "reason", "Unauthorized lateral movement path"),
@@ -497,6 +501,8 @@ def create_app(
         if req.role != "admin":
             recent_alerts.append({
                 "alert_id": f"alert-priv-{time.time_ns()}",
+                "event_id": str(uuid.uuid4()),
+                "services": [node_id],
                 "rule_name": "UNAUTHORIZED_PRIVILEGE_ELEVATION",
                 "severity": "CRITICAL",
                 "description": f"Non-admin role '{req.role}' attempted key rotation",
