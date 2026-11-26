@@ -11,6 +11,8 @@
 
 ## 🏛️ Architecture Overview
 
+cute
+
 ```mermaid
 flowchart TD
     subgraph Client ["Client / Node 1"]
