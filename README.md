@@ -273,7 +273,7 @@ python ../Track-4-Toolkit/validate.py --entry ./track4_service.py
 See [`requirements.txt`](requirements.txt) for exact pins:
 * `cryptography==42.0.8` (Apache-2.0 / BSD-3-Clause) — X25519, HKDF-SHA256, AES-256-GCM, SHA-256
 * `pqcrypto==1.0.0` (MIT / Apache-2.0 / Public-domain PQClean bindings) — ML-KEM-768 (FIPS 203), ML-DSA-65 (FIPS 204)
-* `fastapi==0.111.0`, `uvicorn==0.30.0`, `pydantic==2.7.4`, `jsonschema==4.22.0`, `pytest==8.2.1`, `httpx==0.27.2`, `click==8.1.7`, `requests==2.32.3`, `sqlalchemy==2.0.30`, `alembic==1.14.0`, `psycopg[binary]==3.2.3`
+* `fastapi==0.111.0`, `uvicorn==0.30.0`, `pydantic==2.7.4`, `jsonschema==4.22.0`, `pytest==8.2.1`, `httpx==0.27.2`, `click==8.1.7`, `requests==2.32.3`, `sqlalchemy==2.0.30`, `alembic==1.14.0`, `psycopg[binary]==3.3.9`
 
 ---
 
