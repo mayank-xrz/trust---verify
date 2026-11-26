@@ -195,20 +195,24 @@ def test_06_measured_cross_node_revocation_enforcement(sandbox) -> None:
     import time
 
     d1, _, _, tok = _enroll_token(sandbox, sandbox["users"]["alice"], "a6")
+    request = {"resource_id": "brief-alpha", "permission": "resource:read"}
+    headers = {"Authorization": f"Bearer {tok}"}
+    for node in sandbox["nodes"].values():
+        assert node.post("/api/v1/authorize", headers=headers, json=request).json()["allowed"] is True
+
     sandbox["rev_svc"].revoke_device(sandbox["admin_ctx"], d1, RevocationReason.DEVICE_COMPROMISED)
     t_commit = time.monotonic_ns()
-    for n in sandbox["nodes"].values():
-        n.app.state.sync_mgr.pull_revocations()
-        assert (
-            n.post(
-                "/api/v1/authorize",
-                headers={"Authorization": f"Bearer {tok}"},
-                json={"resource_id": "brief-alpha", "permission": "resource:read"},
-            ).json()["allowed"]
-            is False
-        )
-    elapsed_ms = (time.monotonic_ns() - t_commit) / 1_000_000.0
+    confirmed = {}
+    for name, node in sandbox["nodes"].items():
+        node.app.state.sync_mgr.pull_revocations()
+        result = node.post("/api/v1/authorize", headers=headers, json=request).json()
+        assert result["allowed"] is False
+        assert result["reason_code"] == "DEVICE_REVOKED"
+        confirmed[name] = (time.monotonic_ns() - t_commit) / 1_000_000.0
+    elapsed_ms = max(confirmed.values())
     assert elapsed_ms >= 0.0
+    print(f"REVOCATION_EVIDENCE last confirmed rejection {elapsed_ms:.3f} ms "
+          f"(in-process nodes with explicit sync, {len(confirmed)} of 3 rejected)")
 
 
 def test_07_unaffected_users_retain_access(sandbox) -> None:

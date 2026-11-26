@@ -259,5 +259,6 @@ python3 -m demo.node.operator_cli alerts
 
 echo ""
 echo "======================================================================"
+python3 -m scripts.track4_checklist
 echo "🎉 WALKTHROUGH DEMO COMPLETED SUCCESSFULLY"
 echo "======================================================================"

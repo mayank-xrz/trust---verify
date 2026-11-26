@@ -80,6 +80,31 @@ python -m src.cli verify-logs
 python -m src.cli doc-check
 ```
 
+### Track 4 checklist
+
+`make demo` runs the local HTTP walkthrough and prints a pass/fail table for
+the following twelve checks. Any failed check gives the command a nonzero exit
+status.
+
+| Objective | Evidence produced |
+| --- | --- |
+| Key rotation | 2-second HTTP-demo grace period and rejection after cutoff, plus three-node authorization checks |
+| Revocation across nodes | Time from commit to the last confirmed denial across three in-process nodes with explicit sync, re-enrollment, and unaffected-user access |
+| Crash recovery | Consistent key version, preserved committed data, and revoked credentials still denied |
+| Backup integrity | Damaged payload and missing or invalid pinned signatures rejected |
+| Log integrity | User text stays within one event, and the chain and signed checkpoints verify |
+| Routine vs suspicious activity | F1, median rule-evaluation time to alert, and false alerts per 1,000 benign events on the labelled synthetic fixture |
+| Lateral movement | Rule and path evidence for disallowed service hops |
+| Clock differences | Supported timestamp-gap range, ordering checks, and an `order_uncertain` example |
+| Replay and recipient binding | Duplicate or wrong-recipient messages rejected |
+| Forward secrecy | Long-term identity key alone cannot decrypt a completed earlier session |
+| Delivery under loss or reordering | Valid reordered file delivered, incomplete file discarded and reported |
+| Session resumption | Same peer resumes and a different identity is rejected |
+
+Run `python -m scripts.evaluate_detector` to print the detector metrics on the
+same fixture independently. The score treats LOW stale-key notices as
+informational and measures latency inside the detector, in memory.
+
 Operator CLI (run while nodes are up):
 
 ```bash
