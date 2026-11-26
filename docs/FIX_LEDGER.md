@@ -24,11 +24,11 @@ prompt's `f3e38a5` plus one prior detector fix); baseline suite: **218 passed**.
 | P1-6 | DONE | `27c46fa` | 4 new tests in `tests/test_alert_contract.py`; suite 267 passed at commit; `make demo` PASS | Alerts carry `event_id` and `services[]` |
 | P1-7 | DONE | `c143757` | 4 new tests in `tests/test_readyz_and_rate_limits.py`; suite 271 passed at commit | `/readyz`, per-device auth limits, challenge sweeper |
 | P1-8 | DONE | `f0d27b0` | 5 new tests in `tests/test_docs_drift.py`; `make gates` -> 277 passed | Handoff/security docs match current endpoints and gates |
-| P2-1 | TODO | — | — | CI matrix + gates |
-| P2-2 | TODO | — | — | Missing negative/fuzz tests |
-| P2-3 | TODO | — | — | Benchmark methodology |
-| P2-4 | TODO | — | — | `docs/VALIDATION.md` |
-| P3 | TODO | — | — | Polish batch |
+| P2-1 | DONE | `be58868` | `.github/workflows/ci.yml`; 4 new tests in `tests/test_ci_contract.py`; suite 281 passed | Linux+macOS Python 3.11 matrix; compose config job; pinned dev tools |
+| P2-2 | DONE | `0b92419` | 15 new tests in `tests/test_negative_and_fuzz.py`; suite 296 passed | Fixed-seed fuzz, no new dependency |
+| P2-3 | DONE | `f8ef3c8` | 5 new tests in `tests/test_benchmark_methodology.py`; suite 301 passed | Methodology/limitations + regenerated numbers at `0b92419` |
+| P2-4 | DONE | `b25d8fb` | `docs/VALIDATION.md`; 5 new tests in `tests/test_validation_doc.py`; suite 306 passed | Scope, gate map, and explicit non-claims |
+| P3 | DONE | `43b7d8e` | 4 new tests in `tests/test_p3_polish.py`; suite 310 passed; warnings 302 -> 2 | Lifespan migration, clean/caches, e2e demo fix |
 
 ## P0-1 evidence (2026-11-27)
 
@@ -149,3 +149,40 @@ container validation remains a CI/manual step.
 P0-2 remains BLOCKED-HUMAN only for recording/uploading the 5-minute video.
 The code and published artifacts render "video pending" until
 `DEMO_VIDEO_URL` is supplied.
+
+## P2/P3 evidence (2026-11-27)
+
+Authoritative gate run at `43b7d8e` (after the P3 polish commit):
+
+```
+$ make gates
+ruff check .                     -> All checks passed!
+mypy                             -> Success: no issues found in 20 source files
+python -m src.cli verify-logs    -> exit 0
+pytest . -q                      -> 310 passed, 2 warnings in 12.52s
+```
+
+Additional checks:
+
+```
+$ make demo
+WALKTHROUGH DEMO COMPLETED SUCCESSFULLY   (exit 0)
+
+$ .venv/bin/python scripts/demo_e2e.py
+PASS: 1. Seed & Envelope Encrypt
+PASS: 2. Device Enroll & Authorize
+PASS: 3. Key Rotation Grace & Hard Cutoff
+PASS: 4. Revocation & Secure Re-Enrollment
+PASS: 5. Backup Tamper Detection
+PASS: 6. Transactional Audit Dispatch (15 events)
+```
+
+Benchmark provenance was recorded at `0b92419` (2026-11-26T22:07:48Z) by
+`make bench`; the regenerated files are in `reports/measurements.json`,
+`docs/MEASUREMENTS.md`, the README benchmark block, and the brief. P2-3's
+`tests/test_benchmark_methodology.py` asserts the README block equals the
+generated rendering, so hand edits fail the suite.
+
+CI (`.github/workflows/ci.yml`) runs the same gates on Ubuntu and macOS with
+Python 3.11 plus a `docker compose config` job. It has not run on GitHub from
+this host; the workflow contract is covered by `tests/test_ci_contract.py`.
