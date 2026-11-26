@@ -87,26 +87,23 @@ function runOp(req) {
   throw Error('invalid operation');
 }
 
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { input += chunk; if (input.length > 32 * 1024 * 1024) process.exit(2); });
-process.stdin.on('end', () => {
+const readline = require('node:readline');
+const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+lines.on('line', input => {
   try {
     const req = JSON.parse(input);
+    if (!Number.isSafeInteger(req.id)) throw Error('missing request id');
+    let result;
     if (req.op === 'batch') {
       if (!Array.isArray(req.ops)) throw Error('invalid batch');
-      const results = req.ops.map(runOp);
-      process.stdout.write(JSON.stringify({ results }));
-      return;
-    }
-    process.stdout.write(JSON.stringify(runOp(req)));
-  } catch (err) {
-    if (err && err.code === 'AEAD_AUTH_FAILED') {
-      process.stderr.write('AEAD_AUTH_FAILED\n');
-      process.exitCode = 3;
+      result = { results: req.ops.map(runOp) };
     } else {
-      process.stderr.write('NODE_CRYPTO_FAILED\n');
-      process.exitCode = 1;
+      result = runOp(req);
     }
+    process.stdout.write(JSON.stringify({ id: req.id, result }) + '\n');
+  } catch (err) {
+    let id;
+    try { id = JSON.parse(input).id; } catch (_) { id = null; }
+    process.stdout.write(JSON.stringify({ id, error: err && err.code === 'AEAD_AUTH_FAILED' ? 'AEAD_AUTH_FAILED' : 'NODE_CRYPTO_FAILED' }) + '\n');
   }
 });
