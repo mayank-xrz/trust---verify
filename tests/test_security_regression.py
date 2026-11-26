@@ -15,16 +15,17 @@ import tempfile
 import unittest
 from starlette.testclient import TestClient
 
-from src.node.server import create_app
-from src.crypto.pqc_kem import MLKEMKeyExchange
-from src.crypto.pqc_sig import MLDSASignature
-from src.crypto.messaging import (
+from demo.node.server import create_app
+from demo.node.crypto_provider import (
+    MLKEMKeyExchange,
+    MLDSASignature,
     SecureMessaging,
     RecipientMismatchError,
     ReplayAttackError,
     MessageTamperedError,
+    SessionManager,
+    ResumptionHijackError,
 )
-from src.crypto.session import SessionManager, ResumptionHijackError
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier
 

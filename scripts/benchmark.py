@@ -20,9 +20,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from src.crypto.pqc_kem import MLKEMKeyExchange
-from src.crypto.pqc_sig import MLDSASignature
-from src.crypto.messaging import SecureMessaging
+from demo.node.crypto_provider import MLKEMKeyExchange, MLDSASignature, SecureMessaging
 from src.identity.revocation import RevocationCoordinator
 from src.detector.rules import ContextRuleEngine
 from src.audit.logger import AuditLogger

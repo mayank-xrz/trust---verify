@@ -17,9 +17,8 @@ import time
 import unittest
 from starlette.testclient import TestClient
 
-from src.node.server import create_app
-from src.crypto.pqc_kem import MLKEMKeyExchange
-from src.crypto.pqc_sig import MLDSASignature
+from demo.node.server import create_app
+from demo.node.crypto_provider import MLKEMKeyExchange, MLDSASignature
 from src.identity.key_manager import KeyManager, KeyStateEnum
 
 # Ensure KeyManager implements is_revoked for grace period and revocation checking

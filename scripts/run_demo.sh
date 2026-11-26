@@ -52,7 +52,7 @@ for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     nid="${spec%%:*}"
     port="${spec##*:}"
     NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" \
-        python3 -m src.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
+        python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
     PIDS+=("$pid")
     echo "  🚀 Starting $nid on http://127.0.0.1:$port (pid: $pid)..."
@@ -69,7 +69,7 @@ echo "  ✅ All sandbox nodes online and responding."
 
 # Operator CLI Status
 echo ""
-python3 -m src.node.operator_cli status
+python3 -m demo.node.operator_cli status
 
 # ------------------------------------------------------------------------------
 # STEP 2: Enroll Identities & Send Protected PQC Envelope
@@ -81,7 +81,7 @@ echo "======================================================================"
 
 python3 - << 'EOF'
 import json, urllib.request, base64
-from src.crypto.pqc_kem import MLKEMKeyExchange
+from demo.node.crypto_provider import MLKEMKeyExchange
 
 # 1. Fetch public keys of nodes by self-enrolling
 req_self_a = urllib.request.Request("http://127.0.0.1:8001/enroll", data=json.dumps({"node_id": "node-a"}).encode(), headers={"Content-Type": "application/json"})
@@ -209,7 +209,7 @@ echo "======================================================================"
 
 python3 - << 'EOF'
 import json, urllib.request, base64
-from src.crypto.pqc_kem import MLKEMKeyExchange
+from demo.node.crypto_provider import MLKEMKeyExchange
 
 # 1. Identify active key on node-a
 with urllib.request.urlopen("http://127.0.0.1:8001/health") as r:
@@ -337,11 +337,11 @@ except Exception:
 EOF
 
 # Operator CLI: Verify Audit Log Hash Chains
-python3 -m src.node.operator_cli verify-logs
+python3 -m demo.node.operator_cli verify-logs
 
 # Operator CLI: View Explainable Alerts
 echo ""
-python3 -m src.node.operator_cli alerts
+python3 -m demo.node.operator_cli alerts
 
 echo ""
 echo "======================================================================"

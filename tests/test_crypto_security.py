@@ -6,15 +6,16 @@
 """
 
 import unittest
-from src.crypto.pqc_kem import MLKEMKeyExchange
-from src.crypto.pqc_sig import MLDSASignature
-from src.crypto.messaging import (
+from demo.node.crypto_provider import (
+    MLKEMKeyExchange,
+    MLDSASignature,
     SecureMessaging,
     RecipientMismatchError,
     ReplayAttackError,
     MessageTamperedError,
+    SessionManager,
+    ResumptionHijackError,
 )
-from src.crypto.session import SessionManager, ResumptionHijackError
 
 
 class TestCryptoSecurity(unittest.TestCase):

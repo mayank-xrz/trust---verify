@@ -20,15 +20,16 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from src.crypto.pqc_kem import MLKEMKeyExchange
-from src.crypto.pqc_sig import MLDSASignature
-from src.crypto.messaging import (
+from demo.node.crypto_provider import (
+    MLKEMKeyExchange,
+    MLDSASignature,
     SecureMessaging,
     RecipientMismatchError,
     ReplayAttackError,
     MessageTamperedError,
+    SessionManager,
+    ResumptionHijackError,
 )
-from src.crypto.session import SessionManager, ResumptionHijackError
 from src.identity.key_manager import KeyManager, KeyRecord, KeyStateEnum
 from src.identity.revocation import RevocationCoordinator
 from src.identity.recovery import WALManager, DeviceReEnrollment

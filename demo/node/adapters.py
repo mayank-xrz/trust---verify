@@ -44,9 +44,9 @@ class PersonACryptoAdapter:
 
     def _init_crypto(self):
         try:
-            from src.crypto.pqc_kem import MLKEMKeyExchange
-            from src.crypto.pqc_sig import MLDSASignature
-            from src.crypto.messaging import (
+            from demo.node.crypto_provider import (
+                MLKEMKeyExchange,
+                MLDSASignature,
                 SecureMessaging,
                 RecipientMismatchError,
                 ReplayAttackError,

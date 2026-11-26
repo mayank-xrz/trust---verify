@@ -16,7 +16,7 @@ help:
 	@echo "  make clean - Remove cache, temporary logs and data"
 
 setup:
-	$(PIP) install -r requirements.txt || echo "Local install note: liboqs fallback active if C library uncompiled."
+	$(PIP) install -r requirements.txt
 
 up:
 	docker compose up -d --build

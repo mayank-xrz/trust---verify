@@ -28,9 +28,9 @@ from pydantic import BaseModel, Field
 import uvicorn
 import jsonschema
 
-from src.node.adapters import NodeAdapters
-from src.node.sandbox_api import SandboxController, create_sandbox_router
-from src.node.ui import render_dashboard_html
+from demo.node.adapters import NodeAdapters
+from demo.node.sandbox_api import SandboxController, create_sandbox_router
+from demo.node.ui import render_dashboard_html
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
