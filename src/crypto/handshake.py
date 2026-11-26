@@ -15,6 +15,7 @@ Design:
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import json
 import secrets
@@ -40,6 +41,21 @@ def _best_effort_zeroize(buf: Optional[bytearray]) -> None:
             buf[i] = 0
 
 
+def _zeroize_bytes(buf: Optional[bytes]) -> None:
+    """Overwrite an immutable ``bytes`` payload in place (CPython best effort).
+
+    PQClean/pqcrypto only accepts ``bytes`` for secret keys, so the only way to
+    remove the transient copy is to write zeros into its backing buffer before it
+    is released to the allocator.
+    """
+    if not isinstance(buf, bytes) or not buf:
+        return
+    try:
+        ctypes.memset(id(buf) + bytes.__basicsize__ - 1, 0, len(buf))
+    except Exception:
+        pass
+
+
 def _hkdf_derive(ikm: bytes, salt: bytes, info: bytes, length: int = 32) -> bytes:
     return HKDF(
         algorithm=hashes.SHA256(),
@@ -58,6 +74,19 @@ class SessionKeys:
     resumption_secret: bytes
     peer_identity: str
     peer_device: str
+
+    def zeroize(self) -> None:
+        """Scrub directional keys and the resumption secret in place."""
+        for name in ("tx_key", "rx_key", "resumption_secret"):
+            value = getattr(self, name, b"")
+            _zeroize_bytes(value)
+            setattr(self, name, b"")
+
+    def __del__(self) -> None:
+        try:
+            self.zeroize()
+        except Exception:
+            pass
 
 
 class EphemeralHandshakeSession:
@@ -90,6 +119,7 @@ class EphemeralHandshakeSession:
         mlkem_pub, mlkem_priv = kem_keygen(ml_kem_768)
         self._mlkem_pub_bytes = mlkem_pub
         self._mlkem_priv = bytearray(mlkem_priv)
+        _zeroize_bytes(mlkem_priv)
 
         hello = {
             "responder_identity": self.identity,
@@ -150,6 +180,8 @@ class EphemeralHandshakeSession:
             resumption_secret = _hkdf_derive(bytes(ikm), transcript_hash_bytes, b"track4/v1/resumption-secret")
         finally:
             _best_effort_zeroize(ikm)
+            _zeroize_bytes(x25519_ss)
+            _zeroize_bytes(mlkem_ss)
             del eph_x25519_priv
             self._wipe_ephemerals()
 
@@ -202,7 +234,11 @@ class EphemeralHandshakeSession:
         mlkem_ct = base64.b64decode(transcript["mlkem_ct"], validate=True)
 
         x25519_ss = self._x25519_priv.exchange(init_x25519_pub)
-        mlkem_ss = kem_decaps(ml_kem_768, bytes(self._mlkem_priv), mlkem_ct)
+        mlkem_priv_bytes = bytes(self._mlkem_priv)
+        try:
+            mlkem_ss = kem_decaps(ml_kem_768, mlkem_priv_bytes, mlkem_ct)
+        finally:
+            _zeroize_bytes(mlkem_priv_bytes)
 
         ikm = bytearray(transcript_hash_bytes + x25519_ss + mlkem_ss)
         try:
@@ -212,6 +248,8 @@ class EphemeralHandshakeSession:
             resumption_secret = _hkdf_derive(bytes(ikm), transcript_hash_bytes, b"track4/v1/resumption-secret")
         finally:
             _best_effort_zeroize(ikm)
+            _zeroize_bytes(x25519_ss)
+            _zeroize_bytes(mlkem_ss)
             self._wipe_ephemerals()
 
         return SessionKeys(
