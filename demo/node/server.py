@@ -530,7 +530,17 @@ def create_app(
     @app.get("/logs/verify")
     def verify_logs():
         log_path = getattr(audit.logger, "log_file_path", f"{data_dir}/{node_id}_audit.log")
-        result = audit.verifier.verify_file(log_path)
+        anchor_path = os.path.join(data_dir, f".{node_id}_audit_anchor.json")
+        if hasattr(audit.verifier, "verify_file"):
+            anchor_arg = anchor_path if os.path.exists(anchor_path) else None
+            try:
+                result = audit.verifier.verify_file(log_path, anchor_path=anchor_arg)
+            except TypeError:
+                result = audit.verifier.verify_file(log_path)
+            if getattr(result, "is_valid", False) and hasattr(audit.verifier, "save_anchor") and os.path.exists(log_path):
+                audit.verifier.save_anchor(log_path, anchor_path)
+        else:
+            result = audit.verifier.verify_file(log_path)
         res_dict = result.to_dict() if hasattr(result, "to_dict") else {
             "is_valid": getattr(result, "is_valid", False),
             "total_records": getattr(result, "total_records", 0),

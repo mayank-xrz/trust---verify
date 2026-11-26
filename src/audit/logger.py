@@ -105,18 +105,34 @@ class AuditLogger:
                 f.write("# TBV AUDIT LOG V1\n")
             return
 
-        # Resume last hash and sequence from existing log
+        # Resume last hash and sequence from existing log, verifying chain integrity
+        expected_seq = 0
+        expected_prev = GENESIS_HASH
         with open(self.log_file_path, "r", encoding="utf-8") as f:
-            for line in f:
+            for line_num, line in enumerate(f, start=1):
                 line = line.strip()
                 if not line or line.startswith("#"):
                     continue
                 try:
                     record = json.loads(line)
-                    self._current_sequence = record.get("sequence", 0) + 1
-                    self._last_hash = record.get("entry_hash", GENESIS_HASH)
-                except Exception:
-                    pass
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"Corrupted audit log JSON at line {line_num}") from exc
+                if not isinstance(record, dict):
+                    raise ValueError(f"Invalid audit log record type at line {line_num}")
+                if record.get("sequence") != expected_seq:
+                    raise ValueError(f"Audit log sequence mismatch at line {line_num}")
+                if record.get("prev_hash") != expected_prev:
+                    raise ValueError(f"Audit log prev_hash mismatch at line {line_num}")
+                body = {k: v for k, v in record.items() if k not in ("entry_hash", "signature")}
+                expected_hash = hashlib.sha256(
+                    expected_prev.encode("ascii") + self.canonical_json_bytes(body)
+                ).hexdigest()
+                if record.get("entry_hash") != expected_hash:
+                    raise ValueError(f"Audit log entry_hash mismatch at line {line_num}")
+                expected_prev = expected_hash
+                expected_seq += 1
+        self._current_sequence = expected_seq
+        self._last_hash = expected_prev
 
     @staticmethod
     def sanitize_field(value: Any) -> Any:

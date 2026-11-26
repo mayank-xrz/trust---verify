@@ -441,19 +441,27 @@ def create_app(
 
     @app.get("/rotations/{rotation_id}")
     def get_rotation(
-        rotation_id: str, _actor: ActorContext = Depends(require_actor)
+        rotation_id: str, actor: ActorContext = Depends(require_actor)
     ) -> dict[str, Any]:
         try:
+            with session_factory() as session:
+                rotation_svc._require_rotate_permission(session, actor)
             return rotation_svc.get_rotation(rotation_id)
+        except NotAuthorized as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
         except IdentityKeysError as exc:
             raise HTTPException(status_code=404, detail=exc.reason_code) from exc
 
     @app.get("/keys/{key_set_id}/metadata")
     def get_key_set_meta(
-        key_set_id: str, _actor: ActorContext = Depends(require_actor)
+        key_set_id: str, actor: ActorContext = Depends(require_actor)
     ) -> dict[str, Any]:
         try:
+            with session_factory() as session:
+                rotation_svc._require_rotate_permission(session, actor)
             return rotation_svc.get_key_set_metadata(key_set_id)
+        except NotAuthorized as exc:
+            raise HTTPException(status_code=403, detail=exc.reason_code) from exc
         except IdentityKeysError as exc:
             raise HTTPException(status_code=404, detail=exc.reason_code) from exc
 

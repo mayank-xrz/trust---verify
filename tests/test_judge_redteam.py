@@ -299,3 +299,34 @@ def test_bot_track4_service_no_secret_leak_and_wrong_owner_denied(tmp_path: Path
     from track4_service import _decrypt_asset
     with pytest.raises(CryptoError, match="unauthenticated"):
         _decrypt_asset(b"k" * 32, "secret-doc", "plaintext-downgrade")
+
+
+def test_bot_audit_logger_rejects_forged_tail_on_resume(tmp_path: Path) -> None:
+    from src.audit.logger import AuditLogger
+
+    log_path = tmp_path / "resume.log"
+    logger = AuditLogger("node-1", str(log_path))
+    logger.log_event(service="svc", action="INIT", subject="root", resource="r1", status="SUCCESS")
+
+    # Append a forged line with an arbitrary entry_hash
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(
+            json.dumps({
+                "sequence": 1,
+                "event_id": "forged",
+                "timestamp_ns": 1,
+                "node_id": "node-1",
+                "service": "svc",
+                "action": "FORGED",
+                "subject": "mallory",
+                "resource": "r1",
+                "status": "SUCCESS",
+                "metadata": {},
+                "prev_hash": "0" * 64,
+                "entry_hash": "f" * 64,
+            })
+            + "\n"
+        )
+
+    with pytest.raises(ValueError, match="Audit log"):
+        AuditLogger("node-1", str(log_path))
