@@ -117,6 +117,30 @@ def create_app(
     app.state.enrolled_nodes = enrolled_nodes
     app.state.recent_alerts = recent_alerts
 
+    @app.get("/")
+    def root():
+        active = identity.key_manager.get_active_key()
+        return {
+            "name": "Trust-But-Verify",
+            "tagline": "Post-Quantum Cryptographic Zero-Trust Defense & Explainable Detection",
+            "node_id": node_id,
+            "status": "online",
+            "active_key_id": getattr(active, "key_id", None) if active else None,
+            "active_key_version": getattr(active, "version", 1) if active else 0,
+            "pqc_standards": ["NIST FIPS 203 (ML-KEM-768)", "NIST FIPS 204 (ML-DSA-65)"],
+            "endpoints": {
+                "health": "/health",
+                "interactive_swagger_docs": "/docs",
+                "metrics": "/metrics",
+                "verify_audit_logs": "/logs/verify",
+                "send_envelope": "POST /send",
+                "receive_envelope": "POST /receive",
+                "rotate_key": "POST /keys/rotate",
+                "revoke_key": "POST /keys/revoke",
+                "enroll_device": "POST /enroll",
+            },
+        }
+
     @app.get("/health")
     def health_check():
         active = identity.key_manager.get_active_key()
