@@ -5,8 +5,6 @@ import hashlib
 import json
 import shutil
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
@@ -105,6 +103,11 @@ def hkdf(secret, salt, info, length=32):
         request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
         result = call_node(request, CryptoError)
         return unb64(result["data"], length)
+    try:
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    except ImportError as exc:
+        raise CryptoError("HKDF requires Node.js or cryptography") from exc
     return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(secret)
 
 

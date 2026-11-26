@@ -76,6 +76,15 @@ Make shortcuts: `make setup` (pip install), `make test`, `make chaos`, `make ben
 
 Dependencies and licences are pinned in [`requirements.txt`](requirements.txt): `pqcrypto`, `cryptography`, `fastapi`, `starlette`, `uvicorn`, `pydantic`, `jsonschema`, `pytest`, `httpx`, `click`, `requests`, `sqlalchemy`, `alembic`, `psycopg[binary]`. Third-party attributions are in [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md). There are no AI/ML dependencies.
 
+## Offline adapter
+
+`track4_service.py` uses `cryptography` for state-at-rest HKDF-SHA256 and
+AES-256-GCM when it can import it. Without that package, it uses the existing
+Node.js worker for both operations and keeps the same serialized state format.
+ML-KEM remains in `pqcrypto`. The web stack still uses its pinned dependencies.
+Allowed and denied protected reads append audit events and update the local
+audit anchor.
+
 ## Demo
 
 ```bash

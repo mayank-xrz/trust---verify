@@ -10,12 +10,16 @@ import tempfile
 import time
 from pathlib import Path
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+try:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+except ImportError:
+    AESGCM = None
 
+from src.crypto import aead
 from src.crypto.policy import TimezoneMismatchError, normalize_timezone
-from src.crypto.primitives import CryptoError, b64, canonical, unb64
+from src.crypto.primitives import CryptoError, b64, canonical, hkdf, unb64
 from src.crypto.protected_read import MAX_CHALLENGE_LENGTH, protected_read
 from src.crypto.session import PrekeyStore, TrustRegistry
 
@@ -79,7 +83,10 @@ def save(path, state):
 def _derive_storage_key(key_material):
     ikm = key_material.encode("utf-8") if isinstance(key_material, str) and key_material else secrets.token_bytes(32)
     salt = secrets.token_bytes(16)
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"track4/v1/state-at-rest").derive(ikm)
+    info = b"track4/v1/state-at-rest"
+    if AESGCM is None:
+        return hkdf(ikm, salt, info)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=info).derive(ikm)
 
 
 def _load_storage_key(root):
@@ -94,8 +101,13 @@ def _encrypt_contents(storage_key, contents):
     for asset_id, body in contents.items():
         nonce = secrets.token_bytes(12)
         aad = canonical({"asset": asset_id})
-        ct_and_tag = AESGCM(storage_key).encrypt(nonce, body.encode("utf-8"), aad)
-        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ct_and_tag[:-16]), "tag": b64(ct_and_tag[-16:])}
+        plaintext = body.encode("utf-8")
+        if AESGCM is None:
+            ciphertext, tag = aead.encrypt(storage_key, nonce, aad, plaintext)
+        else:
+            combined = AESGCM(storage_key).encrypt(nonce, plaintext, aad)
+            ciphertext, tag = combined[:-16], combined[-16:]
+        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ciphertext), "tag": b64(tag)}
     return encrypted
 
 
@@ -104,11 +116,13 @@ def _decrypt_asset(storage_key, asset_id, entry):
         raise CryptoError("unauthenticated asset entry")
     aad = canonical({"asset": asset_id})
     try:
-        plaintext = AESGCM(storage_key).decrypt(
-            unb64(entry["nonce"], 12),
-            unb64(entry["ciphertext"]) + unb64(entry["tag"], 16),
-            aad,
-        )
+        nonce = unb64(entry["nonce"], 12)
+        ciphertext = unb64(entry["ciphertext"])
+        tag = unb64(entry["tag"], 16)
+        if AESGCM is None:
+            plaintext = aead.decrypt(storage_key, nonce, aad, ciphertext, tag)
+        else:
+            plaintext = AESGCM(storage_key).decrypt(nonce, ciphertext + tag, aad)
     except Exception as exc:
         raise CryptoError("AEAD authentication failed") from exc
     return plaintext.decode("utf-8")
@@ -320,6 +334,7 @@ def dispatch(request):
             if not allowed or not valid_challenge or replay:
                 _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny", threat=tz_threat)
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 return {"decision": "deny"}
             try:
                 storage_key = _load_storage_key(root)
@@ -328,10 +343,12 @@ def dispatch(request):
             except (CryptoError, KeyError, UnicodeError):
                 _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny")
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 return {"decision": "deny"}
             used[challenge_hash] = now + 3600
             _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "allow")
             save(path, state)
+            _save_audit_anchor(root, state["audit_log"])
             return result
         raise ValueError("unsupported operation")
 

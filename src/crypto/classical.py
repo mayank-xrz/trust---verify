@@ -2,9 +2,6 @@
 
 import shutil
 
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-
 from .node_bridge import call_node
 from .primitives import CryptoError, b64, unb64
 
@@ -13,6 +10,9 @@ def keypair():
     if shutil.which("node"):
         result = call_node({"op": "x25519_keypair"}, CryptoError)
         return unb64(result["public_key"], 44), unb64(result["private_key"], 48)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
     priv = X25519PrivateKey.generate()
     pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     priv_der = priv.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
@@ -28,6 +28,9 @@ def ephemeral_shared(peer_public_key):
             CryptoError,
         )
         return unb64(result["public_key"], 44), unb64(result["data"], 32)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+
     priv = X25519PrivateKey.generate()
     pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
@@ -49,6 +52,9 @@ def shared(private_key, public_key):
             CryptoError,
         )
         return unb64(result["data"], 32)
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+
     try:
         priv = serialization.load_der_private_key(private_key, password=None)
         pub = serialization.load_der_public_key(public_key)
