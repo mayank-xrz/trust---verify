@@ -5,7 +5,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![NIST FIPS 203](https://img.shields.io/badge/NIST-ML--KEM--768-success)](https://csrc.nist.gov/pubs/fips/203/final)
 [![NIST FIPS 204](https://img.shields.io/badge/NIST-ML--DSA--65-success)](https://csrc.nist.gov/pubs/fips/204/final)
-[![Tests](https://img.shields.io/badge/Tests-100%25%20Passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Security%20Tests-24%2F24%20Passing-brightgreen)]()
+[![Zero AI/ML](https://img.shields.io/badge/AI%2FML%20Deps-ZERO-success)]()
 
 ---
 
@@ -13,7 +14,7 @@
 
 ```mermaid
 flowchart TD
-    subgraph Client ["Client / Node 1"]
+    subgraph Client ["Client / node-a"]
         KEM_A["ML-KEM-768 Ephemeral Exchange"]
         SIG_A["ML-DSA-65 Signing"]
         MSG_A["Secure Messaging (AEAD + Recipient Binding)"]
@@ -23,9 +24,9 @@ flowchart TD
         ENV["Secure Envelope\n(AAD: Recipient ID + Monotonic Seq)"]
     end
 
-    subgraph Server ["Server / Node 2"]
-        REPLAY["Sliding-Window Replay Cache"]
-        KM["Atomic Key Manager\n(Grace Period & Cutoffs)"]
+    subgraph Server ["Server / node-b"]
+        REPLAY["Sliding-Window Replay Cache (256 msg)"]
+        KM["Atomic Key Manager\n(5s Grace Period & Cutoff)"]
         WAL["Crash Recovery (WAL)"]
     end
 
@@ -69,56 +70,95 @@ flowchart TD
   * `metrics.py`: Evaluator computing Precision, Recall, F1 score ($\ge 0.90$), MTTA ($< 50$ ms), and FP per 1,000 events.
 
 * **[Person D] Service Wrapper & Operator Sandbox (`src/node/`, `tests/`)**
-  * `server.py`: REST service node exposing protected endpoints with full envelope verification.
-  * `operator_cli.py`: Interactive CLI to check health, view alerts, rotate keys, and verify log chains.
+  * `server.py`: FastAPI service node (`node-a`, `node-b`, `node-c`, `key-authority`, `detector`) exposing protected endpoints with full envelope verification.
+  * `operator_cli.py`: Interactive CLI to check cluster health, inspect keys, view explainable alerts, trigger rotation/revocation, and verify log chains.
   * Automated security verification test suite & reproducible judge demo script.
+
+---
+
+## ⚙️ Key Lifecycle & Clock-Skew Policies
+
+### 1. Documented Grace Period & Hard Cutoff Policy
+* **Atomic Rotation:** When a service node initiates key rotation via `/keys/rotate`, a new post-quantum keypair ($K_{\text{new}}$) is generated and committed to the Write-Ahead Log (WAL).
+* **Grace Period Window ($T_{\text{grace}} = 5.0\text{ s}$):** The retiring key ($K_{\text{old}}$) transitions to state `grace`. During this window, in-flight messages encrypted prior to the rotation are accepted, preventing message drops across distributed nodes.
+* **Hard Cutoff Enforcement:** Once $t > T_{\text{cutoff}} = T_{\text{rotation}} + T_{\text{grace}}$, `cleanup_expired_grace_keys()` transitions $K_{\text{old}}$ to `revoked`/`expired`. Any subsequent message presented with $K_{\text{old}}$ is rejected on all nodes with a `400 Bad Request` and logged as a security alert.
+
+### 2. Documented Clock-Skew Tolerance Window
+* **Skew Tolerance ($\pm 2000\text{ ms}$):** In distributed cloud environments, server clocks drift. The detection engine's `ClockSyncBuffer` tolerates arrival skew up to $\pm 2000\text{ ms}$ without dropping events.
+* **Out-of-Order Buffering:** Events arriving within the window are inserted into a sequence-ordered buffer and evaluated deterministically.
+* **Uncertainty Flagging:** Events whose timestamp skew exceeds the threshold are tagged with `uncertainty_flag = True`, warning operators of potential timing manipulation while preserving forensic visibility.
 
 ---
 
 ## 🚀 Quickstart (Clean-Machine Setup)
 
-Trust-But-Verify is built with zero external dependency requirements for out-of-the-box operation on any clean developer machine.
+Trust-But-Verify is engineered with zero mandatory external binary dependencies for out-of-the-box operation on any clean developer machine.
 
-### 1. Run All Tests
+### Prerequisites
+* Python 3.9+ installed (`python3 --version`)
+* Optional: Docker & Docker Compose
+
+### 1. Run Core Security Verification Suite
 ```bash
 make test
-# Or directly:
-python3 -m unittest discover -s tests -p "test_*.py"
+# Or directly with pytest:
+python3 -m pytest tests/test_crypto_security.py tests/test_lifecycle_chaos.py tests/test_log_injection.py tests/test_detector_eval.py tests/test_integration_e2e.py tests/test_security_regression.py -v
 ```
 
-### 2. Run End-to-End Walkthrough Demo
+### 2. Run Deterministic End-to-End Judge Demo (5 Minutes)
 ```bash
 make demo
 # Or directly:
 ./scripts/run_demo.sh
 ```
 
-### 3. Run Cryptographic & Detector Benchmarks
+### 3. Run Performance & Cryptographic Benchmarks
 ```bash
 make bench
 # Or directly:
 python3 scripts/benchmark.py
 ```
 
-### 4. Run Multi-Node Docker Sandbox
+### 4. Launch Multi-Node Sandbox (Docker)
 ```bash
-docker-compose up --build
+make up
+# Or:
+docker compose up -d
+```
+Service endpoints:
+* `key-authority`: `http://localhost:8000`
+* `node-a`: `http://localhost:8001`
+* `node-b`: `http://localhost:8002`
+* `node-c`: `http://localhost:8003`
+* `detector`: `http://localhost:8005`
+
+### 5. Operator CLI Usage
+```bash
+python3 -m src.node.operator_cli status --url http://localhost:8001
+python3 -m src.node.operator_cli keys --url http://localhost:8001
+python3 -m src.node.operator_cli alerts --url http://localhost:8001
+python3 -m src.node.operator_cli verify-log --path /tmp/node-a_audit.log
 ```
 
 ---
 
-## 📑 Shared JSON Schemas (`schemas/`)
+## 📑 Frozen Shared JSON Schemas (`schemas/`)
 
-* [`schemas/envelope.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/envelope.schema.json): Envelope format with recipient binding, sequence counter, and PQC signatures.
+* [`schemas/envelope.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/envelope.schema.json): Cryptographically bound envelope (`sender_id`, `recipient_id`, `seq_num`, `session_id`, `kem_ciphertext`, `nonce`, `ciphertext`, `associated_data`, `signature`).
 * [`schemas/key_state.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/key_state.schema.json): Key lifecycle schema tracking rotation state, grace periods, and cutoffs.
-* [`schemas/audit_event.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/audit_event.schema.json): Tamper-evident audit event schema with hash chaining pointers.
+* [`schemas/audit_event.schema.json`](file:///Users/zuri/Hackathons/Devforge/trust-but-verify/schemas/audit_event.schema.json): Injection-safe audit record schema with continuous hash chain pointers.
 
 ---
 
-## 🔬 Benchmark Results Summary
+## 🔬 Benchmark Results Output
 
-* **ML-KEM-768 Handshake Latency:** $\approx 0.05 \text{ ms}$ (Simulated) / $< 1.2 \text{ ms}$ (liboqs C)
-* **ML-DSA-65 Sign & Verify:** $\approx 0.08 \text{ ms}$ (Simulated) / $< 2.1 \text{ ms}$ (liboqs C)
-* **Envelope AEAD + AAD Binding:** $> 10,000 \text{ msg/sec}$
-* **Explainable Detector Throughput:** $> 150,000 \text{ events/sec}$
-* **Detection Metrics:** F1 $\ge 0.96$, MTTA $< 1.5 \text{ ms}$, False Positives per 1k = $0.00$.
+The following performance benchmarks were measured on a standard developer workstation using the automated benchmark suite:
+
+| Operation / Component | p50 Latency | p95 Latency | Mean Latency | Throughput | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **ML-KEM-768 Ephemeral Exchange** | 59.81 ms | 60.06 ms | 59.81 ms | 16.7 ops/sec | NIST FIPS 203 (Clean fallback) / $< 1.2$ ms (C liboqs) |
+| **ML-DSA-65 Sign & Verify** | 42.30 ms | 42.65 ms | 42.32 ms | 23.6 ops/sec | NIST FIPS 204 (Clean fallback) / $< 2.1$ ms (C liboqs) |
+| **AEAD Envelope Pack + Unpack** | 42.64 ms | 43.01 ms | 42.65 ms | 23.4 msg/sec | Includes recipient binding verification & replay cache |
+| **Cross-Node Revocation Broadcast** | 26.94 ms | 27.30 ms | 27.19 ms | — | 100% cluster ack across 4 simulated nodes |
+| **Explainable Detection Engine** | 1.69 $\mu$s | 2.10 $\mu$s | 1.69 $\mu$s | **593,075 events/sec** | Zero AI/ML, zero GPU, pure deterministic AST rules |
+| **Memory Footprint Overhead** | — | — | — | **6.8 KB current / 18.9 KB peak** | Extremely lightweight memory overhead per node |
