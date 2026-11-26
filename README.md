@@ -42,7 +42,7 @@ flowchart TD
         NODE_B["Service node-b\n(:8002)"]
         NODE_C["Service node-c\n(:8003)"]
         
-        ENV["PQC Message Envelope\n(NIST ML-KEM-768 + ML-DSA-65 + AES-256-GCM)\nAAD: sender_id | recipient_id | seq_num | session_id"]
+        ENV["PQC Message Envelope\n(ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1)\nAAD: sender/device | recipient/device | session_id | message_id | counter | epoch"]
         
         NODE_A -->|Dispatches Envelope| ENV
         ENV -->|Recipient Binding & Decryption| NODE_B
@@ -91,10 +91,12 @@ flowchart TD
 * **Uncertainty Flagging:** Events arriving with skew exceeding $\pm 2000\text{ ms}$ are processed with `uncertainty_flag = True`, warning forensic operators of clock manipulation or network delay without discarding audit evidence.
 
 ### 3. Pinned Post-Quantum Cryptographic Algorithms
-* **Key Encapsulation Mechanism (KEM):** NIST FIPS 203 **ML-KEM-768** (Kyber-768 equivalent, Category 3 quantum security, 128-bit post-quantum security against Shor's & Grover's algorithms).
-* **Digital Signatures (DSA):** NIST FIPS 204 **ML-DSA-65** (Dilithium3 equivalent, Category 3 quantum security).
-* **Symmetric AEAD Cipher:** **AES-256-GCM** with 96-bit unique nonces and explicit Authenticated Associated Data (AAD).
-* **Backup Authentication:** **HMAC-SHA3-512** + SHA-256 content addressing.
+* **Canonical Suite String:** `ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1` (`src/crypto/primitives.py`)
+* **Key Encapsulation Mechanism (KEM):** NIST FIPS 203 **ML-KEM-768** via `pqcrypto==0.4.0`, hybridized with ephemeral **X25519** (`node:crypto`) in session handshakes.
+* **Digital Signatures (DSA):** NIST FIPS 204 **ML-DSA-65** via `pqcrypto==0.4.0` with domain-separated canonical transcripts.
+* **Key Derivation:** **HKDF-SHA256** (`node:crypto`) for session root, chain keys, and message keys.
+* **Symmetric AEAD Cipher:** **AES-256-GCM** (`node:crypto`) with 96-bit counter nonces and explicit Authenticated Associated Data (AAD).
+* **Judging Adapter (`track4_service.py`):** Uses stdlib + `pqcrypto==0.4.0` only (`ML-KEM-768` + `HMAC-SHA-256` for `protected_read`).
 
 ---
 

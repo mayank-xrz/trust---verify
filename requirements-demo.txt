@@ -1,0 +1,14 @@
+# Demo and legacy multi-node/DB dependencies (not used by judged track4_service.py)
+fastapi==0.111.0
+uvicorn==0.30.0
+pydantic==2.7.4
+jsonschema==4.22.0
+pytest==8.2.1
+httpx==0.27.2
+cryptography==42.0.8
+liboqs-python==0.10.0
+click==8.1.7
+requests==2.32.3
+sqlalchemy==2.0.30
+alembic==1.14.0
+psycopg[binary]==3.2.3
