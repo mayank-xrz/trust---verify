@@ -1,15 +1,14 @@
 # Post-Quantum Cryptography & Core Dependencies
-pqcrypto==0.4.0
-cryptography==42.0.8
-jsonschema==4.22.0
-pytest==8.2.1
-click==8.1.7
 fastapi==0.111.0
 uvicorn==0.30.0
-requests==2.32.3
+pydantic==2.7.4
+jsonschema==4.22.0
+pytest==8.2.1
 httpx==0.27.2
-sqlalchemy==2.0.58
+cryptography==42.0.8
+liboqs-python==0.10.0
+click==8.1.7
+requests==2.32.3
+sqlalchemy==2.0.30
 alembic==1.14.0
 psycopg[binary]==3.2.3
-ruff==0.8.0
-mypy==1.13.0
