@@ -8,6 +8,7 @@ import sys
 import tempfile
 
 from src.crypto.protected_read import protected_read
+from src.crypto.session import TrustRegistry
 
 
 def state_dir():
@@ -69,6 +70,9 @@ def dispatch(request):
                 raise ValueError("invalid actor")
             state["disabled"] = sorted(set(state["disabled"]) | {actor})
             save(path, state)
+            trust_path = root / "trust_registry.json"
+            if trust_path.exists():
+                TrustRegistry(trust_path).revoke(actor)
             return {}
         if op == "audit":
             request_id = request.get("request_id")

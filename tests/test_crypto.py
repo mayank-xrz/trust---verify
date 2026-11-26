@@ -15,7 +15,7 @@ from src.crypto.chunks import Reassembler, make_transfer
 from src.crypto.primitives import CryptoError, b64, canonical, decapsulate, encapsulate, kem_keypair, sign, signing_keypair, verify
 from src.crypto.protected_read import protected_read
 from src.crypto.replay import ReplayLedger
-from src.crypto.session import PrekeyStore, TrustRegistry, accept, finish, initiate
+from src.crypto.session import PrekeyStore, Session, TrustRegistry, accept, finish, initiate
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -209,6 +209,85 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(call({"op": "protected_read", "actor": "other", "asset": "brief", "challenge": "fresh", "public_key": b64(public)}), {"decision": "deny"})
         call({"op": "revoke", "actor": "maya"})
         self.assertEqual(call({"op": "protected_read", "actor": "maya", "asset": "brief", "challenge": "fresh", "public_key": b64(public)}), {"decision": "deny"})
+
+    def test_epoch_rekey_rejects_old_epoch_and_ratchets_chain(self):
+        alice, bob, _, _, _ = self.sessions()
+        ledger = ReplayLedger(Path(self.temp.name) / "replay.db")
+        initial_chain = alice._send_chain_key
+        pkt0 = alice.encrypt(b"msg-0")
+        self.assertNotEqual(alice._send_chain_key, initial_chain)
+        self.assertEqual(bob.decrypt(pkt0, ledger), b"msg-0")
+
+        alice.rekey()
+        bob.rekey()
+        self.assertEqual(alice.epoch, 1)
+        self.assertEqual(bob.epoch, 1)
+        with self.assertRaises(CryptoError):
+            bob.decrypt(pkt0, ledger)
+        pkt1 = alice.encrypt(b"msg-1-epoch1")
+        self.assertEqual(pkt1["header"]["epoch"], 1)
+        self.assertEqual(bob.decrypt(pkt1, ledger), b"msg-1-epoch1")
+
+    def test_key_confirmation_required_before_ready(self):
+        prekeys = PrekeyStore()
+        offer = prekeys.offer("bob", "laptop", self.bob_sk)
+        initiation, alice = initiate(offer, "alice", "phone", self.alice_sk, self.registry)
+        ack, _ = accept(offer, initiation, self.bob_sk, self.registry, prekeys)
+        bad_ack = dict(ack)
+        bad_ack["key_confirm"] = "0" * 64
+        with self.assertRaises(CryptoError):
+            finish(bad_ack, initiation, self.registry, alice)
+        self.assertFalse(alice.ready)
+
+    def test_session_persistence_restart_and_refuse_unwritable(self):
+        alice_state = Path(self.temp.name) / "alice_session.json"
+        bob_state = Path(self.temp.name) / "bob_session.json"
+        prekeys = PrekeyStore()
+        offer = prekeys.offer("bob", "laptop", self.bob_sk)
+        initiation, alice = initiate(offer, "alice", "phone", self.alice_sk, self.registry, state_path=alice_state)
+        ack, bob = accept(offer, initiation, self.bob_sk, self.registry, prekeys, state_path=bob_state)
+        finish(ack, initiation, self.registry, alice)
+
+        pkt0 = alice.encrypt(b"before-restart")
+        alice_restarted = Session.load(alice_state)
+        self.assertEqual(alice_restarted.send_counter, 1)
+        pkt1 = alice_restarted.encrypt(b"after-restart")
+        self.assertEqual(pkt1["header"]["counter"], 1)
+
+        ledger = ReplayLedger(Path(self.temp.name) / "replay.db")
+        self.assertEqual(bob.decrypt(pkt0, ledger), b"before-restart")
+        self.assertEqual(bob.decrypt(pkt1, ledger), b"after-restart")
+
+        # Refuse to encrypt if state cannot be persisted
+        unwritable = Path(self.temp.name) / "no_such_file" / "session.json"
+        alice_restarted.state_path = Path(self.temp.name)  # directory path causes OSError on replace
+        with self.assertRaises(CryptoError):
+            alice_restarted.encrypt(b"should-fail")
+        self.assertEqual(alice_restarted.send_counter, 2)
+
+    def test_trust_registry_and_prekey_persistence_and_revocation(self):
+        reg_path = Path(self.temp.name) / "trust.json"
+        pk_path = Path(self.temp.name) / "prekeys.json"
+        reg1 = TrustRegistry(reg_path)
+        reg1.enroll("alice", "phone", self.alice_pk)
+        reg1.enroll("bob", "laptop", self.bob_pk)
+        self.assertEqual(oct(reg_path.stat().st_mode & 0o777), "0o600")
+
+        pks1 = PrekeyStore(pk_path)
+        expired_offer = pks1.offer("bob", "laptop", self.bob_sk, lifetime=-10)
+        valid_offer = pks1.offer("bob", "laptop", self.bob_sk, lifetime=300)
+
+        pks2 = PrekeyStore(pk_path)
+        with self.assertRaises(CryptoError):
+            pks2.take(expired_offer["prekey_id"])
+
+        reg2 = TrustRegistry(reg_path)
+        reg2.revoke("alice", "phone")
+        reg3 = TrustRegistry(reg_path)
+        with self.assertRaises(CryptoError):
+            reg3.key("alice", "phone")
+        with self.assertRaises(CryptoError):
+            initiate(valid_offer, "alice", "phone", self.alice_sk, reg3)
 
 
 if __name__ == "__main__":
