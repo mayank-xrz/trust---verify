@@ -7,11 +7,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError as SAIntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError as SAIntegrityError
+from sqlalchemy.exc import OperationalError
+
+from alembic import command
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 

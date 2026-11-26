@@ -10,23 +10,27 @@ import uuid
 from pathlib import Path
 
 import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.clock import FakeClock
-from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair, public_key_fingerprint
+from src.identity_keys.crypto import (
+    b64e,
+    ed25519_sign,
+    generate_ed25519_keypair,
+    public_key_fingerprint,
+)
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session
 from src.identity_keys.errors import NotAuthorized, Revoked
 from src.identity_keys.key_lifecycle import is_key_acceptable
 from src.identity_keys.models import AuditOutbox, Device, KeyVersion, ResourceGrant
 from src.identity_keys.reenroll import ReenrollmentService
-from src.identity_keys.revocation import NodeSyncManager, RevocationReason, RevocationService
+from src.identity_keys.revocation import RevocationReason, RevocationService
 from src.identity_keys.rotation import RotationService
 from src.identity_keys.services import IdentityService
 from src.identity_keys.tokens import ActorContext, TokenAuthority

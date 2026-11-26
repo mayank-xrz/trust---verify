@@ -11,11 +11,10 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import select
 
+from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.clock import FakeClock
@@ -24,8 +23,9 @@ from src.identity_keys.db import create_db_engine, create_session_factory, tx_se
 from src.identity_keys.errors import (
     Conflict,
     IllegalTransition,
+)
+from src.identity_keys.errors import (
     IntegrityError as DomainIntegrityError,
-    Revoked,
 )
 from src.identity_keys.key_lifecycle import (
     EnvelopeEncryptionService,
@@ -33,7 +33,7 @@ from src.identity_keys.key_lifecycle import (
     transition_key,
     unwrap_key_material,
 )
-from src.identity_keys.models import AuditOutbox, KeySet, KeyVersion, Rotation
+from src.identity_keys.models import KeyVersion, Rotation
 from src.identity_keys.rotation import RotationService
 from src.identity_keys.services import AuthzService
 from src.identity_keys.tokens import ActorContext

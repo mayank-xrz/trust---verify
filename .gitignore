@@ -42,4 +42,5 @@ htmlcov/
 # Runtime logs & OS artifacts
 *.log
 /tmp/
+tbv_identity.db
 .DS_Store

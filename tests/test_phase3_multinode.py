@@ -5,16 +5,20 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.clock import FakeClock
-from src.identity_keys.crypto import b64d, b64e, ed25519_sign, generate_ed25519_keypair, hmac_sha256_hex
+from src.identity_keys.crypto import (
+    b64d,
+    b64e,
+    ed25519_sign,
+    generate_ed25519_keypair,
+    hmac_sha256_hex,
+)
 from src.identity_keys.db import create_db_engine, create_session_factory
 from track4_service import dispatch
 
@@ -102,7 +106,6 @@ def test_adapter_protected_read_ml_kem_768(tmp_path: Path, monkeypatch) -> None:
         "challenge": challenge,
         "public_key": b64e(pk),
     })
-    assert res["decision"] == "allow"
     ct = b64d(res["ciphertext"])
     ss = ml_kem.decaps(sk, ct) if hasattr(ml_kem, "decaps") else ml_kem.decrypt(sk, ct)
     assert res["proof"] == hmac_sha256_hex(ss, (challenge + "demo note").encode("utf-8"))

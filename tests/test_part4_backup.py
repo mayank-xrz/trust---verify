@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import json
 import os
 import random
 import struct
@@ -13,10 +12,9 @@ import tarfile
 from pathlib import Path
 
 import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.backup import (
@@ -28,7 +26,6 @@ from src.identity_keys.backup import (
 from src.identity_keys.clock import FakeClock
 from src.identity_keys.crypto import (
     aes_gcm_wrap,
-    b64d,
     b64e,
     canonical_json_bytes,
     ed25519_sign,
@@ -36,9 +33,9 @@ from src.identity_keys.crypto import (
     sha256_hex,
 )
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session
-from src.identity_keys.errors import Conflict, IntegrityError as DomainIntegrityError, StateUnavailable
+from src.identity_keys.errors import Conflict, StateUnavailable
+from src.identity_keys.errors import IntegrityError as DomainIntegrityError
 from src.identity_keys.key_lifecycle import EnvelopeEncryptionService
-from src.identity_keys.models import Device
 from src.identity_keys.revocation import RevocationReason, RevocationService
 from src.identity_keys.rotation import RotationService
 from src.identity_keys.services import IdentityService

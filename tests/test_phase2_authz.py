@@ -6,12 +6,12 @@ import uuid
 from pathlib import Path
 
 import pytest
-pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
-from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from alembic import command
+from scripts.seed_sandbox import seed_database
 from src.audit.verifier import AuditLogVerifier
 from src.identity_keys.api import create_app
 from src.identity_keys.audit_outbox import AuditDispatcher, AuditEmitter
@@ -19,10 +19,14 @@ from src.identity_keys.clock import FakeClock
 from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair
 from src.identity_keys.db import create_db_engine, create_session_factory, tx_session
 from src.identity_keys.errors import Conflict, NotAuthorized, Revoked
-from src.identity_keys.models import AuditOutbox, Device, Resource, ResourceGrant, User
-from src.identity_keys.services import AuthzService, IdentityService, KeyMetadataService, transition_device_status
+from src.identity_keys.models import AuditOutbox, Device, ResourceGrant, User
+from src.identity_keys.services import (
+    AuthzService,
+    IdentityService,
+    KeyMetadataService,
+    transition_device_status,
+)
 from src.identity_keys.tokens import ActorContext, TokenAuthority
-from scripts.seed_sandbox import seed_database
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
