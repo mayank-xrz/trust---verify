@@ -450,7 +450,11 @@ class Session:
         self.transcript = transcript
         self.identity = identity
         self.device = device
-        self.state_path = Path(state_path) if state_path is not None else None
+        if state_path is None:
+            label = canonical({"session_id": transcript["session_id"], "identity": identity, "device": device})
+            filename = hashlib.sha256(label).hexdigest() + ".json"
+            state_path = Path(os.environ.get("TRACK4_STATE_DIR") or tempfile.gettempdir()) / "track4-local" / "sessions" / filename
+        self.state_path = Path(state_path)
         self.epoch = 0
         self.send_counter = 0
         self.recv_counter = 0

@@ -395,6 +395,11 @@ class CryptoTests(unittest.TestCase):
         self.assertEqual(bob.decrypt(p0, ledger), b"first")
         self.assertEqual(bob.decrypt(p1, ledger), b"second")
 
+    def test_session_defaults_to_persistent_state(self):
+        alice, _, _, _, _ = self.sessions()
+        self.assertTrue(alice.state_path.is_file())
+        self.assertEqual(Session.load(alice.state_path).send_counter, 0)
+
     def test_session_counter_rollback_rejected_on_load(self):
         state = Path(self.temp.name) / "rollback.json"
         alice, _, _, _, _ = self.sessions()
