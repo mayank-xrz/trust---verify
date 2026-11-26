@@ -199,7 +199,7 @@ def build_rotation_cutoff_body(
     grace_until: datetime,
     signed_at: datetime,
     key_authority_id: str,
-) -> dict[str, str]:
+) -> dict[str, str | int]:
     """Canonical signed body for a rotation grace cutoff."""
     return {
         "key_set_id": key_set_id,

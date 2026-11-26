@@ -2,35 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Tuple, cast
 
 
 def kem_keygen(mod) -> Tuple[bytes, bytes]:
     if hasattr(mod, "keygen"):
-        return mod.keygen()
-    return mod.generate_keypair()
+        return cast(Tuple[bytes, bytes], mod.keygen())
+    return cast(Tuple[bytes, bytes], mod.generate_keypair())
 
 
 def kem_encaps(mod, public_key: bytes) -> Tuple[bytes, bytes]:
     if hasattr(mod, "encaps"):
-        return mod.encaps(public_key)
-    return mod.encrypt(public_key)
+        return cast(Tuple[bytes, bytes], mod.encaps(public_key))
+    return cast(Tuple[bytes, bytes], mod.encrypt(public_key))
 
 
 def kem_decaps(mod, secret_key: bytes, ciphertext: bytes) -> bytes:
     if hasattr(mod, "decaps"):
-        return mod.decaps(secret_key, ciphertext)
-    return mod.decrypt(secret_key, ciphertext)
+        return cast(bytes, mod.decaps(secret_key, ciphertext))
+    return cast(bytes, mod.decrypt(secret_key, ciphertext))
 
 
 def sig_keygen(mod) -> Tuple[bytes, bytes]:
     if hasattr(mod, "keygen"):
-        return mod.keygen()
-    return mod.generate_keypair()
+        return cast(Tuple[bytes, bytes], mod.keygen())
+    return cast(Tuple[bytes, bytes], mod.generate_keypair())
 
 
 def sig_sign(mod, secret_key: bytes, message: bytes) -> bytes:
-    return mod.sign(secret_key, message)
+    return cast(bytes, mod.sign(secret_key, message))
 
 
 def sig_verify(mod, public_key: bytes, message: bytes, signature: bytes) -> bool:

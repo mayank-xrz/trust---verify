@@ -7,7 +7,6 @@ import dataclasses
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-
 HIGH_RISK_ACTION_KEYWORDS = (
     "DUMP",
     "EXFILTRATE",

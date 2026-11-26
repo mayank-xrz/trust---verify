@@ -188,6 +188,7 @@ def test_envelope_aead_failure_does_not_poison_replay_cache(tmp_path: Path) -> N
 
 def test_token_verify_rejects_future_iat_beyond_clock_skew() -> None:
     from datetime import datetime, timedelta, timezone
+
     from src.identity_keys.clock import FakeClock
     from src.identity_keys.errors import NotAuthorized
     from src.identity_keys.tokens import TokenAuthority

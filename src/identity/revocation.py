@@ -82,6 +82,7 @@ class RevocationCoordinator:
                 sig = signer.sign(payload)
             else:
                 from pqcrypto.sign import ml_dsa_65
+
                 from src.crypto._pqcrypto_compat import sig_sign
 
                 sig = sig_sign(ml_dsa_65, signer, payload)
@@ -112,6 +113,7 @@ class RevocationCoordinator:
         if isinstance(verifier, (bytes, bytearray)):
             try:
                 from pqcrypto.sign import ml_dsa_65
+
                 from src.crypto._pqcrypto_compat import sig_verify
 
                 return bool(sig_verify(ml_dsa_65, bytes(verifier), payload, sig))

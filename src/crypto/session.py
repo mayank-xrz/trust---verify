@@ -79,9 +79,9 @@ class TrustRegistry:
     def __init__(self, state_path=None, max_devices_per_user: int = 1):
         self.state_path = Path(state_path) if state_path is not None else None
         self.max_devices_per_user = max_devices_per_user
-        self._keys = {}
-        self._revoked_devices = set()
-        self._revoked_identities = set()
+        self._keys: dict[tuple[str, str], bytes] = {}
+        self._revoked_devices: set[tuple[str, str]] = set()
+        self._revoked_identities: set[str] = set()
         if self.state_path is not None and self.state_path.exists():
             self._load()
 

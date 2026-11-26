@@ -17,7 +17,7 @@ import json
 import os
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 from pqcrypto.sign import ml_dsa_65
 
@@ -29,7 +29,7 @@ def _sig_keygen():
 
 
 def _sig_sign(secret_key: bytes, message: bytes) -> bytes:
-    return ml_dsa_65.sign(secret_key, message)
+    return cast(bytes, ml_dsa_65.sign(secret_key, message))
 
 
 def _sig_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
@@ -219,6 +219,7 @@ class AuditLogVerifier:
                             details=[err],
                         )
                 if sig_b64:
+                    assert self.public_key is not None
                     try:
                         sig_bytes = base64.b64decode(sig_b64, validate=True)
                     except Exception:

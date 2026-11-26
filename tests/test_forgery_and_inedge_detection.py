@@ -1,6 +1,7 @@
 """Regression tests for whole-state/whole-log forgery and in-edge attacker detection."""
 
 from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -8,10 +9,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 import track4_service
-from src.audit.logger import AuditLogger, GENESIS_HASH
+from src.audit.logger import GENESIS_HASH, AuditLogger
 from src.audit.verifier import AuditLogVerifier
 from src.detector.graph_lateral import LateralMovementGraph
 from src.detector.rules import ContextRuleEngine

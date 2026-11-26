@@ -16,7 +16,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger

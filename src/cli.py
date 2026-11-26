@@ -14,7 +14,7 @@ from typing import List
 from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
-from src.audit.verifier import AuditLogVerifier
+from src.audit.verifier import AuditLogVerifier, _MLDSASigner, _sig_keygen
 from src.crypto.delivery import ChunkReceiver, chunk_and_seal
 from src.crypto.envelope import (
     AEADFailedError,
@@ -275,12 +275,21 @@ def cmd_verify_logs(
             public_key = raw
 
     if path is None:
-        # Verify a freshly generated in-temp log if no path provided
+        # Self-check: create a signed log and verify it with the matching
+        # ephemeral key.  An unsigned log can never satisfy require_signatures.
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "verify.log"
-            logger = AuditLogger("cli-verify", str(log_path))
+            public_key, secret_key = _sig_keygen()
+            logger = AuditLogger(
+                "cli-verify",
+                str(log_path),
+                signer=_MLDSASigner(secret_key),
+                checkpoint_interval=1,
+            )
             logger.log_event("crypto", "verify_check", "cli", "audit_log", status="SUCCESS")
-            res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(str(log_path))
+            res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(
+                str(log_path)
+            )
             print(json.dumps(res.to_dict(), indent=2))
             return 0 if res.is_valid else 1
     res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(path)

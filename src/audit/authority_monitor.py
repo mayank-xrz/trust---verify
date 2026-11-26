@@ -142,7 +142,7 @@ class AuthorityMonitor:
 
     def _save_anchor(self) -> None:
         if Path(self.audit_logger.log_file_path).exists():
-            self.verifier.save_anchor(self.audit_logger.log_file_path, self.anchor_path)
+            self.verifier.save_anchor(self.audit_logger.log_file_path, str(self.anchor_path))
 
     def _log_and_anchor(self, **kwargs: Any) -> Any:
         rec = self.audit_logger.log_event(**kwargs)
@@ -151,7 +151,7 @@ class AuthorityMonitor:
 
     def verify_log_integrity(self) -> Dict[str, Any]:
         """Verify SHA-256 hash chain integrity of the audit log; fail closed on tampering."""
-        anchor = self.anchor_path if self.anchor_path.exists() else None
+        anchor = str(self.anchor_path) if self.anchor_path.exists() else None
         res = self.verifier.verify_file(self.audit_logger.log_file_path, anchor_path=anchor)
         if not res.is_valid:
             raise LogIntegrityError(

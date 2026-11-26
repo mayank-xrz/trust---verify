@@ -8,7 +8,7 @@ import json
 import os
 import secrets
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class WALManager:
@@ -117,6 +117,7 @@ class DeviceReEnrollment:
 
         try:
             from pqcrypto.sign import ml_dsa_65
+
             from src.crypto._pqcrypto_compat import sig_verify
 
             return bool(sig_verify(ml_dsa_65, new_public_key, signed_msg, proof_signature))
