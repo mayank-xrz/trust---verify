@@ -9,6 +9,7 @@ from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 
+from scripts.measure_revocation import run_scenario
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.clock import FakeClock
@@ -89,6 +90,17 @@ def test_three_nodes_status_and_consistent_authorization(tmp_path: Path, monkeyp
         for client in clients.values()
     ]
     assert decisions == [True, True, True]
+
+
+def test_revocation_benchmark_measures_denial_and_sync_on_every_node() -> None:
+    result = run_scenario(name="smoke", m_runs=1, push_sync=True, pull_interval_ms=250, seed=42)
+
+    assert set(result["per_node"]) == {"node-a", "node-b", "node-c"}
+    for per_node, last_node in (("per_node", "overall_last_node"), ("watermark_per_node", "watermark_last_node")):
+        assert all(sample["count"] == 1 for sample in result[per_node].values())
+        assert result[last_node]["max_ms"] == max(
+            sample["max_ms"] for sample in result[per_node].values()
+        )
 
 
 def test_adapter_protected_read_ml_kem_768(tmp_path: Path, monkeypatch) -> None:

@@ -2,28 +2,42 @@
 
 Runs reproducible benchmarks against the cryptographic, identity, and detection layers:
 - ML-KEM & ML-DSA Envelope sign+encrypt and verify+decrypt latency (p50, p95, p99 in ms) and throughput (ops/sec) over 500 iterations
-- Peak memory overhead (MB) using tracemalloc
-- Cross-node revocation propagation latency (ms) from /keys/revoke call to all peer nodes rejecting the key
+- Receipt and authenticated inbox latency through the demo HTTP handlers
+- Peak Python allocations using tracemalloc
+- In-memory revocation coordinator fanout
 - Explainable detection engine evaluation throughput
 - Outputs a clean Markdown summary table and saves benchmark_results.json
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import secrets
 import sys
+import tempfile
 import time
 import tracemalloc
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any, Dict, List
+
+from fastapi.testclient import TestClient
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from demo.node.crypto_provider import MLDSASignature, MLKEMKeyExchange, SecureMessaging  # noqa: E402
+from demo.node.crypto_provider import (  # noqa: E402
+    MLDSASignature,
+    MLKEMKeyExchange,
+    SecureMessaging,
+)
+from demo.node.server import create_app  # noqa: E402
 from src.detector.rules import ContextRuleEngine  # noqa: E402
 from src.identity.revocation import RevocationCoordinator  # noqa: E402
+from src.identity_keys.metrics import summarize_latencies_ms  # noqa: E402
 
 
 def percentile(data: List[float], p: float) -> float:
@@ -130,6 +144,52 @@ def benchmark_kem_operations(iterations: int = 100) -> Dict[str, Any]:
     }
 
 
+def benchmark_http_delivery(iterations: int = 300, warmup: int = 30) -> Dict[str, Any]:
+    """Time send, durable receipt and authenticated inbox read in one local workflow."""
+    if iterations < 1 or warmup < 0:
+        raise ValueError("Iterations must be positive and warmup must be nonnegative")
+    peer_token = secrets.token_urlsafe(32)
+    recipient_token = secrets.token_urlsafe(32)
+    enrollment = {"Authorization": f"Bearer {peer_token}"}
+    recipient = {"Authorization": f"Bearer {recipient_token}"}
+    samples = []
+
+    with ExitStack() as stack:
+        state = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="tbv-http-bench-")))
+        sender = stack.enter_context(TestClient(create_app(
+            node_id="node-a", data_dir=str(state / "sender"), peer_enroll_token=peer_token,
+        )))
+        receiver = stack.enter_context(TestClient(create_app(
+            node_id="node-b", data_dir=str(state / "receiver"), peer_enroll_token=peer_token,
+            recipient_token=recipient_token,
+        )))
+        for local, remote in ((sender, receiver), (receiver, sender)):
+            bundle = remote.get("/keys/public").raise_for_status().json()
+            local.post("/peers", json=bundle, headers=enrollment).raise_for_status()
+
+        for i in range(warmup + iterations):
+            payload = {"sample": i}
+            start = time.perf_counter_ns()
+            envelope = sender.post(
+                "/send", json={"recipient_id": "node-b", "payload": payload}
+            ).raise_for_status().json()["envelope"]
+            receipt = receiver.post("/receive", json=envelope).raise_for_status().json()
+            delivered = receiver.get(
+                f"/inbox/{receipt['receipt_id']}", headers=recipient
+            ).raise_for_status().json()
+            elapsed = (time.perf_counter_ns() - start) / 1e6
+            if "payload" in receipt or delivered["payload"] != payload:
+                raise RuntimeError("Protected HTTP delivery failed its verification check")
+            if i >= warmup:
+                samples.append(elapsed)
+
+    return {
+        **summarize_latencies_ms(samples),
+        "warmup": warmup,
+        "throughput_ops_sec": round(iterations * 1000 / sum(samples), 1),
+    }
+
+
 def benchmark_sig_operations(iterations: int = 100) -> Dict[str, Any]:
     """Measures ML-DSA-65 digital signature and verification latency."""
     sig = MLDSASignature()
@@ -159,13 +219,13 @@ def benchmark_sig_operations(iterations: int = 100) -> Dict[str, Any]:
 
 
 def benchmark_revocation_propagation(iterations: int = 50) -> Dict[str, Any]:
-    """Measures cross-node revocation propagation latency from creation to rejection on all peer nodes."""
+    """Time in-memory coordinator fanout. For API enforcement use measure_revocation.py."""
     signer = MLDSASignature()
     pub, priv = signer.generate_keypair()
     cluster_nodes = ["node-a", "node-b", "node-c"]
     latencies: List[float] = []
 
-    print(f"▶ Running cross-node revocation propagation benchmark ({iterations} iterations)...")
+    print(f"▶ Running in-memory revocation coordinator fanout ({iterations} iterations)...")
     for i in range(iterations):
         authority = RevocationCoordinator("key-authority")
         peer_nodes = [RevocationCoordinator(nid) for nid in cluster_nodes]
@@ -242,9 +302,10 @@ def measure_peak_memory_mb() -> Dict[str, float]:
     bob = SecureMessaging("node-b")
 
     # Run multi-node envelope operations
+    shared_key = secrets.token_bytes(32)
     for _ in range(200):
-        envelope = alice.pack_envelope("node-a", "node-b", b"MEMORY_BENCHMARK_PAYLOAD", b"K" * 32, sig)
-        bob.unpack_envelope(envelope, b"K" * 32, sig, sig._public_key)
+        envelope = alice.pack_envelope("node-a", "node-b", b"MEMORY_BENCHMARK_PAYLOAD", shared_key, sig)
+        bob.unpack_envelope(envelope, shared_key, sig, sig._public_key)
 
     current_b, peak_b = tracemalloc.get_traced_memory()
     tracemalloc.stop()
@@ -261,6 +322,7 @@ def measure_peak_memory_mb() -> Dict[str, float]:
 def print_markdown_table(results: Dict[str, Any]):
     """Prints a clean, judge-ready Markdown summary table."""
     env = results["envelope"]
+    http = results["http_delivery"]
     kem = results["kem"]
     sig = results["sig"]
     rev = results["revocation"]
@@ -274,23 +336,28 @@ def print_markdown_table(results: Dict[str, Any]):
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Envelope Sign + Encrypt** | ML-DSA sign + AES-256-GCM (500 ops) | {env['sign_encrypt']['p50_ms']} ms | {env['sign_encrypt']['p95_ms']} ms | {env['sign_encrypt']['p99_ms']} ms | - | - |
 | **Envelope Verify + Decrypt** | ML-DSA verify + AES-256-GCM (500 ops) | {env['verify_decrypt']['p50_ms']} ms | {env['verify_decrypt']['p95_ms']} ms | {env['verify_decrypt']['p99_ms']} ms | - | - |
-| **Envelope End-to-End** | Full roundtrip message transfer | {env['roundtrip']['p50_ms']} ms | {env['roundtrip']['p95_ms']} ms | {env['roundtrip']['p99_ms']} ms | **{env['roundtrip']['throughput_ops_sec']} ops/sec** | - |
+| **Envelope Round Trip** | In-process cryptographic operations | {env['roundtrip']['p50_ms']} ms | {env['roundtrip']['p95_ms']} ms | {env['roundtrip']['p99_ms']} ms | **{env['roundtrip']['throughput_ops_sec']} ops/sec** | - |
+| **HTTP Delivery** | TestClient send, durable receipt and authenticated inbox | {http['median_ms']} ms | {http['p95_ms']} ms | {http['p99_ms']} ms | **{http['throughput_ops_sec']} ops/sec** | - |
 | **PQC Key Exchange** | ML-KEM-768 Ephemeral Exchange | {kem['p50_ms']} ms | {kem['p95_ms']} ms | {kem['p99_ms']} ms | {kem['throughput_ops_sec']} ops/sec | - |
 | **PQC Digital Signature** | ML-DSA-65 Sign & Verify | {sig['p50_ms']} ms | {sig['p95_ms']} ms | {sig['p99_ms']} ms | {sig['throughput_ops_sec']} ops/sec | - |
-| **Revocation Broadcast** | Cross-node propagation to 3 peers | {rev['p50_ms']} ms | {rev['p95_ms']} ms | {rev['p99_ms']} ms | (Mean: {rev['mean_ms']} ms) | - |
+| **Revocation Coordinator** | In-memory fanout to 3 peers | {rev['p50_ms']} ms | {rev['p95_ms']} ms | {rev['p99_ms']} ms | (Mean: {rev['mean_ms']} ms) | - |
 | **Detection Rule Engine** | Deterministic Context Evaluation | - | - | - | **{det['throughput_events_sec']:,} events/sec** | {det['latency_per_event_us']} µs/eval |
-| **Memory Footprint** | Active cluster memory overhead | - | - | - | - | **{mem['peak_mb']} MB ({mem['peak_kb']} KB)** |
+| **Python Allocations** | Peak tracemalloc overhead in the envelope loop | - | - | - | - | **{mem['peak_mb']} MB ({mem['peak_kb']} KB)** |
 """
     print(md_table)
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=Path(REPO_ROOT) / "benchmark_results.json")
+    args = parser.parse_args()
     print("=" * 70)
     print("🚀 TRUST-BUT-VERIFY PERFORMANCE & OVERHEAD BENCHMARK (P4-14)")
     print("=" * 70)
 
     # 1. Envelope operations over 500 iterations
     envelope_res = benchmark_envelope_operations(iterations=500)
+    http_res = benchmark_http_delivery()
 
     # 2. Key exchange & digital signature
     kem_res = benchmark_kem_operations(iterations=50)
@@ -308,6 +375,7 @@ def main():
     results = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "envelope": envelope_res,
+        "http_delivery": http_res,
         "kem": kem_res,
         "sig": sig_res,
         "revocation": rev_res,
@@ -319,11 +387,9 @@ def main():
     print_markdown_table(results)
 
     # Save to benchmark_results.json
-    output_path = os.path.join(REPO_ROOT, "benchmark_results.json")
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
+    args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
 
-    print(f"💾 Benchmark results saved to: {output_path}")
+    print(f"💾 Benchmark results saved to: {args.output}")
     print("=" * 70)
 
 

@@ -54,6 +54,9 @@ ENVELOPE_SCHEMA = _load_schema("envelope.schema.json")
 KEY_STATE_SCHEMA = _load_schema("key_state.schema.json")
 AUDIT_EVENT_SCHEMA = _load_schema("audit_event.schema.json")
 
+ENVELOPE_VALIDATOR = jsonschema.validators.validator_for(ENVELOPE_SCHEMA)(ENVELOPE_SCHEMA)
+ENVELOPE_VALIDATOR.check_schema(ENVELOPE_SCHEMA)
+
 
 # Request/Response Models
 class EnrollRequest(BaseModel):
@@ -125,7 +128,7 @@ def _schema_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
         sig_alg=suite["sig"],
         kem_alg=suite["kem"],
     )
-    jsonschema.validate(instance=result, schema=ENVELOPE_SCHEMA)
+    ENVELOPE_VALIDATOR.validate(result)
     return result
 
 

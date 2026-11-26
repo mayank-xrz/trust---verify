@@ -144,7 +144,11 @@ Time to alert here is the detector's processing time on in-memory events, not en
 
 ## Performance
 
-`make bench` (`scripts/benchmark.py`) measures envelope sign+encrypt and verify+decrypt latency (p50, p95, p99), ML-KEM and ML-DSA operations, revocation propagation to the nodes and rule-engine throughput. Results depend on the machine; run it to get your own numbers. Reference output from the authors' machine is in `reports/` and `prototypes/person_a/benchmark-results.json`.
+`make bench` measures cryptographic operation latency and the protected HTTP workflow from send through durable receipt to authenticated inbox read. It also reports detector throughput and Python allocation overhead.
+
+On macOS arm64 with Python 3.15.2 and the pinned dependencies, reusing the envelope schema validator lowered the median HTTP delivery time from **8.24 ms to 5.52 ms** and increased serial throughput from **111.6 to 159.7 deliveries/s**. These are medians from three local in-process runs per configuration, each with 30 warmup messages and 300 measured deliveries. The standalone crypto-only benchmark measured **3.49 ms p50** across 500 envelopes.
+
+Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
 
 ## Documentation
 

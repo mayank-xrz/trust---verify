@@ -1,4 +1,4 @@
-"""Coordinator-clock revocation propagation latency benchmark across 3 nodes."""
+"""Measure API denial and sync convergence after an authoritative device revocation."""
 
 from __future__ import annotations
 
@@ -6,16 +6,21 @@ import argparse
 import concurrent.futures
 import json
 import os
+import secrets
 import sys
 import tempfile
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
-
-from alembic.config import Config
-from fastapi.testclient import TestClient
+from unittest.mock import patch
+from urllib.parse import urlsplit
 
 from alembic import command
+from alembic.config import Config
+from fastapi.testclient import TestClient
+from sqlalchemy import event
+from sqlalchemy.orm import Session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -23,141 +28,179 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.seed_sandbox import seed_database  # noqa: E402
 from src.identity_keys.api import create_app  # noqa: E402
-from src.identity_keys.clock import SystemClock  # noqa: E402
 from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair  # noqa: E402
 from src.identity_keys.db import create_db_engine, create_session_factory  # noqa: E402
 from src.identity_keys.metrics import summarize_latencies_ms  # noqa: E402
-from src.identity_keys.revocation import RevocationReason  # noqa: E402
+from src.identity_keys.models import Revocation  # noqa: E402
+
+NODE_IDS = ("node-a", "node-b", "node-c")
+PROBE_INTERVAL_SECONDS = 0.005
+PROBE_TIMEOUT_SECONDS = 5.0
+
+
+def _enroll_and_authenticate(
+    client: TestClient, user_id: str, label: str, admin_headers: dict[str, str],
+) -> tuple[str, str]:
+    pub, priv = generate_ed25519_keypair()
+    start = client.post(
+        "/api/v1/enroll/start", params={"user_id": user_id}, headers=admin_headers
+    ).raise_for_status().json()
+    device = client.post(
+        "/api/v1/enroll",
+        headers=admin_headers,
+        json={
+            "enrollment_id": start["enrollment_id"],
+            "nonce": start["nonce"],
+            "label": label,
+            "public_key_b64": b64e(pub),
+            "proof_of_possession_b64": b64e(ed25519_sign(priv, start["nonce"].encode())),
+        },
+    ).raise_for_status().json()
+    device_id = device["device_id"]
+    challenge = client.post(
+        "/api/v1/auth/challenge", params={"device_id": device_id}
+    ).raise_for_status().json()["challenge"]
+    result = client.post(
+        "/api/v1/auth/verify",
+        json={
+            "device_id": device_id,
+            "challenge": challenge,
+            "signature_b64": b64e(ed25519_sign(priv, challenge.encode())),
+        },
+    ).raise_for_status().json()
+    return device_id, result["access_token"]
+
+
+def _authorize(client: TestClient, token: str) -> dict[str, Any]:
+    return client.post(
+        "/api/v1/authorize",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"resource_id": "brief-alpha", "permission": "resource:read"},
+    ).raise_for_status().json()
 
 
 def _probe_node(
-    client: TestClient,
-    token: str,
-    *,
-    poll_interval_s: float = 0.005,
-    pull_before_probe: bool = False,
-    pull_interval_s: float = 0.0,
-) -> int:
-    """Poll node until it denies with DEVICE_REVOKED and return coordinator monotonic_ns."""
-    last_pull = time.monotonic_ns()
-    while True:
-        now_ns = time.monotonic_ns()
-        if pull_before_probe and (now_ns - last_pull) >= int(pull_interval_s * 1_000_000_000):
-            client.app.state.sync_mgr.pull_revocations()
-            last_pull = now_ns
-        resp = client.post(
-            "/api/v1/authorize",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"resource_id": "brief-alpha", "permission": "resource:read"},
-        ).json()
-        if resp["allowed"] is False and resp["reason_code"] in ("DEVICE_REVOKED", "REVOKED"):
-            return time.monotonic_ns()
-        time.sleep(poll_interval_s)
+    client: TestClient, token: str, committed: concurrent.futures.Future[tuple[int, int]],
+) -> tuple[float, float, int]:
+    commit_ns, commit_seq = committed.result(timeout=PROBE_TIMEOUT_SECONDS)
+    deadline = time.monotonic() + PROBE_TIMEOUT_SECONDS
+    denied_ns = synced_ns = None
+    other_denials = 0
+    while time.monotonic() < deadline:
+        if denied_ns is None:
+            decision = _authorize(client, token)
+            if not decision["allowed"]:
+                if decision["reason_code"] == "DEVICE_REVOKED":
+                    denied_ns = time.monotonic_ns()
+                else:
+                    other_denials += 1
+        if synced_ns is None:
+            sync = client.get("/node/sync-status").raise_for_status().json()
+            if sync["watermark"] >= commit_seq and sync["db_reachable"] and not sync["stale"]:
+                synced_ns = time.monotonic_ns()
+        if denied_ns is not None and synced_ns is not None:
+            return (denied_ns - commit_ns) / 1e6, (synced_ns - commit_ns) / 1e6, other_denials
+        time.sleep(PROBE_INTERVAL_SECONDS)
+    raise TimeoutError("Node did not report both DEVICE_REVOKED and a converged watermark")
 
 
 def run_scenario(
-    *,
-    name: str,
-    m_runs: int,
-    push_sync: bool,
-    pull_interval_ms: int,
-    seed: int,
+    *, name: str, m_runs: int, push_sync: bool, pull_interval_ms: int, seed: int,
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix=f"rev-bench-{name}-") as tmp:
+    if m_runs < 1 or pull_interval_ms < 1:
+        raise ValueError("Runs and pull interval must be positive")
+    admin_enroll_token = secrets.token_urlsafe(32)
+    _, signing_seed = generate_ed25519_keypair()
+    environment = {
+        "ADMIN_ENROLL_TOKEN": admin_enroll_token,
+        "TOKEN_SIGNING_SEED_B64": b64e(signing_seed),
+        "CLUSTER_SYNC_SECRET": secrets.token_urlsafe(32),
+        "HEARTBEAT_INTERVAL_MS": str(pull_interval_ms),
+    }
+    with ExitStack() as stack:
+        stack.enter_context(patch.dict(os.environ, environment))
+        tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix=f"rev-bench-{name}-"))
         db_url = f"sqlite+pysqlite:///{Path(tmp) / 'bench.db'}"
         cfg = Config(str(REPO_ROOT / "alembic.ini"))
         cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
         cfg.set_main_option("sqlalchemy.url", db_url)
         command.upgrade(cfg, "head")
+        engine = create_db_engine(db_url)
+        stack.callback(engine.dispose)
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA journal_mode=WAL")
+        users = seed_database(create_session_factory(engine), seed=seed)
 
-        sf = create_session_factory(create_db_engine(db_url))
-        users = seed_database(sf, seed=seed)
-        _, seed_priv = generate_ed25519_keypair()
-        os.environ["TOKEN_SIGNING_SEED_B64"] = b64e(seed_priv)
-        os.environ["CLUSTER_SYNC_SECRET"] = "bench-sync-secret"
+        clients = {}
+        for node_id in NODE_IDS:
+            app = create_app(node_id=node_id, database_url=db_url)
+            stack.callback(app.state.engine.dispose)
+            clients[node_id] = stack.enter_context(TestClient(app))
+        primary = clients["node-a"]
+        revocation_svc = primary.app.state.revocation_svc
+        # Route the production signed push through the peers' HTTP handlers in-process.
+        if push_sync:
+            revocation_svc.peer_urls = {node: f"http://{node}" for node in NODE_IDS[1:]}
 
-        clock = SystemClock()
-        clients = {
-            nid: TestClient(create_app(node_id=nid, database_url=db_url, clock=clock))
-            for nid in ("node-a", "node-b", "node-c")
-        }
-        for c in clients.values():
-            c.app.state.sync_mgr.pull_revocations()
+        def deliver_hint(url: str, *, json: dict[str, Any], timeout: float):
+            target = urlsplit(url)
+            return clients[target.hostname].post(target.path, json=json).raise_for_status()
 
-        per_node: dict[str, list[float]] = {nid: [] for nid in clients}
-        overall_max: list[float] = []
+        stack.enter_context(patch("src.identity_keys.revocation.httpx.post", side_effect=deliver_hint))
+        commit_signals: dict[str, concurrent.futures.Future[tuple[int, int]]] = {}
+
+        def before_commit(session: Session) -> None:
+            for row in session.new:
+                if isinstance(row, Revocation) and row.target_id in commit_signals:
+                    session.info["benchmark_revocation"] = (row.target_id, row.commit_seq)
+                    break
+
+        def after_commit(session: Session) -> None:
+            marker = session.info.pop("benchmark_revocation", None)
+            if marker is not None:
+                target, seq = marker
+                commit_signals[target].set_result((time.monotonic_ns(), seq))
+
+        for name_of_event, listener in (("before_commit", before_commit), ("after_commit", after_commit)):
+            event.listen(revocation_svc.session_factory, name_of_event, listener)
+            stack.callback(event.remove, revocation_svc.session_factory, name_of_event, listener)
+
+        admin_headers = {"X-Admin-Enroll-Token": admin_enroll_token}
+        _, operator_token = _enroll_and_authenticate(primary, users["carol"], "benchmark-operator", admin_headers)
+        denial_samples: dict[str, list[float]] = {node: [] for node in clients}
+        sync_samples: dict[str, list[float]] = {node: [] for node in clients}
+        last_denial, last_sync = [], []
+        other_denials = 0
+        pool = stack.enter_context(concurrent.futures.ThreadPoolExecutor(max_workers=len(clients)))
 
         for i in range(m_runs):
-            pub, priv = generate_ed25519_keypair()
-            st = clients["node-a"].post(f"/api/v1/enroll/start?user_id={users['alice']}").json()
-            pop = ed25519_sign(priv, st["nonce"].encode())
-            dev = (
-                clients["node-a"]
-                .post(
-                    "/api/v1/enroll",
-                    json={
-                        "enrollment_id": st["enrollment_id"],
-                        "nonce": st["nonce"],
-                        "label": f"bench-dev-{i}",
-                        "public_key_b64": b64e(pub),
-                        "proof_of_possession_b64": b64e(pop),
-                    },
-                )
-                .json()
-            )
-            ch = (
-                clients["node-a"]
-                .post(f"/api/v1/auth/challenge?device_id={dev['device_id']}")
-                .json()
-            )
-            sig = ed25519_sign(priv, ch["challenge"].encode())
-            tok = (
-                clients["node-a"]
-                .post(
-                    "/api/v1/auth/verify",
-                    json={
-                        "device_id": dev["device_id"],
-                        "challenge": ch["challenge"],
-                        "signature_b64": b64e(sig),
-                    },
-                )
-                .json()["access_token"]
-            )
+            device_id, token = _enroll_and_authenticate(primary, users["alice"], f"benchmark-{i}", admin_headers)
+            for node_id, client in clients.items():
+                decision = _authorize(client, token)
+                if not decision["allowed"]:
+                    raise RuntimeError(f"{node_id} failed the baseline access check: {decision['reason_code']}")
 
-            admin_ctx = clients["node-a"].app.state.token_authority.verify(tok)
-            _ = admin_ctx
-            rev_svc = clients["node-a"].app.state.revocation_svc
-            from src.identity_keys.tokens import ActorContext
-
-            rev_svc.revoke_device(
-                ActorContext(users["carol"], "carol-dev", "jti-bench"),
-                dev["device_id"],
-                RevocationReason.DEVICE_LOST,
-                push_sync=push_sync,
-            )
-            t_commit = time.monotonic_ns()
-            if push_sync:
-                for c in clients.values():
-                    c.app.state.sync_mgr.pull_revocations()
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-                futs = {
-                    nid: pool.submit(
-                        _probe_node,
-                        c,
-                        tok,
-                        poll_interval_s=0.005,
-                        pull_before_probe=not push_sync,
-                        pull_interval_s=pull_interval_ms / 1000.0,
-                    )
-                    for nid, c in clients.items()
-                }
-                t_enf = {nid: fut.result() for nid, fut in futs.items()}
-
-            latencies = {nid: max(0.0, (t_enf[nid] - t_commit) / 1_000_000.0) for nid in clients}
-            for nid, ms in latencies.items():
-                per_node[nid].append(ms)
-            overall_max.append(max(latencies.values()))
+            committed: concurrent.futures.Future[tuple[int, int]] = concurrent.futures.Future()
+            commit_signals[device_id] = committed
+            probes = {node: pool.submit(_probe_node, client, token, committed) for node, client in clients.items()}
+            try:
+                primary.post(
+                    "/revocations/device",
+                    headers={"Authorization": f"Bearer {operator_token}"},
+                    json={"device_id": device_id, "reason_code": "DEVICE_LOST"},
+                ).raise_for_status()
+            except Exception as exc:
+                if not committed.done():
+                    committed.set_exception(exc)
+                raise
+            observed = {node: result.result() for node, result in probes.items()}
+            del commit_signals[device_id]
+            for node, (denied_ms, sync_ms, other) in observed.items():
+                denial_samples[node].append(denied_ms)
+                sync_samples[node].append(sync_ms)
+                other_denials += other
+            last_denial.append(max(values[0] for values in observed.values()))
+            last_sync.append(max(values[1] for values in observed.values()))
 
         return {
             "scenario": name,
@@ -165,61 +208,61 @@ def run_scenario(
             "seed": seed,
             "push_sync": push_sync,
             "pull_interval_ms": pull_interval_ms,
-            "per_node": {nid: summarize_latencies_ms(vals) for nid, vals in per_node.items()},
-            "overall_last_node": summarize_latencies_ms(overall_max),
+            "other_denials_excluded": other_denials,
+            "per_node": {node: summarize_latencies_ms(vals) for node, vals in denial_samples.items()},
+            "overall_last_node": summarize_latencies_ms(last_denial),
+            "watermark_per_node": {node: summarize_latencies_ms(vals) for node, vals in sync_samples.items()},
+            "watermark_last_node": summarize_latencies_ms(last_sync),
         }
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Measure cross-node revocation latency.")
-    parser.add_argument("--ci", action="store_true", help="Run CI mode (M=20)")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ci", action="store_true", help="Run 20 iterations per scenario")
     parser.add_argument("--m", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "reports")
     args = parser.parse_args()
     m_runs = args.m if args.m is not None else (20 if args.ci else 100)
+    if m_runs < 1:
+        parser.error("--m must be positive")
 
     results = [
-        run_scenario(
-            name="push_plus_pull",
-            m_runs=m_runs,
-            push_sync=True,
-            pull_interval_ms=250,
-            seed=args.seed,
-        ),
-        run_scenario(
-            name="pull_only_250ms",
-            m_runs=m_runs,
-            push_sync=False,
-            pull_interval_ms=250,
-            seed=args.seed,
-        ),
+        run_scenario(name=name, m_runs=m_runs, push_sync=push, pull_interval_ms=250, seed=args.seed)
+        for name, push in (("push_plus_pull", True), ("pull_only_250ms", False))
     ]
-
-    reports_dir = REPO_ROOT / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    (reports_dir / "revocation_latency.json").write_text(
-        json.dumps(results, indent=2), encoding="utf-8"
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "revocation_latency.json").write_text(
+        json.dumps(results, indent=2) + "\n", encoding="utf-8"
     )
 
     lines = [
         "# Revocation Propagation Latency Report",
         "",
-        "- **Measurement method:** Single-coordinator `time.monotonic_ns()` "
-        "(`t_enforced[node] - t_commit`) with 5 ms parallel probe loop across 3 nodes.",
-        f"- **Seed:** `{args.seed}` | **M:** `{m_runs}` per scenario | "
-        "**Limits:** Single-host `TestClient` + SQLite, includes 5 ms probe granularity.",
+        "Measured from SQLAlchemy's successful commit callback to the last of three nodes returning",
+        "`DEVICE_REVOKED` or reporting a converged watermark. Each node must allow the same device",
+        "and resource before the measured revocation. Each node waits 5 ms between probe cycles.",
         "",
-        "| Scenario | Push | Pull (ms) | Min (ms) | Median (ms) | P95 (ms) | P99 (ms) | Max (ms) |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        f"Seed **{args.seed}**, **{m_runs}** trials per scenario. Single-host TestClient with shared SQLite",
+        "in WAL mode. In push mode, node-a sends signed HTTP hints in-process to node-b and node-c.",
+        "All nodes run a 250 ms heartbeat in both scenarios. Authorization reads the shared",
+        "database, so a node can deny a revoked device before its sync watermark catches up.",
+        "Timings include request handling and probe delay.",
+        "",
+        "| Scenario | Last denial p50 | Last denial p95 | Last denial max | Last sync p50 | Last sync p95 | Excluded denials |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for r in results:
-        o = r["overall_last_node"]
+    for result in results:
+        denial = result["overall_last_node"]
+        watermark = result["watermark_last_node"]
         lines.append(
-            f"| {r['scenario']} | {r['push_sync']} | {r['pull_interval_ms']} | "
-            f"{o['min_ms']} | {o['median_ms']} | {o['p95_ms']} | {o['p99_ms']} | {o['max_ms']} |"
+            f"| {result['scenario']} | {denial['median_ms']} ms | {denial['p95_ms']} ms | "
+            f"{denial['max_ms']} ms | {watermark['median_ms']} ms | {watermark['p95_ms']} ms | "
+            f"{result['other_denials_excluded']} |"
         )
-    (reports_dir / "revocation_latency.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    print("\n".join(lines))
+    report = "\n".join(lines) + "\n"
+    (args.output_dir / "revocation_latency.md").write_text(report, encoding="utf-8")
+    print(report, end="")
 
 
 if __name__ == "__main__":

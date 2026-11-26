@@ -5,39 +5,74 @@
     "seed": 42,
     "push_sync": true,
     "pull_interval_ms": 250,
+    "other_denials_excluded": 0,
     "per_node": {
       "node-a": {
         "count": 20,
-        "min_ms": 4.699,
-        "median_ms": 6.706,
-        "p95_ms": 14.565,
-        "p99_ms": 15.284,
-        "max_ms": 15.464
+        "min_ms": 5.085,
+        "median_ms": 8.591,
+        "p95_ms": 11.617,
+        "p99_ms": 11.792,
+        "max_ms": 11.836
       },
       "node-b": {
         "count": 20,
-        "min_ms": 4.867,
-        "median_ms": 7.544,
-        "p95_ms": 14.063,
-        "p99_ms": 15.329,
-        "max_ms": 15.645
+        "min_ms": 4.734,
+        "median_ms": 8.663,
+        "p95_ms": 10.266,
+        "p99_ms": 11.11,
+        "max_ms": 11.321
       },
       "node-c": {
         "count": 20,
-        "min_ms": 6.33,
-        "median_ms": 9.534,
-        "p95_ms": 16.675,
-        "p99_ms": 16.811,
-        "max_ms": 16.845
+        "min_ms": 5.387,
+        "median_ms": 8.535,
+        "p95_ms": 11.883,
+        "p99_ms": 12.951,
+        "max_ms": 13.219
       }
     },
     "overall_last_node": {
       "count": 20,
-      "min_ms": 7.732,
-      "median_ms": 10.801,
-      "p95_ms": 16.675,
-      "p99_ms": 16.811,
-      "max_ms": 16.845
+      "min_ms": 6.771,
+      "median_ms": 10.158,
+      "p95_ms": 11.905,
+      "p99_ms": 12.956,
+      "max_ms": 13.219
+    },
+    "watermark_per_node": {
+      "node-a": {
+        "count": 20,
+        "min_ms": 224.438,
+        "median_ms": 234.657,
+        "p95_ms": 244.836,
+        "p99_ms": 247.93,
+        "max_ms": 248.704
+      },
+      "node-b": {
+        "count": 20,
+        "min_ms": 6.66,
+        "median_ms": 10.947,
+        "p95_ms": 12.34,
+        "p99_ms": 13.141,
+        "max_ms": 13.341
+      },
+      "node-c": {
+        "count": 20,
+        "min_ms": 7.503,
+        "median_ms": 10.874,
+        "p95_ms": 13.23,
+        "p99_ms": 13.831,
+        "max_ms": 13.981
+      }
+    },
+    "watermark_last_node": {
+      "count": 20,
+      "min_ms": 224.438,
+      "median_ms": 234.657,
+      "p95_ms": 244.836,
+      "p99_ms": 247.93,
+      "max_ms": 248.704
     }
   },
   {
@@ -46,39 +81,74 @@
     "seed": 42,
     "push_sync": false,
     "pull_interval_ms": 250,
+    "other_denials_excluded": 0,
     "per_node": {
       "node-a": {
         "count": 20,
-        "min_ms": 3.31,
-        "median_ms": 5.584,
-        "p95_ms": 14.506,
-        "p99_ms": 23.48,
-        "max_ms": 25.724
+        "min_ms": 3.859,
+        "median_ms": 5.244,
+        "p95_ms": 8.219,
+        "p99_ms": 8.472,
+        "max_ms": 8.535
       },
       "node-b": {
         "count": 20,
-        "min_ms": 3.449,
-        "median_ms": 5.555,
-        "p95_ms": 14.27,
-        "p99_ms": 21.648,
-        "max_ms": 23.492
+        "min_ms": 3.685,
+        "median_ms": 5.397,
+        "p95_ms": 6.6,
+        "p99_ms": 7.128,
+        "max_ms": 7.261
       },
       "node-c": {
         "count": 20,
-        "min_ms": 3.07,
-        "median_ms": 7.468,
-        "p95_ms": 14.246,
-        "p99_ms": 21.969,
-        "max_ms": 23.9
+        "min_ms": 3.758,
+        "median_ms": 5.648,
+        "p95_ms": 7.858,
+        "p99_ms": 8.769,
+        "max_ms": 8.996
       }
     },
     "overall_last_node": {
       "count": 20,
-      "min_ms": 6.631,
-      "median_ms": 8.796,
-      "p95_ms": 14.506,
-      "p99_ms": 23.48,
-      "max_ms": 25.724
+      "min_ms": 5.051,
+      "median_ms": 6.232,
+      "p95_ms": 8.558,
+      "p99_ms": 8.909,
+      "max_ms": 8.996
+    },
+    "watermark_per_node": {
+      "node-a": {
+        "count": 20,
+        "min_ms": 194.566,
+        "median_ms": 209.937,
+        "p95_ms": 217.526,
+        "p99_ms": 217.962,
+        "max_ms": 218.072
+      },
+      "node-b": {
+        "count": 20,
+        "min_ms": 225.967,
+        "median_ms": 238.035,
+        "p95_ms": 244.535,
+        "p99_ms": 244.872,
+        "max_ms": 244.956
+      },
+      "node-c": {
+        "count": 20,
+        "min_ms": 227.303,
+        "median_ms": 240.456,
+        "p95_ms": 243.486,
+        "p99_ms": 244.614,
+        "max_ms": 244.896
+      }
+    },
+    "watermark_last_node": {
+      "count": 20,
+      "min_ms": 232.311,
+      "median_ms": 241.092,
+      "p95_ms": 244.899,
+      "p99_ms": 244.945,
+      "max_ms": 244.956
     }
   }
 ]

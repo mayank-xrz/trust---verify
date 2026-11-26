@@ -1,9 +1,16 @@
 # Revocation Propagation Latency Report
 
-- **Measurement method:** Single-coordinator `time.monotonic_ns()` (`t_enforced[node] - t_commit`) with 5 ms parallel probe loop across `node-a`, `node-b`, `node-c`.
-- **Seed:** `42` | **M:** `20` per scenario | **Limits:** Single-host `TestClient` + SQLite, includes 5 ms probe granularity.
+Measured from SQLAlchemy's successful commit callback to the last of three nodes returning
+`DEVICE_REVOKED` or reporting a converged watermark. Each node must allow the same device
+and resource before the measured revocation. Each node waits 5 ms between probe cycles.
 
-| Scenario | Push | Pull Interval (ms) | Overall Min (ms) | Median (ms) | P95 (ms) | P99 (ms) | Max (ms) |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| push_plus_pull | True | 250 | 7.732 | 10.801 | 16.675 | 16.811 | 16.845 |
-| pull_only_250ms | False | 250 | 6.631 | 8.796 | 14.506 | 23.48 | 25.724 |
+Seed **42**, **20** trials per scenario. Single-host TestClient with shared SQLite
+in WAL mode. In push mode, node-a sends signed HTTP hints in-process to node-b and node-c.
+All nodes run a 250 ms heartbeat in both scenarios. Authorization reads the shared
+database, so a node can deny a revoked device before its sync watermark catches up.
+Timings include request handling and probe delay.
+
+| Scenario | Last denial p50 | Last denial p95 | Last denial max | Last sync p50 | Last sync p95 | Excluded denials |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| push_plus_pull | 10.158 ms | 11.905 ms | 13.219 ms | 234.657 ms | 244.836 ms | 0 |
+| pull_only_250ms | 6.232 ms | 8.558 ms | 8.996 ms | 241.092 ms | 244.899 ms | 0 |
