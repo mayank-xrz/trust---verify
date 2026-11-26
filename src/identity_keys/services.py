@@ -1,4 +1,4 @@
-"""Service layer for identity enrollment, verification, fail-closed authorization, and key metadata."""
+"""Service layer for enrollment, verification, fail-closed authz, and key metadata."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NoReturn
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -16,6 +16,7 @@ from .clock import Clock
 from .crypto import b64d, ed25519_verify, public_key_fingerprint
 from .db import tx_session
 from .errors import Conflict, IllegalTransition, NotAuthorized, NotFound, Revoked, StateUnavailable
+from .key_lifecycle import is_key_acceptable
 from .models import (
     AuthChallenge,
     Device,
@@ -43,7 +44,9 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
 
-def transition_device_status(device: Device, new_status: str, now: datetime, reason: str | None = None) -> None:
+def transition_device_status(
+    device: Device, new_status: str, now: datetime, reason: str | None = None
+) -> None:
     """Single legal state-transition function for Device rows."""
     allowed_map = {
         "pending": {"enrolled", "revoked"},
@@ -119,7 +122,7 @@ class IdentityService:
             if not enrollment:
                 raise NotFound("Enrollment not found")
 
-            def _reject(exc: Exception, reason_code: str) -> None:
+            def _reject(exc: Exception, reason_code: str) -> NoReturn:
                 self.emitter.emit(
                     session,
                     actor_id=enrollment.user_id,
@@ -134,7 +137,10 @@ class IdentityService:
                 raise exc
 
             if enrollment.status != "pending" or enrollment.nonce != nonce:
-                _reject(NotAuthorized("Enrollment nonce invalid or already used", "NONCE_REPLAYED"), "NONCE_REPLAYED")
+                _reject(
+                    NotAuthorized("Enrollment nonce invalid or already used", "NONCE_REPLAYED"),
+                    "NONCE_REPLAYED",
+                )
             if now >= _as_utc(enrollment.expires_at):
                 _reject(NotAuthorized("Enrollment nonce expired", "NONCE_EXPIRED"), "NONCE_EXPIRED")
 
@@ -145,7 +151,10 @@ class IdentityService:
             pub_bytes = b64d(public_key_b64)
             sig_bytes = b64d(proof_of_possession_b64)
             if not ed25519_verify(pub_bytes, nonce.encode("utf-8"), sig_bytes):
-                _reject(NotAuthorized("Invalid proof-of-possession signature", "INVALID_POP"), "INVALID_POP")
+                _reject(
+                    NotAuthorized("Invalid proof-of-possession signature", "INVALID_POP"),
+                    "INVALID_POP",
+                )
 
             fp = public_key_fingerprint(pub_bytes)
             existing = session.execute(
@@ -154,10 +163,15 @@ class IdentityService:
             if existing is not None:
                 if existing.status == "revoked":
                     _reject(
-                        Revoked("Public key fingerprint belongs to a revoked device", "REVOKED_KEY_REUSE"),
+                        Revoked(
+                            "Public key fingerprint belongs to a revoked device",
+                            "REVOKED_KEY_REUSE",
+                        ),
                         "REVOKED_KEY_REUSE",
                     )
-                _reject(Conflict("Duplicate public key", "DUPLICATE_PUBLIC_KEY"), "DUPLICATE_PUBLIC_KEY")
+                _reject(
+                    Conflict("Duplicate public key", "DUPLICATE_PUBLIC_KEY"), "DUPLICATE_PUBLIC_KEY"
+                )
 
             device_id = str(uuid.uuid4())
             device = Device(
@@ -214,11 +228,44 @@ class IdentityService:
             return {"challenge_id": challenge_id, "challenge": challenge}
 
     def verify_identity(
-        self, *, device_id: str, challenge: str, signature_b64: str
+        self,
+        *,
+        device_id: str,
+        challenge: str,
+        signature_b64: str,
+        key_version_id: str | None = None,
     ) -> dict[str, Any]:
-        """Verify device challenge signature, active user & enrolled device; issue bearer token."""
+        """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
         with tx_session(self.session_factory) as session:
+            if key_version_id is not None:
+                kv = session.get(KeyVersion, key_version_id)
+                if kv is None:
+                    raise NotAuthorized("Unknown auth key version", reason_code="KEY_RETIRED")
+                ok, k_reason = is_key_acceptable(kv, now, purpose="auth")
+                if not ok:
+                    self.emitter.emit(
+                        session,
+                        actor_id="system",
+                        device_id=device_id,
+                        action="key.rejected_after_cutoff",
+                        target=key_version_id,
+                        outcome="deny",
+                        reason_code=k_reason,
+                    )
+                    session.commit()
+                    raise NotAuthorized(f"Auth key rejected: {k_reason}", reason_code=k_reason)
+                if k_reason == "KEY_GRACE_VALID":
+                    self.emitter.emit(
+                        session,
+                        actor_id="system",
+                        device_id=device_id,
+                        action="key.grace_used",
+                        target=key_version_id,
+                        outcome="allow",
+                        reason_code=k_reason,
+                    )
+
             ch = session.execute(
                 select(AuthChallenge).where(
                     AuthChallenge.device_id == device_id,
@@ -265,7 +312,7 @@ class AuthzService:
         clock: Clock,
         emitter: AuditEmitter,
         node_id: str,
-        max_cache_staleness_ms: int = 5000,
+        max_cache_staleness_ms: int = 500,
     ) -> None:
         self.session_factory = session_factory
         self.clock = clock
@@ -280,17 +327,58 @@ class AuthzService:
         resource_id: str,
         permission: str,
         *,
+        key_version_id: str | None = None,
         correlation_id: str | None = None,
     ) -> AuthzDecision:
-        """Evaluate user, device, role permissions, ownership/grants, and key state. Fail closed."""
+        """Evaluate user, device, auth key state, role perms, and grants. Fail closed."""
         decision_id = str(uuid.uuid4())
+        now = self.clock.now()
         try:
             with tx_session(self.session_factory) as session:
+                if key_version_id is not None:
+                    kv = session.get(KeyVersion, key_version_id)
+                    if kv is None:
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.rejected_after_cutoff",
+                            target=key_version_id,
+                            outcome="deny",
+                            reason_code="KEY_RETIRED",
+                            correlation_id=correlation_id,
+                        )
+                        return AuthzDecision(False, "KEY_RETIRED", key_version_id, decision_id)
+                    ok, k_reason = is_key_acceptable(kv, now, purpose="auth")
+                    if not ok:
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.rejected_after_cutoff",
+                            target=key_version_id,
+                            outcome="deny",
+                            reason_code=k_reason,
+                            correlation_id=correlation_id,
+                        )
+                        return AuthzDecision(False, k_reason, key_version_id, decision_id)
+                    if k_reason == "KEY_GRACE_VALID":
+                        self.emitter.emit(
+                            session,
+                            actor_id=actor_context.user_id,
+                            device_id=actor_context.device_id,
+                            action="key.grace_used",
+                            target=key_version_id,
+                            outcome="allow",
+                            reason_code=k_reason,
+                            correlation_id=correlation_id,
+                        )
+
                 user = session.get(User, actor_context.user_id)
                 device = session.get(Device, actor_context.device_id)
                 resource = session.get(Resource, resource_id)
 
-                allowed, reason_code, key_version_id = self._evaluate(
+                allowed, reason_code, res_kv_id = self._evaluate(
                     session, user, device, resource, actor_context, permission
                 )
                 self._last_authoritative_mono_ns = self.clock.monotonic_ns()
@@ -308,7 +396,7 @@ class AuthzService:
                 return AuthzDecision(
                     allowed=allowed,
                     reason_code=reason_code,
-                    key_version_id=key_version_id,
+                    key_version_id=key_version_id or res_kv_id,
                     decision_id=decision_id,
                 )
         except Exception:
@@ -387,16 +475,25 @@ class KeyMetadataService:
             with tx_session(self.session_factory) as session:
                 req_user = session.get(User, requester.user_id)
                 req_dev = session.get(Device, requester.device_id)
-                if not req_user or req_user.status != "active" or not req_dev or req_dev.status != "enrolled":
+                if (
+                    not req_user
+                    or req_user.status != "active"
+                    or not req_dev
+                    or req_dev.status != "enrolled"
+                ):
                     raise NotAuthorized("Requester is not active/enrolled")
 
                 # Only self or admin role can query target user's device public keys
                 is_admin = (
                     session.execute(
                         select(Permission.name)
-                        .join(RolePermission, RolePermission.permission_id == Permission.permission_id)
+                        .join(
+                            RolePermission, RolePermission.permission_id == Permission.permission_id
+                        )
                         .join(UserRole, UserRole.role_id == RolePermission.role_id)
-                        .where(UserRole.user_id == requester.user_id, Permission.name == "key:rotate")
+                        .where(
+                            UserRole.user_id == requester.user_id, Permission.name == "key:rotate"
+                        )
                     ).first()
                     is not None
                 )

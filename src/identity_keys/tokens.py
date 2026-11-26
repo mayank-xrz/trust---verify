@@ -41,8 +41,10 @@ class TokenAuthority:
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
             from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-            pub = Ed25519PrivateKey.from_private_bytes(priv).public_key().public_bytes(
-                Encoding.Raw, PublicFormat.Raw
+            pub = (
+                Ed25519PrivateKey.from_private_bytes(priv)
+                .public_key()
+                .public_bytes(Encoding.Raw, PublicFormat.Raw)
             )
             self._pub, self._priv = pub, priv
         else:

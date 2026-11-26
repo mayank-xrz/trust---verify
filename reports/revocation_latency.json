@@ -1,0 +1,84 @@
+[
+  {
+    "scenario": "push_plus_pull",
+    "m_runs": 20,
+    "seed": 42,
+    "push_sync": true,
+    "pull_interval_ms": 250,
+    "per_node": {
+      "node-a": {
+        "count": 20,
+        "min_ms": 4.699,
+        "median_ms": 6.706,
+        "p95_ms": 14.565,
+        "p99_ms": 15.284,
+        "max_ms": 15.464
+      },
+      "node-b": {
+        "count": 20,
+        "min_ms": 4.867,
+        "median_ms": 7.544,
+        "p95_ms": 14.063,
+        "p99_ms": 15.329,
+        "max_ms": 15.645
+      },
+      "node-c": {
+        "count": 20,
+        "min_ms": 6.33,
+        "median_ms": 9.534,
+        "p95_ms": 16.675,
+        "p99_ms": 16.811,
+        "max_ms": 16.845
+      }
+    },
+    "overall_last_node": {
+      "count": 20,
+      "min_ms": 7.732,
+      "median_ms": 10.801,
+      "p95_ms": 16.675,
+      "p99_ms": 16.811,
+      "max_ms": 16.845
+    }
+  },
+  {
+    "scenario": "pull_only_250ms",
+    "m_runs": 20,
+    "seed": 42,
+    "push_sync": false,
+    "pull_interval_ms": 250,
+    "per_node": {
+      "node-a": {
+        "count": 20,
+        "min_ms": 3.31,
+        "median_ms": 5.584,
+        "p95_ms": 14.506,
+        "p99_ms": 23.48,
+        "max_ms": 25.724
+      },
+      "node-b": {
+        "count": 20,
+        "min_ms": 3.449,
+        "median_ms": 5.555,
+        "p95_ms": 14.27,
+        "p99_ms": 21.648,
+        "max_ms": 23.492
+      },
+      "node-c": {
+        "count": 20,
+        "min_ms": 3.07,
+        "median_ms": 7.468,
+        "p95_ms": 14.246,
+        "p99_ms": 21.969,
+        "max_ms": 23.9
+      }
+    },
+    "overall_last_node": {
+      "count": 20,
+      "min_ms": 6.631,
+      "median_ms": 8.796,
+      "p95_ms": 14.506,
+      "p99_ms": 23.48,
+      "max_ms": 25.724
+    }
+  }
+]

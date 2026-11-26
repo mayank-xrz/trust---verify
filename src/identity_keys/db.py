@@ -27,6 +27,7 @@ def create_db_engine(database_url: str | None = None) -> Engine:
     engine = create_engine(url, future=True, pool_pre_ping=True, connect_args=connect_args)
 
     if url.startswith("sqlite"):
+
         @event.listens_for(engine, "connect")
         def _set_sqlite_pragma(dbapi_conn, _connection_record) -> None:
             cursor = dbapi_conn.cursor()
