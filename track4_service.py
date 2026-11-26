@@ -10,8 +10,11 @@ import sys
 import tempfile
 import time
 
-from src.crypto import aead
-from src.crypto.primitives import CryptoError, b64, canonical, hkdf, unb64
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+from src.crypto.primitives import CryptoError, b64, canonical, unb64
 from src.crypto.protected_read import protected_read
 from src.crypto.session import TrustRegistry, PrekeyStore
 from src.crypto.protected_read import MAX_CHALLENGE_LENGTH
@@ -20,8 +23,20 @@ GENESIS_HASH = "0" * 64
 
 
 def state_dir():
-    root = Path(os.environ.get("TRACK4_STATE_DIR") or tempfile.gettempdir()) / "track4-local"
-    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    env_dir = os.environ.get("TRACK4_STATE_DIR")
+    if env_dir:
+        root = Path(env_dir) / "track4-local"
+    else:
+        root = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
+    if root.exists():
+        if root.is_symlink() or not root.is_dir():
+            raise CryptoError("unsafe state directory")
+        st = root.lstat()
+        if st.st_uid != os.getuid():
+            raise CryptoError("state directory ownership mismatch")
+        os.chmod(root, 0o700)
+    else:
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
     return root
 
 
@@ -64,7 +79,7 @@ def save(path, state):
 def _derive_storage_key(key_material):
     ikm = key_material.encode("utf-8") if isinstance(key_material, str) and key_material else secrets.token_bytes(32)
     salt = secrets.token_bytes(16)
-    return hkdf(ikm, salt, b"track4/v1/state-at-rest", length=32)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"track4/v1/state-at-rest").derive(ikm)
 
 
 def _load_storage_key(root):
@@ -79,8 +94,8 @@ def _encrypt_contents(storage_key, contents):
     for asset_id, body in contents.items():
         nonce = secrets.token_bytes(12)
         aad = canonical({"asset": asset_id})
-        ct, tag = aead.encrypt(storage_key, nonce, aad, body.encode("utf-8"))
-        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ct), "tag": b64(tag)}
+        ct_and_tag = AESGCM(storage_key).encrypt(nonce, body.encode("utf-8"), aad)
+        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ct_and_tag[:-16]), "tag": b64(ct_and_tag[-16:])}
     return encrypted
 
 
@@ -88,13 +103,14 @@ def _decrypt_asset(storage_key, asset_id, entry):
     if isinstance(entry, str):
         return entry
     aad = canonical({"asset": asset_id})
-    plaintext = aead.decrypt(
-        storage_key,
-        unb64(entry["nonce"], 12),
-        aad,
-        unb64(entry["ciphertext"]),
-        unb64(entry["tag"], 16),
-    )
+    try:
+        plaintext = AESGCM(storage_key).decrypt(
+            unb64(entry["nonce"], 12),
+            unb64(entry["ciphertext"]) + unb64(entry["tag"], 16),
+            aad,
+        )
+    except Exception as exc:
+        raise CryptoError("AEAD authentication failed") from exc
     return plaintext.decode("utf-8")
 
 
@@ -134,8 +150,10 @@ def verify_chain(audit_log):
 
 
 def _lookup_read_decision(audit_log, request_id):
+    if not isinstance(request_id, str) or not request_id:
+        return None
     for entry in reversed(audit_log):
-        if entry.get("op") == "read" and entry.get("request_id") == request_id:
+        if entry.get("op") in ("read", "protected_read") and entry.get("request_id") == request_id:
             return entry.get("decision", "deny")
     return None
 
@@ -216,8 +234,11 @@ def dispatch(request):
                     return {"decision": "deny"}
                 storage_key = _load_storage_key(root)
                 return {"decision": "allow", "body": _decrypt_asset(storage_key, asset, state["contents"][asset])}
+            req_id = request.get("request_id")
+            if req_id is not None and (not isinstance(req_id, str) or not req_id):
+                raise ValueError("invalid request id")
             challenge = request.get("challenge")
-            context = canonical({"actor": actor, "asset": asset, "request_id": request.get("request_id")})
+            context = canonical({"actor": actor, "asset": asset, "request_id": req_id})
             valid_challenge = isinstance(challenge, str) and 0 < len(challenge) <= MAX_CHALLENGE_LENGTH
             challenge_hash = hashlib.sha256(context + b"\x00" + challenge.encode("utf-8")).hexdigest() if valid_challenge else None
             used = state.setdefault("used_challenges", {})

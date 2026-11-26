@@ -26,6 +26,8 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
+from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_sign, sig_verify
+
 
 class HandshakeError(Exception):
     """Raised when handshake verification or key exchange fails."""
@@ -84,7 +86,7 @@ class EphemeralHandshakeSession:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
-        mlkem_pub, mlkem_priv = ml_kem_768.keygen()
+        mlkem_pub, mlkem_priv = kem_keygen(ml_kem_768)
         self._mlkem_pub_bytes = mlkem_pub
         self._mlkem_priv = bytearray(mlkem_priv)
 
@@ -96,7 +98,7 @@ class EphemeralHandshakeSession:
             "mlkem_pub": base64.b64encode(self._mlkem_pub_bytes).decode("ascii"),
         }
         canonical_hello = json.dumps(hello, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        sig = ml_dsa_65.sign(self._signing_secret_key, b"track4/v1/hello\x00" + canonical_hello)
+        sig = sig_sign(ml_dsa_65, self._signing_secret_key, b"track4/v1/hello\x00" + canonical_hello)
         hello["signature"] = base64.b64encode(sig).decode("ascii")
         return hello
 
@@ -109,14 +111,8 @@ class EphemeralHandshakeSession:
         hello_unsigned = {k: v for k, v in responder_hello.items() if k != "signature"}
         canonical_hello = json.dumps(hello_unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
         sig_bytes = base64.b64decode(responder_hello["signature"], validate=True)
-        try:
-            res = ml_dsa_65.verify(responder_signing_public_key, b"track4/v1/hello\x00" + canonical_hello, sig_bytes)
-            if res is False:
-                raise HandshakeError("Responder hello ML-DSA-65 signature invalid")
-        except HandshakeError:
-            raise
-        except Exception as exc:
-            raise HandshakeError("Responder hello ML-DSA-65 signature invalid") from exc
+        if not sig_verify(ml_dsa_65, responder_signing_public_key, b"track4/v1/hello\x00" + canonical_hello, sig_bytes):
+            raise HandshakeError("Responder hello ML-DSA-65 signature invalid")
 
         resp_x25519_pub = X25519PublicKey.from_public_bytes(
             base64.b64decode(hello_unsigned["x25519_pub"], validate=True)
@@ -128,7 +124,7 @@ class EphemeralHandshakeSession:
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw,
         )
-        mlkem_ct, mlkem_ss = ml_kem_768.encaps(resp_mlkem_pub)
+        mlkem_ct, mlkem_ss = kem_encaps(ml_kem_768, resp_mlkem_pub)
         x25519_ss = eph_x25519_priv.exchange(resp_x25519_pub)
 
         transcript = {
@@ -156,7 +152,8 @@ class EphemeralHandshakeSession:
             del eph_x25519_priv
             self._wipe_ephemerals()
 
-        init_sig = ml_dsa_65.sign(
+        init_sig = sig_sign(
+            ml_dsa_65,
             self._signing_secret_key,
             b"track4/v1/transcript\x00" + transcript_hash_bytes,
         )
@@ -189,20 +186,14 @@ class EphemeralHandshakeSession:
         transcript_hash_bytes = hashlib.sha256(transcript_bytes).digest()
         sig_bytes = base64.b64decode(init_msg["signature"], validate=True)
 
-        try:
-            res = ml_dsa_65.verify(
-                initiator_signing_public_key,
-                b"track4/v1/transcript\x00" + transcript_hash_bytes,
-                sig_bytes,
-            )
-            if res is False:
-                self._wipe_ephemerals()
-                raise HandshakeError("Initiator transcript ML-DSA-65 signature invalid")
-        except HandshakeError:
-            raise
-        except Exception as exc:
+        if not sig_verify(
+            ml_dsa_65,
+            initiator_signing_public_key,
+            b"track4/v1/transcript\x00" + transcript_hash_bytes,
+            sig_bytes,
+        ):
             self._wipe_ephemerals()
-            raise HandshakeError("Initiator transcript ML-DSA-65 signature invalid") from exc
+            raise HandshakeError("Initiator transcript ML-DSA-65 signature invalid")
 
         init_x25519_pub = X25519PublicKey.from_public_bytes(
             base64.b64decode(transcript["init_x25519_pub"], validate=True)
@@ -210,7 +201,7 @@ class EphemeralHandshakeSession:
         mlkem_ct = base64.b64decode(transcript["mlkem_ct"], validate=True)
 
         x25519_ss = self._x25519_priv.exchange(init_x25519_pub)
-        mlkem_ss = ml_kem_768.decaps(bytes(self._mlkem_priv), mlkem_ct)
+        mlkem_ss = kem_decaps(ml_kem_768, bytes(self._mlkem_priv), mlkem_ct)
 
         ikm = bytearray(transcript_hash_bytes + x25519_ss + mlkem_ss)
         try:

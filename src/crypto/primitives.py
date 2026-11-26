@@ -6,9 +6,14 @@ import json
 from pathlib import Path
 import subprocess
 
+import shutil
+
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
+from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_keygen, sig_sign, sig_verify
 from .node_bridge import call_node
 
 SUITE = "ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1"
@@ -40,7 +45,7 @@ def unb64(value, size=None):
 
 def kem_keypair():
     try:
-        return ml_kem_768.generate_keypair()
+        return kem_keygen(ml_kem_768)
     except Exception as exc:
         raise CryptoError("ML-KEM key generation failed") from exc
 
@@ -49,7 +54,7 @@ def encapsulate(public_key):
     if not isinstance(public_key, bytes) or len(public_key) != ml_kem_768.PUBLIC_KEY_SIZE:
         raise CryptoError("invalid ML-KEM public key length")
     try:
-        return ml_kem_768.encrypt(public_key)
+        return kem_encaps(ml_kem_768, public_key)
     except Exception as exc:
         raise CryptoError("ML-KEM encapsulation failed") from exc
 
@@ -60,14 +65,14 @@ def decapsulate(secret_key, ciphertext):
     if not isinstance(ciphertext, bytes) or len(ciphertext) != ml_kem_768.CIPHERTEXT_SIZE:
         raise CryptoError("invalid ML-KEM ciphertext length")
     try:
-        return ml_kem_768.decrypt(secret_key, ciphertext)
+        return kem_decaps(ml_kem_768, secret_key, ciphertext)
     except Exception as exc:
         raise CryptoError("ML-KEM decapsulation failed") from exc
 
 
 def signing_keypair():
     try:
-        return ml_dsa_65.generate_keypair()
+        return sig_keygen(ml_dsa_65)
     except Exception as exc:
         raise CryptoError("ML-DSA key generation failed") from exc
 
@@ -78,7 +83,7 @@ def sign(secret_key, domain, transcript):
     if not isinstance(domain, str) or not domain.startswith("track4/v1/"):
         raise CryptoError("invalid signature domain")
     try:
-        return ml_dsa_65.sign(secret_key, domain.encode("ascii") + b"\x00" + canonical(transcript))
+        return sig_sign(ml_dsa_65, secret_key, domain.encode("ascii") + b"\x00" + canonical(transcript))
     except Exception as exc:
         raise CryptoError("ML-DSA signing failed") from exc
 
@@ -90,11 +95,7 @@ def verify(public_key, domain, transcript, signature):
         raise CryptoError("invalid ML-DSA signature length")
     if not isinstance(domain, str) or not domain.startswith("track4/v1/"):
         raise CryptoError("invalid signature domain")
-    try:
-        valid = ml_dsa_65.verify(public_key, domain.encode("ascii") + b"\x00" + canonical(transcript), signature)
-    except Exception as exc:
-        raise CryptoError("signature verification failed") from exc
-    if not valid:
+    if not sig_verify(ml_dsa_65, public_key, domain.encode("ascii") + b"\x00" + canonical(transcript), signature):
         raise CryptoError("signature verification failed")
 
 
@@ -103,9 +104,11 @@ def hkdf(secret, salt, info, length=32):
         raise CryptoError("invalid KDF input")
     if not 1 <= length <= 255 * 32:
         raise CryptoError("invalid KDF length")
-    request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
-    result = call_node(request, CryptoError)
-    return unb64(result["data"], length)
+    if shutil.which("node"):
+        request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
+        result = call_node(request, CryptoError)
+        return unb64(result["data"], length)
+    return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(secret)
 
 
 def digest(value):

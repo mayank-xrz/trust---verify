@@ -18,6 +18,14 @@ from typing import Any, Dict, Optional, Set, Tuple
 try:
     from pqcrypto.kem import ml_kem_768
     from pqcrypto.sign import ml_dsa_65
+    from src.crypto._pqcrypto_compat import (
+        kem_decaps,
+        kem_encaps,
+        kem_keygen,
+        sig_keygen,
+        sig_sign,
+        sig_verify,
+    )
     PQCRYPTO_AVAILABLE = True
 except ImportError:
     PQCRYPTO_AVAILABLE = False
@@ -69,9 +77,11 @@ class MLKEMKeyExchange:
     ALGORITHM = "ML-KEM-768"
     FALLBACK_ALGORITHM = "MOCK-KEM-768"
 
-    def __init__(self, algorithm: str = ALGORITHM, use_fallback: bool = not PQCRYPTO_AVAILABLE):
-        self.use_fallback = use_fallback or not PQCRYPTO_AVAILABLE
-        self.algorithm = self.FALLBACK_ALGORITHM if self.use_fallback else algorithm
+    def __init__(self, algorithm: str = ALGORITHM, use_fallback: bool = False):
+        if use_fallback or not PQCRYPTO_AVAILABLE:
+            raise RuntimeError("pqcrypto ML-KEM-768 is required; classical fallback is disabled")
+        self.use_fallback = False
+        self.algorithm = algorithm
         self._private_key: Optional[bytes] = None
         self._public_key: Optional[bytes] = None
 
@@ -80,44 +90,20 @@ class MLKEMKeyExchange:
         return self.algorithm
 
     def generate_keypair(self) -> Tuple[bytes, bytes]:
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            pub, priv = ml_kem_768.generate_keypair()
-            self._public_key, self._private_key = pub, priv
-            return pub, priv
-
-        priv_int = secrets.randbelow(_MODP_P - 2) + 2
-        pub_int = pow(_MODP_G, priv_int, _MODP_P)
-        priv, pub = priv_int.to_bytes(256, "big"), pub_int.to_bytes(256, "big")
+        pub, priv = kem_keygen(ml_kem_768)
         self._public_key, self._private_key = pub, priv
         return pub, priv
 
     def encapsulate(self, peer_public_key: bytes) -> Tuple[bytes, bytes]:
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            ct, ss = ml_kem_768.encrypt(peer_public_key)
-            return ct, ss[:32]
-
-        peer_pub_int = int.from_bytes(peer_public_key, "big")
-        eph_priv_int = secrets.randbelow(_MODP_P - 2) + 2
-        eph_pub_int = pow(_MODP_G, eph_priv_int, _MODP_P)
-        shared_point = pow(peer_pub_int, eph_priv_int, _MODP_P)
-        ct = eph_pub_int.to_bytes(256, "big")
-        ss = hashlib.sha3_256(b"TBV-KEM-SHARED-SECRET:" + shared_point.to_bytes(256, "big")).digest()
-        return ct, ss
+        ct, ss = kem_encaps(ml_kem_768, peer_public_key)
+        return ct, ss[:32]
 
     def decapsulate(self, ciphertext: bytes, private_key: Optional[bytes] = None) -> bytes:
         priv = private_key or self._private_key
         if priv is None:
             raise ValueError("No private key available for decapsulation.")
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            ss = ml_kem_768.decrypt(priv, ciphertext)
-            return ss[:32]
-
-        if len(ciphertext) != 256:
-            raise ValueError(f"Invalid KEM ciphertext length: expected 256 bytes, got {len(ciphertext)}")
-        priv_int = int.from_bytes(priv, "big")
-        eph_pub_int = int.from_bytes(ciphertext, "big")
-        shared_point = pow(eph_pub_int, priv_int, _MODP_P)
-        return hashlib.sha3_256(b"TBV-KEM-SHARED-SECRET:" + shared_point.to_bytes(256, "big")).digest()
+        ss = kem_decaps(ml_kem_768, priv, ciphertext)
+        return ss[:32]
 
     def wipe_keys(self) -> None:
         self._private_key = None
@@ -130,9 +116,11 @@ class MLDSASignature:
     ALGORITHM = "ML-DSA-65"
     FALLBACK_ALGORITHM = "SCHNORR-MODP-2048"
 
-    def __init__(self, algorithm: str = ALGORITHM, use_fallback: bool = not PQCRYPTO_AVAILABLE):
-        self.use_fallback = use_fallback or not PQCRYPTO_AVAILABLE
-        self.algorithm = self.FALLBACK_ALGORITHM if self.use_fallback else algorithm
+    def __init__(self, algorithm: str = ALGORITHM, use_fallback: bool = False):
+        if use_fallback or not PQCRYPTO_AVAILABLE:
+            raise RuntimeError("pqcrypto ML-DSA-65 is required; classical fallback is disabled")
+        self.use_fallback = False
+        self.algorithm = algorithm
         self._private_key: Optional[bytes] = None
         self._public_key: Optional[bytes] = None
 
@@ -141,14 +129,7 @@ class MLDSASignature:
         return self.algorithm
 
     def generate_keypair(self) -> Tuple[bytes, bytes]:
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            pub, priv = ml_dsa_65.generate_keypair()
-            self._public_key, self._private_key = pub, priv
-            return pub, priv
-
-        x = secrets.randbelow(_MODP_Q - 2) + 1
-        y = pow(_MODP_G, x, _MODP_P)
-        priv, pub = x.to_bytes(256, "big"), y.to_bytes(256, "big")
+        pub, priv = sig_keygen(ml_dsa_65)
         self._public_key, self._private_key = pub, priv
         return pub, priv
 
@@ -156,38 +137,10 @@ class MLDSASignature:
         priv = private_key or self._private_key
         if priv is None:
             raise ValueError("No private key available for signing.")
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            return ml_dsa_65.sign(priv, message)
-
-        x = int.from_bytes(priv, "big")
-        y = pow(_MODP_G, x, _MODP_P)
-        k = secrets.randbelow(_MODP_Q - 2) + 1
-        r = pow(_MODP_G, k, _MODP_P)
-        h = hashlib.sha256(r.to_bytes(256, "big") + y.to_bytes(256, "big") + message).digest()
-        e = int.from_bytes(h, "big") % _MODP_Q
-        s = (k - x * e) % _MODP_Q
-        return e.to_bytes(32, "big") + s.to_bytes(256, "big")
+        return sig_sign(ml_dsa_65, priv, message)
 
     def verify(self, message: bytes, signature: bytes, public_key: bytes) -> bool:
-        if not self.use_fallback and PQCRYPTO_AVAILABLE:
-            try:
-                return bool(ml_dsa_65.verify(public_key, message, signature))
-            except Exception:
-                return False
-
-        if len(signature) != 288 or len(public_key) != 256:
-            return False
-        try:
-            e = int.from_bytes(signature[:32], "big")
-            s = int.from_bytes(signature[32:], "big")
-            y = int.from_bytes(public_key, "big")
-            if not (1 <= y < _MODP_P):
-                return False
-            r_v = (pow(_MODP_G, s, _MODP_P) * pow(y, e, _MODP_P)) % _MODP_P
-            h_v = hashlib.sha256(r_v.to_bytes(256, "big") + y.to_bytes(256, "big") + message).digest()
-            return (int.from_bytes(h_v, "big") % _MODP_Q) == e
-        except Exception:
-            return False
+        return sig_verify(ml_dsa_65, public_key, message, signature)
 
 
 class _FallbackAEAD:

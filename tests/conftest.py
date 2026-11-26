@@ -12,15 +12,16 @@ import pytest
 from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
+from src.crypto._pqcrypto_compat import sig_keygen
 
 
 @pytest.fixture
 def runtime_identities() -> Dict[str, tuple[bytes, bytes]]:
     """Generate fresh ML-DSA-65 identity keypairs at runtime."""
     return {
-        "alice": ml_dsa_65.keygen(),
-        "bob": ml_dsa_65.keygen(),
-        "mallory": ml_dsa_65.keygen(),
+        "alice": sig_keygen(ml_dsa_65),
+        "bob": sig_keygen(ml_dsa_65),
+        "mallory": sig_keygen(ml_dsa_65),
     }
 
 

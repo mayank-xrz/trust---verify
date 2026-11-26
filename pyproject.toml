@@ -14,3 +14,4 @@ files = ["src/identity_keys", "track4_service.py", "scripts/seed_sandbox.py", "s
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["tests"]

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+pytest.importorskip("src.identity_keys.db", reason="src.identity_keys removed in upstream c1f170e")
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text

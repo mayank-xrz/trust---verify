@@ -28,6 +28,7 @@ from .replay_cache import PersistentReplayCache
 
 
 DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0
+DEFAULT_MAX_ACTIVE_MESSAGES = 64
 
 
 class DeliveryError(Exception):
@@ -110,6 +111,7 @@ class ChunkReceiver:
         replay_cache: Optional[PersistentReplayCache] = None,
         audit_logger: Optional[AuditLogger] = None,
         timeout_seconds: float = DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+        max_active_messages: int = DEFAULT_MAX_ACTIVE_MESSAGES,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.local_identity = local_identity
@@ -117,6 +119,7 @@ class ChunkReceiver:
         self.replay_cache = replay_cache
         self.audit_logger = audit_logger
         self.timeout_seconds = timeout_seconds
+        self.max_active_messages = max_active_messages
         self.clock = clock
         self._buffers: Dict[str, Dict[str, Any]] = {}
         self.failure_reports: List[Dict[str, Any]] = []
@@ -156,6 +159,30 @@ class ChunkReceiver:
 
         buf = self._buffers.get(msg_id)
         if buf is None:
+            if len(self._buffers) >= self.max_active_messages:
+                oldest_mid = min(self._buffers, key=lambda k: self._buffers[k]["created_at"])
+                evicted = self._buffers.pop(oldest_mid)
+                missing = sorted(set(range(evicted["chunk_count"])) - set(evicted["chunks"].keys()))
+                emit_crypto_event(
+                    self.audit_logger,
+                    actor=evicted["sender_identity"],
+                    source_service=evicted["sender_identity"],
+                    target_service=f"{self.local_identity}/{self.local_device}",
+                    action="delivery_failed_incomplete",
+                    outcome="failed",
+                    session_id=evicted["session_id"],
+                    message_id=oldest_mid,
+                    reason="buffer_capacity_evicted",
+                    extra={"missing_chunks": ",".join(str(x) for x in missing)},
+                )
+                self._record_failure(
+                    {
+                        "action": "delivery_failed_incomplete",
+                        "message_id": oldest_mid,
+                        "missing_chunks": missing,
+                        "reason": "buffer_capacity_evicted",
+                    }
+                )
             buf = {
                 "created_at": self.clock(),
                 "sender_identity": sender_id,
