@@ -1,0 +1,7 @@
+# Development and CI tooling. Install with:
+#   python -m pip install -r requirements-dev.txt
+# Runtime dependencies are pulled in through requirements.txt.
+-r requirements.txt
+
+ruff==0.17.6
+mypy==2.4.1

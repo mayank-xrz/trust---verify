@@ -1,0 +1,75 @@
+name: CI Gates
+
+on:
+  push:
+    branches: [main, "fix/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: Gates (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.11"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+      - name: Ruff
+        run: python -m ruff check .
+
+      - name: Mypy
+        run: python -m mypy
+
+      - name: Verify audit log CLI
+        run: python -m src.cli verify-logs
+
+      - name: Pytest (repository root scope)
+        run: python -m pytest . -q
+
+      - name: Demo smoke test
+        if: runner.os == 'Linux'
+        env:
+          PYTHON: python
+        run: make demo
+
+  compose-config:
+    name: Compose config (syntax + required secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml with generated secrets
+        run: |
+          set -euo pipefail
+          export POSTGRES_PASSWORD="$(openssl rand -hex 16)"
+          export WRAP_MASTER_KEY_B64="$(openssl rand -base64 32 | tr -d '\n')"
+          export TOKEN_SIGNING_SEED_B64="$(openssl rand -base64 32 | tr -d '\n')"
+          export CLUSTER_SYNC_SECRET="$(openssl rand -hex 32)"
+          export ADMIN_ENROLL_TOKEN="$(openssl rand -hex 16)"
+          export DEMO_CLUSTER_KEY_B64="$(openssl rand -base64 32 | tr -d '\n')"
+          docker compose config > /dev/null
+          echo "compose config OK"

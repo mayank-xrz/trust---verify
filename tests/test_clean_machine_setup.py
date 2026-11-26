@@ -10,6 +10,7 @@ def test_makefile_setup_creates_venv_and_targets_use_it() -> None:
     assert "PYTHON ?= .venv/bin/python" in makefile
     assert "-m venv $(VENV)" in makefile
     assert "install -r requirements.txt" in makefile
+    assert "install -r requirements-dev.txt" in makefile
     assert "core.hooksPath .githooks" in makefile
     for target in ("test:", "gates:", "bench:", "demo:"):
         assert target in makefile

@@ -28,6 +28,7 @@ setup:
 	fi
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
+	$(PIP) install -r requirements-dev.txt
 	git config core.hooksPath .githooks
 	@echo "Setup complete. Run 'make test' or 'make demo'."
 

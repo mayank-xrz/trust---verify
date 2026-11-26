@@ -142,10 +142,15 @@ make clean
 ```
 
 `make setup` is idempotent. It creates `.venv` with `python3.11`, installs
-`requirements.txt`, and sets `core.hooksPath=.githooks`. Every other target
-uses `.venv/bin/python`; override with `make test PYTHON=/path/to/python` only
-if that interpreter already has the pinned dependencies. If `python3.11` is not
-on your `PATH`, install it first or pass `BASE_PYTHON=/path/to/python3.11`.
+`requirements.txt` plus the pinned gate tools in `requirements-dev.txt`, and
+sets `core.hooksPath=.githooks`. Every other target uses `.venv/bin/python`;
+override with `make test PYTHON=/path/to/python` only if that interpreter
+already has the pinned dependencies. If `python3.11` is not on your `PATH`,
+install it first or pass `BASE_PYTHON=/path/to/python3.11`.
+
+CI (`.github/workflows/ci.yml`) runs the same `ruff`, `mypy`, `verify-logs`,
+and root-scope `pytest` gates on Linux and macOS with Python 3.11, plus a
+`docker compose config` job that generates throwaway secrets.
 
 ### Docker sandbox (optional)
 
