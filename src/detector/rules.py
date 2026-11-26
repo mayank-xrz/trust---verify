@@ -11,6 +11,70 @@ import time
 from typing import Any, Dict, List, Optional
 
 
+APPROVED_CHANGE_WINDOWS = frozenset({"approved", "active", "open", "scheduled"})
+
+
+@dataclasses.dataclass(frozen=True)
+class ChangeTicket:
+    """A declared, approved change window that can suppress privilege alerts."""
+
+    ticket_id: str
+    subject: Optional[str] = None
+    not_before_ns: int = 0
+    not_after_ns: int = (1 << 63) - 1
+    approved: bool = True
+
+    def covers(self, subject: str, timestamp_ns: int) -> bool:
+        if not self.approved:
+            return False
+        if self.subject is not None and self.subject != subject:
+            return False
+        return self.not_before_ns <= timestamp_ns <= self.not_after_ns
+
+
+class ChangeTicketRegistry:
+    """Authoritative registry of approved change tickets.
+
+    The rule engine only needs the declared ``change_ticket`` /
+    ``change_window`` metadata to be present.  When a registry is supplied, the
+    ticket must additionally be registered, approved, owned by the subject, and
+    inside its time window, so an arbitrary event cannot self-approve.
+    """
+
+    def __init__(self, tickets: Optional[List[ChangeTicket]] = None) -> None:
+        self._tickets: Dict[str, ChangeTicket] = {}
+        for ticket in tickets or []:
+            self.register(ticket)
+
+    def register(self, ticket: ChangeTicket) -> None:
+        self._tickets[ticket.ticket_id] = ticket
+
+    def revoke(self, ticket_id: str) -> None:
+        self._tickets.pop(ticket_id, None)
+
+    def is_approved(self, ticket_id: str, subject: str, timestamp_ns: int) -> bool:
+        ticket = self._tickets.get(ticket_id)
+        return ticket is not None and ticket.covers(subject, timestamp_ns)
+
+
+def declared_approved_change(
+    event: Dict[str, Any],
+    registry: Optional[ChangeTicketRegistry] = None,
+) -> Optional[Dict[str, Any]]:
+    """Return change-ticket evidence iff the event is inside an approved window."""
+    metadata = event.get("metadata") or {}
+    ticket_id = str(metadata.get("change_ticket", "")).strip()
+    window = str(metadata.get("change_window", "")).strip().lower()
+    if not ticket_id or window not in APPROVED_CHANGE_WINDOWS:
+        return None
+    subject = str(event.get("subject", ""))
+    timestamp_ns = int(event.get("timestamp_ns", 0))
+    if registry is not None and not registry.is_approved(ticket_id, subject, timestamp_ns):
+        return None
+    return {"change_ticket": ticket_id, "change_window": window}
+
+
+
 @dataclasses.dataclass
 class RuleAlert:
     alert_id: str
@@ -100,9 +164,15 @@ class DetectionRules:
 class ContextRuleEngine:
     """Stateful context engine tracking frequency bursts and routine vs suspicious transitions."""
 
-    def __init__(self, burst_threshold: int = 15, burst_window_sec: float = 1.0):
+    def __init__(
+        self,
+        burst_threshold: int = 15,
+        burst_window_sec: float = 1.0,
+        change_tickets: Optional[ChangeTicketRegistry] = None,
+    ):
         self.burst_threshold = burst_threshold
         self.burst_window_sec = burst_window_sec
+        self.change_tickets = change_tickets
         # subject -> deque of timestamps
         self.subject_history: Dict[str, collections.deque] = collections.defaultdict(collections.deque)
 
@@ -110,10 +180,13 @@ class ContextRuleEngine:
         """Evaluates single event against all explainable rules."""
         alerts = []
 
-        # 1. Stateless privilege elevation check
-        r1 = DetectionRules.check_unauthorized_admin(event)
-        if r1:
-            alerts.append(r1)
+        # 1. Stateless privilege elevation check, unless the event is covered by
+        # an approved declared-change window (e.g. an approved deploy bot).
+        change = declared_approved_change(event, self.change_tickets)
+        if change is None:
+            r1 = DetectionRules.check_unauthorized_admin(event)
+            if r1:
+                alerts.append(r1)
 
         # 2. Crypto attack / replay check
         r2 = DetectionRules.check_crypto_tamper_or_replay(event)
