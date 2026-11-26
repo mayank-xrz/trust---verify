@@ -100,6 +100,7 @@ class EphemeralHandshakeSession:
         self._mlkem_priv: Optional[bytearray] = None
         self._x25519_pub_bytes: Optional[bytes] = None
         self._mlkem_pub_bytes: Optional[bytes] = None
+        self._session_id: Optional[str] = None
 
     def has_ephemeral_secrets(self) -> bool:
         return self._x25519_priv is not None or self._mlkem_priv is not None
@@ -121,10 +122,11 @@ class EphemeralHandshakeSession:
         self._mlkem_priv = bytearray(mlkem_priv)
         _zeroize_bytes(mlkem_priv)
 
+        self._session_id = "sess-" + secrets.token_hex(16)
         hello = {
             "responder_identity": self.identity,
             "responder_device": self.device,
-            "session_id": "sess-" + secrets.token_hex(16),
+            "session_id": self._session_id,
             "x25519_pub": base64.b64encode(self._x25519_pub_bytes).decode("ascii"),
             "mlkem_pub": base64.b64encode(self._mlkem_pub_bytes).decode("ascii"),
         }
@@ -227,6 +229,27 @@ class EphemeralHandshakeSession:
         ):
             self._wipe_ephemerals()
             raise HandshakeError("Initiator transcript ML-DSA-65 signature invalid")
+
+        # Bind responder identity, device, session_id, and ephemeral public keys to our own hello
+        expected_x25519_b64 = (
+            base64.b64encode(self._x25519_pub_bytes).decode("ascii")
+            if self._x25519_pub_bytes is not None
+            else ""
+        )
+        expected_mlkem_b64 = (
+            base64.b64encode(self._mlkem_pub_bytes).decode("ascii")
+            if self._mlkem_pub_bytes is not None
+            else ""
+        )
+        if (
+            transcript.get("session_id") != self._session_id
+            or transcript.get("responder_identity") != self.identity
+            or transcript.get("responder_device") != self.device
+            or transcript.get("resp_x25519_pub") != expected_x25519_b64
+            or transcript.get("resp_mlkem_pub") != expected_mlkem_b64
+        ):
+            self._wipe_ephemerals()
+            raise HandshakeError("Initiator transcript does not match responder identity or ephemeral offer")
 
         init_x25519_pub = X25519PublicKey.from_public_bytes(
             base64.b64decode(transcript["init_x25519_pub"], validate=True)

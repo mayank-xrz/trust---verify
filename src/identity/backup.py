@@ -74,6 +74,8 @@ class BackupManager:
             raise BackupIntegrityError(f"Failed to parse backup JSON: {e}")
 
         manifest = snapshot.get("manifest", {})
+        if manifest.get("algorithm") != "HMAC-SHA3-512":
+            raise BackupIntegrityError("Unsupported or missing backup MAC algorithm")
         payload_b64 = snapshot.get("payload_b64", "")
         claimed_mac = manifest.get("mac", "")
 
@@ -89,7 +91,10 @@ class BackupManager:
 
         # Compute and compare HMAC
         expected_mac = hmac.new(self.master_key, raw_payload, hashlib.sha3_512).digest()
-        provided_mac = bytes.fromhex(claimed_mac)
+        try:
+            provided_mac = bytes.fromhex(claimed_mac)
+        except (TypeError, ValueError) as e:
+            raise BackupIntegrityError(f"Malformed backup MAC: {e}") from e
 
         if not hmac.compare_digest(expected_mac, provided_mac):
             raise BackupIntegrityError("Backup HMAC signature verification failed! Tampering detected.")

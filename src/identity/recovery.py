@@ -89,6 +89,8 @@ class DeviceReEnrollment:
         challenge_response: bytes,
         new_public_key: bytes,
         proof_signature: bytes,
+        *,
+        verifier: Optional[Any] = None,
     ) -> bool:
         """Verifies proof of possession and authorization for device replacement."""
         pending = self.pending_challenges.get(node_id)
@@ -96,12 +98,27 @@ class DeviceReEnrollment:
             return False
 
         nonce, exp = pending
+        del self.pending_challenges[node_id]
         if time.time() > exp:
-            del self.pending_challenges[node_id]
+            return False
+
+        if not new_public_key or not proof_signature:
             return False
 
         # Expected response combines cluster secret + nonce + new public key
         expected_response = hashlib.sha3_256(self.cluster_secret + nonce + new_public_key).digest()
-        del self.pending_challenges[node_id]
+        if not hmac.compare_digest(challenge_response, expected_response):
+            return False
 
-        return hmac.compare_digest(challenge_response, expected_response)
+        # Verify proof-of-possession signature over domain-separated binding using new_public_key
+        signed_msg = b"track4/v1/reenroll\x00" + node_id.encode("utf-8") + b"\x00" + nonce + new_public_key
+        if verifier is not None:
+            return bool(verifier(new_public_key, signed_msg, proof_signature))
+
+        try:
+            from pqcrypto.sign import ml_dsa_65
+            from src.crypto._pqcrypto_compat import sig_verify
+
+            return bool(sig_verify(ml_dsa_65, new_public_key, signed_msg, proof_signature))
+        except Exception:
+            return False
