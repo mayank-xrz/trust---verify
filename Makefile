@@ -32,6 +32,7 @@ setup:
 	@echo "Setup complete. Run 'make test' or 'make demo'."
 
 up:
+	docker compose config > /dev/null
 	docker compose up -d --build
 
 down:

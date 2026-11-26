@@ -1,0 +1,27 @@
+# Build context hygiene: never ship local secrets, VCS data, caches, or logs.
+.git
+.gitignore
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.log
+logs
+tmp
+dist
+build
+reports/measurements.json
+benchmark_results.json

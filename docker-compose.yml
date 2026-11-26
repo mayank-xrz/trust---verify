@@ -1,4 +1,24 @@
-version: "3.9"
+name: tbv-sandbox
+
+# Hardened sandbox compose file. Secrets are required from the environment
+# (see env.example); there are no working default credentials. All published
+# ports bind to 127.0.0.1 so the sandbox is not exposed on the LAN.
+x-app: &app
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: tbv-app:local
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  restart: unless-stopped
+  networks:
+    - tbv-sandbox-net
 
 services:
   postgres:
@@ -6,146 +26,153 @@ services:
     container_name: tbv-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tbv}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tbv_dev_only}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (no default)}
       POSTGRES_DB: ${POSTGRES_DB:-tbv_identity}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    shm_size: 128mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tbv} -d ${POSTGRES_DB:-tbv_identity}"]
       interval: 5s
       timeout: 3s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
     networks:
       - tbv-sandbox-net
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    container_name: tbv-migrate
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    mem_limit: 512m
 
   key-authority:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app
     container_name: tbv-key-authority
+    command: ["python", "-m", "demo.node.server"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
-      - NODE_ID=key-authority
-      - PORT=8000
+      NODE_ID: key-authority
+      PORT: "8000"
+      DATA_DIR: /tmp/tbv_data
+      DEMO_CLUSTER_KEY_B64: ${DEMO_CLUSTER_KEY_B64:?set DEMO_CLUSTER_KEY_B64 (32 random bytes, base64)}
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 5s
       timeout: 3s
       retries: 10
-    networks:
-      - tbv-sandbox-net
+    mem_limit: 512m
 
   detector:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    <<: *app
     container_name: tbv-detector
+    command: ["python", "-m", "demo.node.server"]
     ports:
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
     environment:
-      - NODE_ID=detector
-      - PORT=8005
+      NODE_ID: detector
+      PORT: "8005"
+      DATA_DIR: /tmp/tbv_data
+      DEMO_CLUSTER_KEY_B64: ${DEMO_CLUSTER_KEY_B64:?set DEMO_CLUSTER_KEY_B64 (32 random bytes, base64)}
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8005/health || exit 1"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')"]
       interval: 5s
       timeout: 3s
       retries: 5
-    networks:
-      - tbv-sandbox-net
+    mem_limit: 512m
 
   node-a:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8101
-        CMD ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
+    <<: *app
     container_name: tbv-node-a
+    command: ["uvicorn", "src.identity_keys.api:app", "--host", "0.0.0.0", "--port", "8101"]
     ports:
-      - "8101:8101"
-      - "8001:8001"
+      - "127.0.0.1:8101:8101"
     environment:
       NODE_ID: node-a
-      NODE_PORT: 8101
-      WRAP_KEY_REF: local-wrap-key-node-a
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
-      MAX_CACHE_STALENESS_MS: 5000
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: "5000"
+      WRAP_MASTER_KEY_B64: ${WRAP_MASTER_KEY_B64:?set WRAP_MASTER_KEY_B64 (32 random bytes, base64)}
+      CLUSTER_SYNC_SECRET: ${CLUSTER_SYNC_SECRET:?set CLUSTER_SYNC_SECRET}
+      TOKEN_SIGNING_SEED_B64: ${TOKEN_SIGNING_SEED_B64:?set TOKEN_SIGNING_SEED_B64}
+      ADMIN_ENROLL_TOKEN: ${ADMIN_ENROLL_TOKEN:?set ADMIN_ENROLL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8101/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8101/healthz')"]
       interval: 5s
       timeout: 3s
-      retries: 5
-    networks:
-      - tbv-sandbox-net
+      retries: 10
+    mem_limit: 512m
 
   node-b:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8102
-        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
+    <<: *app
     container_name: tbv-node-b
+    command: ["uvicorn", "src.identity_keys.api:app", "--host", "0.0.0.0", "--port", "8102"]
     ports:
-      - "8102:8102"
-      - "8002:8002"
+      - "127.0.0.1:8102:8102"
     environment:
       NODE_ID: node-b
-      NODE_PORT: 8102
-      WRAP_KEY_REF: local-wrap-key-node-b
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
-      MAX_CACHE_STALENESS_MS: 5000
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: "5000"
+      WRAP_MASTER_KEY_B64: ${WRAP_MASTER_KEY_B64:?set WRAP_MASTER_KEY_B64 (32 random bytes, base64)}
+      CLUSTER_SYNC_SECRET: ${CLUSTER_SYNC_SECRET:?set CLUSTER_SYNC_SECRET}
+      TOKEN_SIGNING_SEED_B64: ${TOKEN_SIGNING_SEED_B64:?set TOKEN_SIGNING_SEED_B64}
+      ADMIN_ENROLL_TOKEN: ${ADMIN_ENROLL_TOKEN:?set ADMIN_ENROLL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8102/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8102/healthz')"]
       interval: 5s
       timeout: 3s
-      retries: 5
-    networks:
-      - tbv-sandbox-net
+      retries: 10
+    mem_limit: 512m
 
   node-c:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt || true
-        EXPOSE 8103
-        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
+    <<: *app
     container_name: tbv-node-c
+    command: ["uvicorn", "src.identity_keys.api:app", "--host", "0.0.0.0", "--port", "8103"]
     ports:
-      - "8103:8103"
-      - "8003:8003"
+      - "127.0.0.1:8103:8103"
     environment:
       NODE_ID: node-c
-      NODE_PORT: 8103
-      WRAP_KEY_REF: local-wrap-key-node-c
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:-tbv_dev_only}@postgres:5432/${POSTGRES_DB:-tbv_identity}
-      MAX_CACHE_STALENESS_MS: 5000
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-tbv}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tbv_identity}
+      MAX_CACHE_STALENESS_MS: "5000"
+      WRAP_MASTER_KEY_B64: ${WRAP_MASTER_KEY_B64:?set WRAP_MASTER_KEY_B64 (32 random bytes, base64)}
+      CLUSTER_SYNC_SECRET: ${CLUSTER_SYNC_SECRET:?set CLUSTER_SYNC_SECRET}
+      TOKEN_SIGNING_SEED_B64: ${TOKEN_SIGNING_SEED_B64:?set TOKEN_SIGNING_SEED_B64}
+      ADMIN_ENROLL_TOKEN: ${ADMIN_ENROLL_TOKEN:?set ADMIN_ENROLL_TOKEN}
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8103/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8103/healthz')"]
       interval: 5s
       timeout: 3s
-      retries: 5
-    networks:
-      - tbv-sandbox-net
+      retries: 10
+    mem_limit: 512m
+
+volumes:
+  pgdata:
 
 networks:
   tbv-sandbox-net:

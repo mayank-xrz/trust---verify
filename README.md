@@ -147,6 +147,25 @@ uses `.venv/bin/python`; override with `make test PYTHON=/path/to/python` only
 if that interpreter already has the pinned dependencies. If `python3.11` is not
 on your `PATH`, install it first or pass `BASE_PYTHON=/path/to/python3.11`.
 
+### Docker sandbox (optional)
+
+`docker-compose.yml` has no working default credentials and binds every
+published port to `127.0.0.1`. Copy `env.example` to `.env`, fill the required
+values, and run `make up`. At minimum:
+
+```bash
+python3 -c 'import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())'
+# Use that value for WRAP_MASTER_KEY_B64, TOKEN_SIGNING_SEED_B64, and
+# DEMO_CLUSTER_KEY_B64; generate separate values per secret.
+openssl rand -hex 32   # CLUSTER_SYNC_SECRET / POSTGRES_PASSWORD / ADMIN_ENROLL_TOKEN
+```
+
+All app containers run as the non-root `tbvuser`, with a read-only root
+filesystem, a `/tmp` tmpfs, `no-new-privileges`, and all capabilities dropped.
+A one-shot `migrate` service runs `alembic upgrade head` before the identity
+nodes start. If Docker is not installed, the Python test suite still runs; the
+compose file is checked statically in `tests/test_compose_hardening.py`.
+
 ### Manual Execution (No Make Required)
 
 #### Create the environment and install dependencies
