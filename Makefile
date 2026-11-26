@@ -25,7 +25,7 @@ down:
 	docker compose down -v
 
 test:
-	$(PYTHON) -m pytest tests/test_crypto_security.py tests/test_lifecycle_chaos.py tests/test_log_injection.py tests/test_detector_eval.py tests/test_integration_e2e.py tests/test_security_regression.py -v
+	$(PYTHON) -m pytest -q
 
 chaos:
 	$(PYTHON) -m pytest tests/test_lifecycle_chaos.py -v || $(PYTHON) -m unittest tests/test_lifecycle_chaos.py -v

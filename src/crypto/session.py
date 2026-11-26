@@ -219,7 +219,7 @@ class PrekeyStore:
             raise CryptoError("peer trust revoked")
         if type(lifetime) is not int or lifetime <= 0:
             raise CryptoError("invalid prekey lifetime")
-        public, private = ml_kem_768.generate_keypair()
+        public, private = ml_kem_768.keygen()
         dh_public, dh_private = classical.keypair()
         created = int(time.time())
         expires = created + lifetime

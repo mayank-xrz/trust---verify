@@ -40,7 +40,7 @@ def unb64(value, size=None):
 
 def kem_keypair():
     try:
-        return ml_kem_768.generate_keypair()
+        return ml_kem_768.keygen()
     except Exception as exc:
         raise CryptoError("ML-KEM key generation failed") from exc
 
@@ -49,7 +49,7 @@ def encapsulate(public_key):
     if not isinstance(public_key, bytes) or len(public_key) != ml_kem_768.PUBLIC_KEY_SIZE:
         raise CryptoError("invalid ML-KEM public key length")
     try:
-        return ml_kem_768.encrypt(public_key)
+        return ml_kem_768.encaps(public_key)
     except Exception as exc:
         raise CryptoError("ML-KEM encapsulation failed") from exc
 
@@ -60,14 +60,14 @@ def decapsulate(secret_key, ciphertext):
     if not isinstance(ciphertext, bytes) or len(ciphertext) != ml_kem_768.CIPHERTEXT_SIZE:
         raise CryptoError("invalid ML-KEM ciphertext length")
     try:
-        return ml_kem_768.decrypt(secret_key, ciphertext)
+        return ml_kem_768.decaps(secret_key, ciphertext)
     except Exception as exc:
         raise CryptoError("ML-KEM decapsulation failed") from exc
 
 
 def signing_keypair():
     try:
-        return ml_dsa_65.generate_keypair()
+        return ml_dsa_65.keygen()
     except Exception as exc:
         raise CryptoError("ML-DSA key generation failed") from exc
 
@@ -75,7 +75,7 @@ def signing_keypair():
 def sign(secret_key, domain, transcript):
     if not isinstance(secret_key, bytes) or len(secret_key) != ml_dsa_65.SECRET_KEY_SIZE:
         raise CryptoError("invalid ML-DSA secret key length")
-    if not isinstance(domain, str) or not domain.startswith("track4/v1/"):
+    if not isinstance(domain, str) or not domain.startswith(("track4/v1/", "track4/v2/")):
         raise CryptoError("invalid signature domain")
     try:
         return ml_dsa_65.sign(secret_key, domain.encode("ascii") + b"\x00" + canonical(transcript))
@@ -88,14 +88,12 @@ def verify(public_key, domain, transcript, signature):
         raise CryptoError("invalid ML-DSA public key length")
     if not isinstance(signature, bytes) or len(signature) != ml_dsa_65.SIGNATURE_SIZE:
         raise CryptoError("invalid ML-DSA signature length")
-    if not isinstance(domain, str) or not domain.startswith("track4/v1/"):
+    if not isinstance(domain, str) or not domain.startswith(("track4/v1/", "track4/v2/")):
         raise CryptoError("invalid signature domain")
     try:
-        valid = ml_dsa_65.verify(public_key, domain.encode("ascii") + b"\x00" + canonical(transcript), signature)
+        ml_dsa_65.verify(public_key, domain.encode("ascii") + b"\x00" + canonical(transcript), signature)
     except Exception as exc:
         raise CryptoError("signature verification failed") from exc
-    if not valid:
-        raise CryptoError("signature verification failed")
 
 
 def hkdf(secret, salt, info, length=32):

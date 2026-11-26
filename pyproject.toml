@@ -14,3 +14,14 @@ files = ["src/identity_keys", "track4_service.py", "scripts/seed_sandbox.py", "s
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = [
+  "tests/test_replay_binding.py",
+  "tests/test_forward_secrecy.py",
+  "tests/test_delivery.py",
+  "tests/test_resumption.py",
+  "tests/test_crypto.py",
+  "tests/test_node_worker_stdlib.py",
+  "tests/test_detector_eval.py",
+  "tests/test_log_injection.py",
+  "tests/test_lifecycle_chaos.py",
+]
