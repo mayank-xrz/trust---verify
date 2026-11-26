@@ -1,4 +1,14 @@
-"""Operator Dashboard & CLI for Alerts, Health, Key Verification, and Lateral Movement."""
+"""Operator Dashboard & CLI for Multi-Node Health, Key Lifecycle, Audit, and Alerts (P4-10).
+
+Interacts with running sandbox nodes (node-a, node-b, node-c, detector).
+
+Commands:
+- status: inspects health, active key versions, and metrics across all nodes.
+- rotate --identity <id>: initiates atomic rotation with grace period.
+- revoke --key-id <id>: initiates cross-node revocation broadcast and measures latency.
+- verify-logs: verifies cryptographic log hash chains on all nodes.
+- alerts: fetches explainable detection alerts from detector/nodes.
+"""
 
 from __future__ import annotations
 import argparse
@@ -6,133 +16,191 @@ import json
 import sys
 import urllib.request
 import urllib.error
+from typing import Dict, Any, List, Optional, Tuple
+
+DEFAULT_NODES = {
+    "node-a": "http://localhost:8001",
+    "node-b": "http://localhost:8002",
+    "node-c": "http://localhost:8003",
+    "detector": "http://localhost:8005",
+}
 
 
-def fetch_url(url: str, method: str = "GET", data: dict = None):
+def http_request(url: str, method: str = "GET", payload: Optional[dict] = None, timeout: float = 3.0) -> Tuple[int, Dict[str, Any]]:
     try:
-        req = urllib.request.Request(url, method=method)
-        req.add_header("Content-Type", "application/json")
-        body = json.dumps(data).encode("utf-8") if data else None
-        with urllib.request.urlopen(req, data=body, timeout=5) as resp:
-            return resp.status, json.loads(resp.read().decode("utf-8"))
+        data_bytes = json.dumps(payload).encode("utf-8") if payload else None
+        req = urllib.request.Request(
+            url,
+            data=data_bytes,
+            headers={"Content-Type": "application/json"},
+            method=method,
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, json.loads(body) if body else {}
     except urllib.error.HTTPError as e:
         try:
             return e.code, json.loads(e.read().decode("utf-8"))
         except Exception:
             return e.code, {"error": str(e)}
     except Exception as e:
-        return 500, {"error": str(e)}
+        return 503, {"error": str(e), "offline": True}
 
 
 class OperatorCLI:
-    """Programmatic and command-line Operator Interface."""
+    """Operator CLI implementation."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8001):
-        self.host = host
-        self.port = port
-        self.base_url = f"http://{host}:{port}"
+    def __init__(self, nodes: Optional[Dict[str, str]] = None):
+        self.nodes = nodes or DEFAULT_NODES
 
-    def status(self) -> dict:
-        code, data = fetch_url(f"{self.base_url}/health")
+    def status(self) -> Dict[str, Any]:
+        print("=" * 70)
+        print("🖥️  TRUST-BUT-VERIFY CLUSTER STATUS")
+        print("=" * 70)
+        results = {}
+
+        for nid, base_url in self.nodes.items():
+            code, data = http_request(f"{base_url}/health")
+            if code == 200:
+                print(f"🟢 [{nid}] Online | Key: {data.get('active_key_id', 'N/A')} (v{data.get('active_key_version', 1)}) | Uptime: {data.get('uptime_seconds', 0)}s")
+                results[nid] = {"online": True, **data}
+            else:
+                print(f"🔴 [{nid}] Offline or Error ({base_url}) - HTTP {code}")
+                results[nid] = {"online": False, "status": "offline", "error": data}
+
+        print("=" * 70)
+        return results
+
+    def rotate(self, identity: str = "node-a", role: str = "admin") -> Dict[str, Any]:
+        base_url = self.nodes.get(identity, f"http://localhost:8001")
+        print(f"🔄 Triggering atomic key rotation on '{identity}' ({base_url})...")
+
+        code, data = http_request(
+            f"{base_url}/keys/rotate",
+            method="POST",
+            payload={"role": role, "requested_by": "operator_cli", "identity": identity},
+        )
+
         if code == 200:
-            print(f"🟢 [Node Online] ID: {data.get('node_id')} | Active Key: {data.get('active_key_id')} (v{data.get('active_key_version')})")
-            m_code, m_data = fetch_url(f"{self.base_url}/metrics")
-            if m_code == 200:
-                msgs = m_data.get("messages", {})
-                print(f"   Messages: {msgs.get('received', 0)} received, {msgs.get('sent', 0)} sent, {msgs.get('rejected', 0)} rejected")
-                print(f"   Alerts: {m_data.get('alerts_count', 0)} recorded | Enrolled peers: {m_data.get('enrolled_nodes_count', 0)}")
-                return {**data, "metrics": m_data}
+            active = data.get("active_key", {})
+            grace = data.get("grace_key", {})
+            print(f"✅ Key Rotated Successfully!")
+            print(f"   Active Key ID: {active.get('key_id')} (v{active.get('version', 'N/A')})")
+            if grace:
+                print(f"   Grace Key ID:  {grace.get('key_id')} | Cutoff: {grace.get('grace_cutoff', 'N/A')}")
             return data
         else:
-            print(f"🔴 [Node Offline or Error] HTTP {code}: {data}")
+            print(f"❌ Key Rotation Failed (HTTP {code}): {data.get('detail', data)}")
             return {"error": data, "code": code}
 
-    def keys(self) -> dict:
-        code, data = fetch_url(f"{self.base_url}/metrics")
+    def revoke(self, key_id: str, reason: str = "Manual compromise revocation", role: str = "admin") -> Dict[str, Any]:
+        print(f"🚫 Initiating cross-node key revocation for '{key_id}'...")
+        # Broadcast via primary authority / node-a
+        base_url = self.nodes.get("key-authority", self.nodes.get("node-a", "http://localhost:8001"))
+
+        code, data = http_request(
+            f"{base_url}/keys/revoke",
+            method="POST",
+            payload={"key_id": key_id, "reason": reason, "role": role},
+        )
+
         if code == 200:
-            print(f"🔑 Key State for Node '{data.get('node_id')}':")
-            print(f"   Active Key ID: {data.get('active_key_id')} (Version {data.get('active_key_version')})")
+            print(f"✅ Key '{key_id}' Revoked!")
+            print(f"   Propagation Latency: {data.get('propagation_latency_ms', 0)} ms")
             return data
         else:
-            print(f"❌ Failed to fetch key state: HTTP {code}")
+            print(f"❌ Revocation Failed (HTTP {code}): {data.get('detail', data)}")
             return {"error": data, "code": code}
 
-    def alerts(self) -> list:
-        code, data = fetch_url(f"{self.base_url}/metrics")
-        alerts = data.get("alerts", [])
-        print(f"📋 Explainable Security Alerts ({len(alerts)}):")
-        if not alerts:
-            print("   (No security alerts recorded. System clean.)")
-        for a in alerts:
-            print(f"  - [{a.get('severity', 'HIGH')}] {a.get('rule_name')}: {a.get('description')}")
-            if a.get("evidence"):
-                print(f"    Evidence: {json.dumps(a.get('evidence'))}")
-        return alerts
+    def verify_logs(self) -> Dict[str, Any]:
+        print("=" * 70)
+        print("🔍 VERIFYING AUDIT LOG HASH CHAINS ACROSS CLUSTER")
+        print("=" * 70)
+        results = {}
 
-    def verify_log(self) -> dict:
-        code, data = fetch_url(f"{self.base_url}/logs/verify")
-        if code == 200 and data.get("is_valid"):
-            print(f"✅ Audit Log Valid! Total records: {data.get('total_records')} (Checkpoints: {data.get('verified_checkpoints', 0)})")
-        else:
-            print(f"❌ Verification Failed! Error: {data.get('first_error', data.get('detail'))}")
-        return data
+        for nid, base_url in self.nodes.items():
+            if nid == "detector":
+                continue
+            code, data = http_request(f"{base_url}/logs/verify")
+            if code == 200 and data.get("is_valid"):
+                print(f"✅ [{nid}] Log Chain VALID ({data.get('total_records', 0)} records verified)")
+                results[nid] = {"valid": True, **data}
+            else:
+                err = data.get("first_error") or data.get("detail", "Unknown failure")
+                idx = data.get("tampered_index", "N/A")
+                print(f"❌ [{nid}] Log Tampering Detected! Error: {err} (Tampered Index: {idx})")
+                results[nid] = {"valid": False, "error": err, "tampered_index": idx}
 
-    def rotate(self, role: str = "admin") -> dict:
-        payload = {"role": role, "requested_by": "operator_cli"}
-        code, data = fetch_url(f"{self.base_url}/keys/rotate", method="POST", data=payload)
-        if code == 200:
-            print(f"🔄 Key Rotated! New Active Key: {data.get('active_key', {}).get('key_id')}")
-            if data.get("grace_key"):
-                print(f"   Previous key moved to grace period: {data.get('grace_key', {}).get('key_id')}")
-        else:
-            print(f"❌ Rotation Failed (HTTP {code}): {data.get('detail', data.get('error'))}")
-        return data
+        print("=" * 70)
+        return results
 
-    def revoke(self, key_id: str, reason: str = "Manual administrative revocation", role: str = "admin") -> dict:
-        payload = {"key_id": key_id, "reason": reason, "role": role}
-        code, data = fetch_url(f"{self.base_url}/keys/revoke", method="POST", data=payload)
-        if code == 200:
-            print(f"🚫 Key Revoked! Key ID: {key_id} | Reason: {reason}")
+    def alerts(self) -> List[Dict[str, Any]]:
+        print("=" * 70)
+        print("🚨 EXPLAINABLE DETECTION & PRIVILEGE ALERTS")
+        print("=" * 70)
+        all_alerts = []
+
+        # Check detector and nodes for explainable alerts
+        for nid, base_url in self.nodes.items():
+            code, data = http_request(f"{base_url}/metrics")
+            if code == 200:
+                alerts = data.get("alerts", [])
+                for a in alerts:
+                    all_alerts.append({"node": nid, **a})
+
+        if not all_alerts:
+            print("  (Zero security alerts recorded. Cluster state clean.)")
         else:
-            print(f"❌ Revocation Failed (HTTP {code}): {data.get('detail', data.get('error'))}")
-        return data
+            for a in all_alerts:
+                sev = a.get("severity", "HIGH")
+                rule = a.get("rule_name", "UNKNOWN_RULE")
+                desc = a.get("description", "")
+                src_node = a.get("node", "cluster")
+                print(f"  • [{sev}] on {src_node} -> {rule}")
+                print(f"    Details: {desc}")
+                if a.get("evidence"):
+                    print(f"    Evidence: {json.dumps(a.get('evidence'))}")
+
+        print("=" * 70)
+        return all_alerts
 
 
 def main():
     parser = argparse.ArgumentParser(description="Trust-But-Verify Operator CLI")
-    parser.add_argument("--host", default="127.0.0.1", help="Node hostname (default: 127.0.0.1)")
-    parser.add_argument("--port", type=int, default=8001, help="Node port (default: 8001)")
-
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("status", help="Inspect node health and metrics")
-    subparsers.add_parser("keys", help="Inspect active and revoked keys")
-    subparsers.add_parser("alerts", help="Print explainable lateral-movement and security alerts")
-    subparsers.add_parser("verify-log", help="Verify node hash-chained audit log")
+    # status
+    subparsers.add_parser("status", help="Inspect health & key versions across all nodes")
 
-    p_rotate = subparsers.add_parser("rotate", help="Trigger atomic key rotation with grace period")
-    p_rotate.add_argument("--role", default="admin", help="Role for authorization (admin/user)")
+    # rotate
+    rotate_parser = subparsers.add_parser("rotate", help="Trigger key rotation on an identity node")
+    rotate_parser.add_argument("--identity", default="node-a", help="Target node identity (default: node-a)")
+    rotate_parser.add_argument("--role", default="admin", help="Role authorizing rotation (default: admin)")
 
-    p_revoke = subparsers.add_parser("revoke", help="Broadcast key revocation across cluster")
-    p_revoke.add_argument("key_id", help="ID of key to revoke")
-    p_revoke.add_argument("--reason", default="Manual administrative revocation", help="Revocation reason")
-    p_revoke.add_argument("--role", default="admin", help="Role for authorization (admin/user)")
+    # revoke
+    revoke_parser = subparsers.add_parser("revoke", help="Trigger cross-node revocation broadcast")
+    revoke_parser.add_argument("--key-id", required=True, help="Key ID to revoke")
+    revoke_parser.add_argument("--reason", default="Manual administrative revocation", help="Revocation reason")
+
+    # verify-logs
+    subparsers.add_parser("verify-logs", help="Verify audit log hash chains across nodes")
+
+    # alerts
+    subparsers.add_parser("alerts", help="Fetch explainable detector alerts")
 
     args = parser.parse_args()
-    cli = OperatorCLI(host=args.host, port=args.port)
+    cli = OperatorCLI()
 
     if args.command == "status":
         cli.status()
-    elif args.command == "keys":
-        cli.keys()
+    elif args.command == "rotate":
+        cli.rotate(identity=args.identity, role=args.role)
+    elif args.command == "revoke":
+        cli.revoke(key_id=args.key_id, reason=args.reason)
+    elif args.command == "verify-logs":
+        cli.verify_logs()
     elif args.command == "alerts":
         cli.alerts()
-    elif args.command == "verify-log":
-        cli.verify_log()
-    elif args.command == "rotate":
-        cli.rotate(role=args.role)
-    elif args.command == "revoke":
-        cli.revoke(key_id=args.key_id, reason=args.reason, role=args.role)
 
 
 if __name__ == "__main__":
