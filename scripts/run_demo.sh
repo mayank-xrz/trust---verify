@@ -6,7 +6,7 @@
 # 1. Boot 3-node sandbox & check operator_cli status
 # 2. Enroll identities & send authenticated PQC envelope
 # 3. Trigger atomic key rotation: prove grace period & post-cutoff rejection
-# 4. Trigger cross-node revocation: measure propagation latency & re-enroll
+# 4. Revoke a recipient key, confirm another node stays reachable, and replace it
 # 5. Demonstrate crash recovery (WAL) & damaged backup rejection
 # 6. Verify audit log hash chains & inspect explainable detector alerts
 # ==============================================================================
@@ -16,6 +16,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+export DEMO_PEER_ENROLL_TOKEN
+DEMO_PEER_ENROLL_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 
 TEMP_DATA_DIR="$(mktemp -d -t tbv_demo_XXXXXX)"
 PIDS=()
@@ -51,7 +53,7 @@ echo "======================================================================"
 for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     nid="${spec%%:*}"
     port="${spec##*:}"
-    NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" \
+    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" \
         python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
     PIDS+=("$pid")
@@ -61,7 +63,14 @@ done
 # Wait for all nodes to become healthy
 echo "  ⏳ Waiting for sandbox cluster to report healthy..."
 for port in 8001 8002 8003 8005; do
-    until curl -s "http://127.0.0.1:${port}/health" >/dev/null 2>&1; do
+    for attempt in {1..50}; do
+        if curl --fail --silent --max-time 1 "http://127.0.0.1:${port}/health" >/dev/null; then
+            break
+        fi
+        if [[ "$attempt" -eq 50 ]]; then
+            echo "Node on port $port did not become healthy." >&2
+            exit 1
+        fi
         sleep 0.2
     done
 done
@@ -71,189 +80,93 @@ echo "  ✅ All sandbox nodes online and responding."
 echo ""
 python3 -m demo.node.operator_cli status
 
-# ------------------------------------------------------------------------------
-# STEP 2: Enroll Identities & Send Protected PQC Envelope
-# ------------------------------------------------------------------------------
-echo ""
-echo "======================================================================"
-echo "▶ STEP 2: Enrolling Identities & Sending PQC-Protected Message"
-echo "======================================================================"
+# Steps 2-4 exercise the same protected transport before, during, and after key changes.
+python3 - <<'PYTHON'
+import json
+import os
+import time
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
-python3 - << 'EOF'
-import json, urllib.request, base64
-from demo.node.crypto_provider import MLKEMKeyExchange
+NODES = {f"node-{name}": f"http://127.0.0.1:{port}" for name, port in zip("abc", (8001, 8002, 8003))}
+OPERATOR = {"Authorization": f"Bearer {os.environ['DEMO_PEER_ENROLL_TOKEN']}"}
 
-# 1. Fetch public keys of nodes by self-enrolling
-req_self_a = urllib.request.Request("http://127.0.0.1:8001/enroll", data=json.dumps({"node_id": "node-a"}).encode(), headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(req_self_a) as r:
-    pub_a_b64 = json.loads(r.read())["key_state"]["public_key"]
 
-req_self_b = urllib.request.Request("http://127.0.0.1:8002/enroll", data=json.dumps({"node_id": "node-b"}).encode(), headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(req_self_b) as r:
-    pub_b_b64 = json.loads(r.read())["key_state"]["public_key"]
+def call(node, path, body=None, headers=None):
+    request = Request(
+        NODES[node] + path,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json", **(headers or {})},
+    )
+    with urlopen(request, timeout=5) as response:
+        return json.load(response)
 
-# Cross-register node keys so signature verification succeeds
-for port in [8002, 8003]:
-    r = urllib.request.Request(f"http://127.0.0.1:{port}/enroll", data=json.dumps({"node_id": "node-a", "public_key_b64": pub_a_b64}).encode(), headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(r)
 
-for port in [8001, 8003]:
-    r = urllib.request.Request(f"http://127.0.0.1:{port}/enroll", data=json.dumps({"node_id": "node-b", "public_key_b64": pub_b_b64}).encode(), headers={"Content-Type": "application/json"})
-    urllib.request.urlopen(r)
+def enroll(local_node, peer):
+    bundle = call(peer, "/keys/public")
+    call(local_node, "/peers", bundle, OPERATOR)
+    return bundle
 
-# 2. Enroll business identities alice and bob
-kem = MLKEMKeyExchange()
-alice_pub, _ = kem.generate_keypair()
-bob_pub, _ = kem.generate_keypair()
 
-req_a = urllib.request.Request("http://127.0.0.1:8001/enroll",
-    data=json.dumps({"node_id": "alice", "device_id": "dev-alice-01", "public_key_b64": base64.b64encode(alice_pub).decode()}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(req_a) as r:
-    res_a = json.loads(r.read())
-    print(f"  ✅ Enrolled 'alice' on node-a (Key ID: {res_a['key_state']['key_id']})")
+def send(recipient, payload):
+    return call("node-a", "/send", {
+        "target_node_url": NODES[recipient],
+        "recipient_id": recipient,
+        "payload": payload,
+    })["envelope"]
 
-req_b = urllib.request.Request("http://127.0.0.1:8002/enroll",
-    data=json.dumps({"node_id": "bob", "device_id": "dev-bob-01", "public_key_b64": base64.b64encode(bob_pub).decode()}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(req_b) as r:
-    res_b = json.loads(r.read())
-    print(f"  ✅ Enrolled 'bob' on node-b (Key ID: {res_b['key_state']['key_id']})")
 
-# 3. Dispatch confidential message from node-a to node-b
-send_req = urllib.request.Request("http://127.0.0.1:8001/send",
-    data=json.dumps({"target_node_url": "http://127.0.0.1:8002", "recipient_id": "node-b", "payload": {"action": "WIRE_TRANSFER", "amount": 100000, "currency": "USD"}}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(send_req) as r:
-    envelope = json.loads(r.read())["envelope"]
-    print(f"  📦 Node-a generated PQC Envelope: Session {envelope['session_id']}, Nonce {envelope['nonce'][:12]}...")
+def expect_delivery(recipient, envelope, payload):
+    result = call(recipient, "/receive", envelope)
+    if result["payload"] != payload:
+        raise RuntimeError(f"Unexpected payload delivered on {recipient}")
 
-# 4. Receive and verify on node-b
-recv_req = urllib.request.Request("http://127.0.0.1:8002/receive",
-    data=json.dumps(envelope).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(recv_req) as r:
-    delivery = json.loads(r.read())
-    print(f"  📬 Node-b unpacked verified payload: {delivery['payload']} (Record Hash: {delivery['record_hash'][:16]}...)")
-EOF
 
-# ------------------------------------------------------------------------------
-# STEP 3: Key Rotation with Grace Period & Post-Cutoff Rejection
-# ------------------------------------------------------------------------------
-echo ""
-echo "======================================================================"
-echo "▶ STEP 3: Key Rotation with Grace Period & Post-Cutoff Rejection"
-echo "======================================================================"
+def expect_denial(recipient, envelope, reason):
+    try:
+        call(recipient, "/receive", envelope)
+    except HTTPError as exc:
+        detail = json.load(exc).get("detail")
+        if exc.code == 400 and detail == reason:
+            return
+        raise RuntimeError(f"{recipient} returned {exc.code}: {detail}") from exc
+    raise RuntimeError(f"{recipient} accepted a message that should have been denied")
 
-python3 - << 'EOF'
-import json, urllib.request, time
 
-# 1. Fetch current key on node-a
-with urllib.request.urlopen("http://127.0.0.1:8001/health") as r:
-    old_key_id = json.loads(r.read())["active_key_id"]
+print("\n▶ STEP 2: Enroll peer public keys and deliver protected messages")
+for peer in ("node-b", "node-c"):
+    enroll("node-a", peer)
+    enroll(peer, "node-a")
+    payload = {"action": "TRANSFER", "recipient": peer, "amount": 100}
+    expect_delivery(peer, send(peer, payload), payload)
+    print(f"  {peer} accepted its authenticated message.")
 
-# Prepare message with old key
-send_req = urllib.request.Request("http://127.0.0.1:8001/send",
-    data=json.dumps({"target_node_url": "http://127.0.0.1:8002", "recipient_id": "node-b", "payload": {"msg": "Pre-rotation flight"}}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(send_req) as r:
-    old_env = json.loads(r.read())["envelope"]
-    old_env["key_id"] = old_key_id
-
-# 2. Trigger rotation via Operator CLI logic
-rot_req = urllib.request.Request("http://127.0.0.1:8001/keys/rotate",
-    data=json.dumps({"role": "admin"}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(rot_req) as r:
-    rot_data = json.loads(r.read())
-    new_key_id = rot_data["active_key"]["key_id"]
-    print(f"  🔄 Rotated node-a key: {old_key_id} -> {new_key_id}")
-    print(f"  ⏳ Grace period active (2.0s cutoff window)...")
-
-# 3. Delivery during grace period succeeds
-recv_req = urllib.request.Request("http://127.0.0.1:8002/receive",
-    data=json.dumps(old_env).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(recv_req) as r:
-    assert r.status == 200
-    print(f"  ✅ Envelope with old key delivered successfully during grace period!")
-
-# 4. Sleep past grace period cutoff
-print(f"  💤 Sleeping 2.2s to pass grace cutoff...")
+print("\n▶ STEP 3: Rotate node-b's recipient key and verify grace and hard cutoff")
+grace_payload = {"message": "In flight before rotation"}
+grace = send("node-b", grace_payload)
+late = send("node-b", {"message": "First delivery after cutoff"})
+call("node-b", "/keys/rotate", {"role": "admin"})
+expect_delivery("node-b", grace, grace_payload)
+bundle = enroll("node-a", "node-b")
+assert bundle["kem_key_id"] != grace["key_id"]
+current = {"message": "Delivered with the new key"}
+expect_delivery("node-b", send("node-b", current), current)
 time.sleep(2.2)
+expect_denial("node-b", late, "Recipient key is expired")
+print("  Old key accepted in grace and expired on cutoff. New key delivered during grace.")
 
-# 5. Delivery after cutoff fails across cluster
-rejected_count = 0
-for port, nid in [(8002, "node-b"), (8003, "node-c")]:
-    try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/receive",
-            data=json.dumps(old_env).encode(),
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req) as r:
-            pass
-    except urllib.error.HTTPError as e:
-        if e.code == 400:
-            rejected_count += 1
-            print(f"  🛑 {nid} rejected expired key post-cutoff: HTTP 400 ({e.reason})")
-
-print(f"  🛡️ Hard cutoff enforced: {rejected_count}/2 peer nodes rejected expired key.")
-EOF
-
-# ------------------------------------------------------------------------------
-# STEP 4: Cross-Node Revocation & Device Re-Enrollment
-# ------------------------------------------------------------------------------
-echo ""
-echo "======================================================================"
-echo "▶ STEP 4: Cross-Node Key Revocation & Device Re-Enrollment"
-echo "======================================================================"
-
-python3 - << 'EOF'
-import json, urllib.request, base64
-from demo.node.crypto_provider import MLKEMKeyExchange
-
-# 1. Identify active key on node-a
-with urllib.request.urlopen("http://127.0.0.1:8001/health") as r:
-    active_key = json.loads(r.read())["active_key_id"]
-
-# 2. Trigger revocation with latency measurement
-rev_req = urllib.request.Request("http://127.0.0.1:8001/keys/revoke",
-    data=json.dumps({"key_id": active_key, "reason": "Compromised laptop detected in audit review", "role": "admin"}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(rev_req) as r:
-    rev_res = json.loads(r.read())
-    lat = rev_res.get("propagation_latency_ms", 0.0)
-    print(f"  🚫 Revoked Key '{active_key}'")
-    print(f"  ⚡ Cross-node propagation latency: {lat} ms")
-
-# Sync revocation to peers
-for port in [8002, 8003]:
-    p_req = urllib.request.Request(f"http://127.0.0.1:{port}/keys/revoke",
-        data=json.dumps({"key_id": active_key, "reason": "Compromised", "role": "admin"}).encode(),
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(p_req) as r:
-        pass
-
-# 3. Verify peer nodes reject revoked key
-print("  🔍 Verifying peer nodes reject the revoked key...")
-test_env = {"sender_id": "node-a", "recipient_id": "node-b", "key_id": active_key, "ciphertext": "AAAA", "nonce": "AAAA", "signature": "AAAA", "kem_ciphertext": "AAAA", "version": "1.0", "seq_num": 1, "session_id": "test", "associated_data": {"sender_id": "node-a", "recipient_id": "node-b", "seq_num": 1, "session_id": "test"}, "sig_alg": "ML-DSA-65", "kem_alg": "ML-KEM-768"}
-for port, nid in [(8002, "node-b"), (8003, "node-c")]:
-    try:
-        req = urllib.request.Request(f"http://127.0.0.1:{port}/receive", data=json.dumps(test_env).encode(), headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req) as r:
-            pass
-    except urllib.error.HTTPError as e:
-        print(f"  🛡️ {nid} denied request using revoked key: HTTP {e.code}")
-
-# 4. Re-enroll alice on replacement device
-kem = MLKEMKeyExchange()
-new_pub, _ = kem.generate_keypair()
-reenroll_req = urllib.request.Request("http://127.0.0.1:8001/enroll",
-    data=json.dumps({"node_id": "alice", "device_id": "dev-alice-02-replacement", "public_key_b64": base64.b64encode(new_pub).decode()}).encode(),
-    headers={"Content-Type": "application/json"})
-with urllib.request.urlopen(reenroll_req) as r:
-    new_dev = json.loads(r.read())
-    print(f"  ✅ Re-enrolled alice on new device: {new_dev['key_state']['device_id']} (New Key: {new_dev['key_state']['key_id']})")
-EOF
+print("\n▶ STEP 4: Revoke node-b's current key and verify node-c stays reachable")
+in_flight = send("node-b", {"message": "Undelivered before revocation"})
+call("node-b", "/keys/revoke", {"key_id": in_flight["key_id"], "role": "admin"})
+expect_denial("node-b", in_flight, "Recipient key is revoked")
+unaffected = {"message": "Unaffected recipient"}
+expect_delivery("node-c", send("node-c", unaffected), unaffected)
+call("node-b", "/keys/rotate", {"role": "admin"})
+enroll("node-a", "node-b")
+replacement = {"message": "Delivered with the replacement key"}
+expect_delivery("node-b", send("node-b", replacement), replacement)
+print("  Revoked key denied, node-c unaffected, node-b restored with a replacement key.")
+PYTHON
 
 # ------------------------------------------------------------------------------
 # STEP 5: Crash Recovery (WAL) & Damaged Backup Rejection
@@ -264,7 +177,7 @@ echo "▶ STEP 5: Demonstrating Crash Recovery (WAL) & Damaged Backup Rejection"
 echo "======================================================================"
 
 python3 - << 'EOF'
-import os, tempfile, json
+import os, tempfile, json, secrets
 from src.identity.key_manager import KeyManager, KeyStateEnum
 from src.identity.recovery import WALManager
 from src.identity.backup import BackupManager, BackupIntegrityError
@@ -288,7 +201,7 @@ print(f"  ✅ WAL Crash Recovery: Torn write discarded, consistent state recover
 
 # 2. Backup Tampering Rejection
 backup_file = os.path.join(tmpdir, "backup.tbv.json")
-bm = BackupManager(b"SUPER-SECRET-MASTER-KEY-32BYTES!")
+bm = BackupManager(secrets.token_bytes(32))
 bm.create_backup({"node_id": "demo-node", "keys": [v1_id]}, backup_file)
 
 # Corrupt 1 byte in backup payload
@@ -300,9 +213,10 @@ with open(backup_file, "w") as f:
 
 try:
     bm.verify_and_restore(backup_file)
-    print("  ❌ Failed: Corrupted backup was loaded!")
 except BackupIntegrityError as e:
     print(f"  🛡️ Damaged Backup Blocked: {e}")
+else:
+    raise RuntimeError("Corrupted backup was accepted")
 EOF
 
 # ------------------------------------------------------------------------------
@@ -320,7 +234,7 @@ import json, urllib.request
 # Trigger lateral movement policy alert
 try:
     req = urllib.request.Request("http://127.0.0.1:8001/send",
-        data=json.dumps({"target_node_url": "http://127.0.0.1:8005", "recipient_id": "audit-service", "payload": {"exploit": "lateral_hop"}}).encode(),
+        data=json.dumps({"target_node_url": "http://127.0.0.1:8005", "recipient_id": "key-store", "payload": {"exploit": "lateral_hop"}}).encode(),
         headers={"Content-Type": "application/json"})
     urllib.request.urlopen(req)
 except Exception:

@@ -229,10 +229,14 @@ class PersonBIdentityAdapter:
                     self.key_manager.active_key_id = new_rec.key_id
                     if new_rec.key_id not in self.key_manager.key_history:
                         self.key_manager.key_history.append(new_rec.key_id)
-                if old_id and old_id in self.key_manager.keys:
-                    old_rec = self.key_manager.keys[old_id]
-                    if old_rec.state == KeyStateEnum.ACTIVE:
-                        old_rec.state = KeyStateEnum.GRACE_PERIOD
+                    if old_id and old_id in self.key_manager.keys:
+                        old_rec = self.key_manager.keys[old_id]
+                        if old_rec.state == KeyStateEnum.ACTIVE:
+                            old_rec.state = KeyStateEnum.GRACE_PERIOD
+                            cutoff = rot_payload.get("grace_period_cutoff")
+                            old_rec.grace_period_cutoff = (
+                                cutoff if cutoff is not None else new_rec.activated_at
+                            )
             elif op == "ENFORCE_CUTOFFS":
                 for kid in payload.get("expired_key_ids", []):
                     rec = self.key_manager.keys.get(kid)

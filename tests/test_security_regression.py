@@ -1,5 +1,5 @@
 """P4-13 Security Regression Test Suite:
-- Replay attack rejection on /receive and SecureMessaging
+- Replay attack rejection in SecureMessaging
 - Recipient binding tampering rejection (changing recipient_id / associated_data without re-signing)
 - Session resumption hijack rejection
 - Log injection resistance (newlines / JSON injection) and 1-byte mutation detection via /logs/verify
@@ -31,8 +31,8 @@ from src.audit.verifier import AuditLogVerifier
 class TestSecurityRegression(unittest.TestCase):
 
     def test_replay_attack_rejection(self):
-        """Verify identical message_id or replayed sequence numbers are rejected at both messaging and endpoint levels."""
-        # 1. Crypto messaging layer replay rejection
+        """Verify identical message_id or replayed sequence numbers are rejected at the messaging layer."""
+        # Crypto messaging layer replay rejection
         alice = SecureMessaging("node-alice")
         bob = SecureMessaging("node-bob")
         signer = MLDSASignature()
@@ -54,37 +54,6 @@ class TestSecurityRegression(unittest.TestCase):
         # Immediate replay must fail
         with self.assertRaises(ReplayAttackError):
             bob.unpack_envelope(envelope, shared_key, signer, signer_pub)
-
-        # 2. FastAPI endpoint layer replay rejection on /receive
-        tmpdir = tempfile.mkdtemp(prefix="tbv_replay_")
-        try:
-            app = create_app(node_id="node-b", data_dir=tmpdir)
-            client = TestClient(app)
-            app.state.peer_shared_keys["node-a"] = shared_key
-            app.state.peer_public_keys["node-a"] = signer_pub
-            app.state.adapters.audit.lateral_graph.allow_edge("node-a", "node-b")
-
-            sender_msg = SecureMessaging("node-a")
-            ep_env = sender_msg.pack_envelope(
-                sender_id="node-a",
-                recipient_id="node-b",
-                plaintext=b'{"cmd": "EXECUTE_TX", "tx_id": "tx-4401"}',
-                shared_key=shared_key,
-                signer=signer,
-            )
-
-            # First receive succeeds
-            first_resp = client.post("/receive", json=ep_env)
-            self.assertEqual(first_resp.status_code, 200)
-            self.assertEqual(first_resp.json()["status"], "delivered")
-
-            # Second receive of identical envelope must be rejected with HTTP 400
-            second_resp = client.post("/receive", json=ep_env)
-            self.assertEqual(second_resp.status_code, 400)
-            detail = second_resp.json()["detail"].lower()
-            self.assertTrue("replay" in detail or "duplicate" in detail)
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_recipient_header_tampering_rejection(self):
         """Verify an envelope intended for Node-B is rejected by Node-C (Recipient Binding)."""

@@ -26,7 +26,7 @@ from src.audit.logger import AuditLogger
 
 from ._pqcrypto_compat import sig_keygen
 from .delivery import DEFAULT_DELIVERY_TIMEOUT_SECONDS, ChunkReceiver, chunk_and_seal
-from .envelope import EnvelopeError, open_envelope, seal_envelope
+from .envelope import EnvelopeError, RecipientMismatchError, open_envelope, seal_envelope
 from .events import emit_crypto_event
 from .handshake import EphemeralHandshakeSession, SessionKeys
 from .policy import (
@@ -345,6 +345,23 @@ class SecureCryptoSystem:
             pad_bucket=pad_bucket,
         )
 
+    def _receive_session(self, envelope: Dict[str, Any]) -> SessionKeys:
+        if (envelope.get("recipient_identity"), envelope.get("recipient_device")) != (
+            self.identity, self.device
+        ):
+            raise RecipientMismatchError("Envelope recipient does not match this device")
+        sid = str(envelope.get("session_id", ""))
+        keys = self._sessions.get(sid)
+        if keys is None:
+            raise EnvelopeError("Unknown session")
+        if (envelope.get("sender_identity"), envelope.get("sender_device")) != (
+            keys.peer_identity, keys.peer_device
+        ):
+            raise EnvelopeError("Sender does not match the authenticated session peer")
+        if envelope.get("epoch") != self._session_epochs.get(sid):
+            raise EnvelopeError("Stale or mismatched epoch")
+        return keys
+
     def decrypt(
         self,
         envelope: Dict[str, Any],
@@ -353,6 +370,7 @@ class SecureCryptoSystem:
         request_timezone: Optional[str] = None,
     ) -> bytes:
         """Verify device/timezone policy, recipient binding, signature, epoch, replay cache, and decrypt."""
+        keys = self._receive_session(envelope)
         sid = str(envelope.get("session_id", ""))
         sender_id = str(envelope.get("sender_identity", ""))
         sender_dev = str(envelope.get("sender_device", ""))
@@ -365,16 +383,11 @@ class SecureCryptoSystem:
                 session_id=sid,
                 message_id=msg_id,
             )
-        keys = self._sessions.get(sid)
-        active_epoch = self._session_epochs.get(sid)
-        if keys is not None and active_epoch is not None and int(envelope.get("epoch", -1)) != active_epoch:
-            raise EnvelopeError(f"Stale or mismatched epoch: expected {active_epoch}")
-        session_key = keys.rx_key if keys is not None else b"\x00" * 32
         return open_envelope(
             envelope,
             local_identity=self.identity,
             local_device=self.device,
-            session_key=session_key,
+            session_key=keys.rx_key,
             sender_public_key=sender_public_key,
             replay_cache=self.replay_cache,
             audit_logger=self.audit_logger,
@@ -414,12 +427,10 @@ class SecureCryptoSystem:
         sender_public_key: bytes,
     ) -> Optional[bytes]:
         """Ingest one chunk; returns reassembled plaintext once all chunks verify."""
-        sid = str(envelope.get("session_id", ""))
-        keys = self._sessions.get(sid)
-        session_key = keys.rx_key if keys is not None else b"\x00" * 32
+        keys = self._receive_session(envelope)
         return self.chunk_receiver.ingest_chunk(
             envelope,
-            session_key=session_key,
+            session_key=keys.rx_key,
             sender_public_key=sender_public_key,
         )
 

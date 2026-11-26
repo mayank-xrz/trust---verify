@@ -8,7 +8,7 @@ import pytest
 
 from src.audit.verifier import AuditLogVerifier
 from src.crypto import SecureCryptoSystem
-from src.crypto.envelope import RecipientMismatchError
+from src.crypto.envelope import EnvelopeError, RecipientMismatchError
 from src.crypto.replay_cache import ReplayRejectedError
 from src.crypto.resumption import ResumptionPeerMismatchError
 
@@ -21,11 +21,17 @@ def test_merged_encrypt_decrypt_and_chunked_roundtrip(tmp_path: Path) -> None:
     # 1. Forward-secret hybrid handshake
     hello = bob.create_hello()
     init_msg, alice_keys = alice.initiate_session(hello, bob.signing_public_key)
+    env = alice.encrypt(alice_keys.session_id, b"merged-system-secret-payload")
+    chunk = alice.encrypt_chunked(alice_keys.session_id, b"pending handshake")[0]
+    with pytest.raises(EnvelopeError, match="Unknown session"):
+        bob.decrypt(env, alice.signing_public_key)
+    with pytest.raises(EnvelopeError, match="Unknown session"):
+        bob.decrypt_chunk(chunk, alice.signing_public_key)
+
     bob_keys = bob.accept_session(init_msg, alice.signing_public_key)
     assert alice_keys.session_id == bob_keys.session_id
 
     # 2. Single-message encrypt -> decrypt
-    env = alice.encrypt(alice_keys.session_id, b"merged-system-secret-payload")
     assert bob.decrypt(env, alice.signing_public_key) == b"merged-system-secret-payload"
 
     # Replay rejected

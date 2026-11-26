@@ -1,346 +1,170 @@
-"""P4-11 End-to-End Integration Test Suite across 3 mock nodes (node-a, node-b, node-c).
+"""HTTP tests of the demo node's recipient-specific protected transport."""
 
-Tests:
-- Multi-node enrollment & health checks
-- Protected message transfer between enrolled identities (alice on node-a, bob on node-b)
-- Key rotation with grace period: transfers using old key succeed during grace period and are rejected across all nodes (node-a, node-b, node-c) post-grace cutoff
-- Cross-node key revocation broadcast: assert all nodes reject revoked key, assert propagation latency is recorded, re-enroll alice on new device, and verify both alice (new device) and bob continue operating normally
-- Unauthorized key rotation rejected (role-based access control)
-"""
-
-import base64
-import os
-import shutil
+import secrets
 import tempfile
-import time
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-from demo.node.crypto_provider import MLDSASignature, MLKEMKeyExchange
 from demo.node.server import create_app
-from src.identity.key_manager import KeyManager, KeyStateEnum
-
-# Ensure KeyManager implements is_revoked for grace period and revocation checking
-if not hasattr(KeyManager, "is_revoked"):
-    def _is_revoked(self, key_id: str) -> bool:
-        self.enforce_cutoffs()
-        if hasattr(self, "_revoked_ids") and key_id in self._revoked_ids:
-            return True
-        rec = self.keys.get(key_id)
-        if not rec:
-            return False
-        state = getattr(rec, "state", None)
-        return state in (KeyStateEnum.REVOKED, KeyStateEnum.EXPIRED, "REVOKED", "EXPIRED", "revoked", "expired")
-
-    _orig_revoke = KeyManager.revoke_key
-    def _patched_revoke(self, key_id: str, reason: str = "") -> bool:
-        if not hasattr(self, "_revoked_ids"):
-            self._revoked_ids = set()
-        self._revoked_ids.add(key_id)
-        return _orig_revoke(self, key_id, reason)
-
-    KeyManager.is_revoked = _is_revoked
-    KeyManager.revoke_key = _patched_revoke
 
 
 class TestIntegrationE2E(unittest.TestCase):
 
     def setUp(self):
-        self.temp_dir = tempfile.mkdtemp(prefix="tbv_integration_")
-        self.data_dir_a = os.path.join(self.temp_dir, "data_a")
-        self.data_dir_b = os.path.join(self.temp_dir, "data_b")
-        self.data_dir_c = os.path.join(self.temp_dir, "data_c")
+        state = tempfile.TemporaryDirectory(prefix="tbv_integration_")
+        self.addCleanup(state.cleanup)
+        self.state = Path(state.name)
+        token = secrets.token_urlsafe(32)
+        self.operator = {"Authorization": f"Bearer {token}"}
+        self.client_a, self.client_b, self.client_c = (
+            self.create_node(node, token) for node in ("node-a", "node-b", "node-c")
+        )
+        self.token = token
 
-        # Create apps for 3 sandbox nodes with a 1.5-second grace period
-        self.grace_period = 1.5
-        self.app_a = create_app(node_id="node-a", data_dir=self.data_dir_a, grace_period_seconds=self.grace_period)
-        self.app_b = create_app(node_id="node-b", data_dir=self.data_dir_b, grace_period_seconds=self.grace_period)
-        self.app_c = create_app(node_id="node-c", data_dir=self.data_dir_c, grace_period_seconds=self.grace_period)
+    def create_node(self, node_id, token):
+        client = TestClient(
+            create_app(
+                node_id=node_id,
+                data_dir=str(self.state / node_id),
+                grace_period_seconds=30,
+                peer_enroll_token=token,
+            )
+        )
+        self.addCleanup(client.close)
+        return client
 
-        self.client_a = TestClient(self.app_a)
-        self.client_b = TestClient(self.app_b)
-        self.client_c = TestClient(self.app_c)
+    def enroll_peer(self, client, bundle):
+        response = client.post("/peers", json=bundle, headers=self.operator)
+        self.assertEqual(response.status_code, 200, response.text)
 
-        self.kem = MLKEMKeyExchange()
-        self.sig = MLDSASignature()
+    def connect(self, sender, receiver):
+        self.enroll_peer(sender, receiver.get("/keys/public").json())
+        self.enroll_peer(receiver, sender.get("/keys/public").json())
 
-        # Shared symmetric keys between test nodes
-        self.shared_key = b"INTEGRATION_TEST_PQC_KEY_32BYTES!"
-        cluster_nodes = ["node-a", "node-b", "node-c", "alice", "bob"]
-        for app in [self.app_a, self.app_b, self.app_c]:
-            # Allow all sandbox nodes to communicate in lateral movement graph
-            graph = app.state.adapters.audit.lateral_graph
-            for src in cluster_nodes:
-                for dst in cluster_nodes:
-                    graph.allow_edge(src, dst)
+    def send(self, sender, recipient, payload):
+        response = sender.post(
+            "/send",
+            json={"target_node_url": f"http://{recipient}", "recipient_id": recipient, "payload": payload},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()["envelope"]
 
-            for nid in cluster_nodes:
-                app.state.peer_shared_keys[nid] = self.shared_key
+    def assert_delivered(self, receiver, envelope, payload):
+        response = receiver.post("/receive", json=envelope)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["payload"], payload)
+        self.assertTrue(response.json()["record_hash"])
 
-        # Bind peer public keys for digital signature verification
-        pub_a = self.app_a.state.sig_provider._public_key
-        pub_b = self.app_b.state.sig_provider._public_key
-        pub_c = self.app_c.state.sig_provider._public_key
-
-        for app in [self.app_a, self.app_b, self.app_c]:
-            app.state.peer_public_keys["node-a"] = pub_a
-            app.state.peer_public_keys["node-b"] = pub_b
-            app.state.peer_public_keys["node-c"] = pub_c
-
-    def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    def assert_rejected(self, receiver, envelope, detail, status=400):
+        response = receiver.post("/receive", json=envelope)
+        self.assertEqual(response.status_code, status, response.text)
+        self.assertIn(detail, response.json()["detail"])
 
     def test_multi_node_health_and_enrollment(self):
-        """Verify all 3 nodes report healthy and enroll correctly."""
-        for client, nid in [(self.client_a, "node-a"), (self.client_b, "node-b"), (self.client_c, "node-c")]:
-            resp = client.get("/health")
-            self.assertEqual(resp.status_code, 200)
-            data = resp.json()
-            self.assertEqual(data["status"], "healthy")
-            self.assertEqual(data["node_id"], nid)
-            self.assertGreaterEqual(data["uptime_seconds"], 0.0)
-
-        # Enroll node-b into node-a
-        pub, _ = self.kem.generate_keypair()
-        enroll_resp = self.client_a.post("/enroll", json={
-            "node_id": "node-b",
-            "public_key_b64": base64.b64encode(pub).decode(),
-            "role": "node"
-        })
-        self.assertEqual(enroll_resp.status_code, 200)
-        self.assertEqual(enroll_resp.json()["status"], "enrolled")
-
-    def test_enrollment_and_protected_transfer(self):
-        """Enroll identities alice and bob, transfer authenticated PQC envelope from node-a to node-b, verify decryption."""
-        # 1. Enroll alice on node-a
-        alice_kem_pub, _ = self.kem.generate_keypair()
-        enroll_alice = self.client_a.post("/enroll", json={
-            "node_id": "alice",
-            "device_id": "dev-alice-laptop-01",
-            "public_key_b64": base64.b64encode(alice_kem_pub).decode(),
-            "role": "node"
-        })
-        self.assertEqual(enroll_alice.status_code, 200)
-        self.assertEqual(enroll_alice.json()["status"], "enrolled")
-
-        # 2. Enroll bob on node-b
-        bob_kem_pub, _ = self.kem.generate_keypair()
-        enroll_bob = self.client_b.post("/enroll", json={
-            "node_id": "bob",
-            "device_id": "dev-bob-workstation-01",
-            "public_key_b64": base64.b64encode(bob_kem_pub).decode(),
-            "role": "node"
-        })
-        self.assertEqual(enroll_bob.status_code, 200)
-        self.assertEqual(enroll_bob.json()["status"], "enrolled")
-
-        # 3. Dispatch confidential authenticated transfer from node-a to node-b
-        payload = {"action": "TRANSFER", "amount": 5000, "currency": "USD", "memo": "PQC Protected Wire"}
-        send_resp = self.client_a.post("/send", json={
-            "target_node_url": "http://node-b:8002",
-            "recipient_id": "node-b",
-            "payload": payload
-        })
-        self.assertEqual(send_resp.status_code, 200)
-        envelope = send_resp.json()["envelope"]
-        self.assertEqual(envelope["sender_id"], "node-a")
-        self.assertEqual(envelope["recipient_id"], "node-b")
-
-        # 4. Receive and verify decryption on node-b
-        recv_resp = self.client_b.post("/receive", json=envelope)
-        self.assertEqual(recv_resp.status_code, 200)
-        recv_data = recv_resp.json()
-        self.assertEqual(recv_data["status"], "delivered")
-        self.assertEqual(recv_data["payload"]["action"], "TRANSFER")
-        self.assertEqual(recv_data["payload"]["amount"], 5000)
-        self.assertTrue(recv_data.get("record_hash"))
-
-    def test_key_rotation_and_grace_period(self):
-        """Verify key rotation moves key to grace period: old key succeeds during grace, rejected across all nodes after cutoff."""
-        # 1. Capture initial active key on node-a
-        init_health = self.client_a.get("/health").json()
-        old_key_id = init_health["active_key_id"]
-
-        # Prepare envelope bound to old_key_id before rotation
-        payload = {"op": "PAYMENT", "amount": 1200}
-        send_resp = self.client_a.post("/send", json={
-            "target_node_url": "http://node-b:8002",
-            "recipient_id": "node-b",
-            "payload": payload
-        })
-        self.assertEqual(send_resp.status_code, 200)
-        old_envelope = send_resp.json()["envelope"]
-        old_envelope["key_id"] = old_key_id
-
-        # 2. Trigger key rotation on node-a with admin role
-        rotate_resp = self.client_a.post("/keys/rotate", json={"role": "admin"})
-        self.assertEqual(rotate_resp.status_code, 200)
-        r_data = rotate_resp.json()
-        self.assertEqual(r_data["status"], "rotated")
-
-        new_key_id = r_data["active_key"]["key_id"]
-        self.assertNotEqual(new_key_id, old_key_id)
-
-        # Sync retired key record to node-b and node-c cluster directories
-        old_key_rec = self.app_a.state.key_manager.keys[old_key_id]
-        self.app_b.state.key_manager.keys[old_key_id] = old_key_rec
-        self.app_c.state.key_manager.keys[old_key_id] = old_key_rec
-
-        # 3. Assert envelope using old key SUCCEEDS during grace period
-        recv_grace_resp = self.client_b.post("/receive", json=old_envelope)
-        self.assertEqual(recv_grace_resp.status_code, 200)
-        self.assertEqual(recv_grace_resp.json()["status"], "delivered")
-
-        # 4. Sleep past the grace period cutoff
-        time.sleep(self.grace_period + 0.3)
-
-        # 5. Assert transfers using the old key are REJECTED across all nodes (node-a, node-b, node-c)
-        env_for_b = dict(old_envelope)
-        env_for_b["recipient_id"] = "node-b"
-        env_for_b["key_id"] = old_key_id
-
-        env_for_c = dict(old_envelope)
-        env_for_c["recipient_id"] = "node-c"
-        env_for_c["key_id"] = old_key_id
-
-        env_for_a = dict(old_envelope)
-        env_for_a["sender_id"] = "node-b"
-        env_for_a["recipient_id"] = "node-a"
-        env_for_a["key_id"] = old_key_id
-
-        for client, nid, test_env in [
-            (self.client_a, "node-a", env_for_a),
-            (self.client_b, "node-b", env_for_b),
-            (self.client_c, "node-c", env_for_c),
-        ]:
-            post_cutoff_resp = client.post("/receive", json=test_env)
+        for client, node_id in (
+            (self.client_a, "node-a"), (self.client_b, "node-b"), (self.client_c, "node-c")
+        ):
+            self.assertEqual(client.get("/health").json()["node_id"], node_id)
+            bundle = client.get("/keys/public").json()
+            self.assertEqual(bundle["node_id"], node_id)
             self.assertEqual(
-                post_cutoff_resp.status_code,
-                400,
-                f"Node {nid} failed to reject expired key after grace cutoff"
+                set(bundle),
+                {"node_id", "signing_public_key_b64", "kem_key_id", "kem_key_version", "kem_public_key_b64"},
             )
 
-        # 6. Verify transfers using the new active key succeed normally
-        new_send = self.client_a.post("/send", json={
-            "target_node_url": "http://node-b:8002",
-            "recipient_id": "node-b",
-            "payload": {"op": "PAYMENT", "amount": 2400}
-        })
-        self.assertEqual(new_send.status_code, 200)
-        new_env = new_send.json()["envelope"]
-        new_env["key_id"] = new_key_id
-        recv_new = self.client_b.post("/receive", json=new_env)
-        self.assertEqual(recv_new.status_code, 200)
-        self.assertEqual(recv_new.json()["status"], "delivered")
+        bundle = self.client_b.get("/keys/public").json()
+        self.assertEqual(self.client_a.post("/peers", json=bundle).status_code, 401)
+        self.enroll_peer(self.client_a, bundle)
+        self.enroll_peer(self.client_a, bundle)
+        invalid_bundle = dict(bundle, kem_public_key_b64=bundle["signing_public_key_b64"])
+        self.assertEqual(
+            self.client_a.post("/peers", json=invalid_bundle, headers=self.operator).status_code,
+            422,
+        )
+        conflicting_bundle = dict(
+            bundle, signing_public_key_b64=self.client_c.get("/keys/public").json()["signing_public_key_b64"]
+        )
+        self.assertEqual(
+            self.client_a.post("/peers", json=conflicting_bundle, headers=self.operator).status_code,
+            409,
+        )
 
-    def test_cross_node_revocation_and_reenrollment(self):
-        """Revoke device key, verify rejection across all nodes, check propagation latency, re-enroll alice, verify normal operation."""
-        # 1. Identify active key on node-a
-        active_key_id = self.client_a.get("/health").json()["active_key_id"]
+    def test_protected_transfer_for_multiple_recipients(self):
+        payload = {"memo": "PQC protected transfer"}
+        request = {"target_node_url": "http://node-b", "recipient_id": "node-b", "payload": payload}
+        self.assertEqual(self.client_a.post("/send", json=request).status_code, 403)
 
-        # Sync key record to node-b and node-c
-        key_rec = self.app_a.state.key_manager.keys[active_key_id]
-        self.app_b.state.key_manager.keys[active_key_id] = key_rec
-        self.app_c.state.key_manager.keys[active_key_id] = key_rec
+        self.enroll_peer(self.client_a, self.client_b.get("/keys/public").json())
+        first = self.send(self.client_a, "node-b", payload)
+        self.assert_rejected(self.client_b, first, "Sender transport keys are not enrolled", 403)
+        self.connect(self.client_a, self.client_b)
+        self.connect(self.client_a, self.client_c)
+        second = self.send(self.client_a, "node-b", payload)
+        third = self.send(self.client_a, "node-c", payload)
 
-        # Create envelope bound to this key
-        send_resp = self.client_a.post("/send", json={
-            "target_node_url": "http://node-b:8002",
-            "recipient_id": "node-b",
-            "payload": {"msg": "Pre-revocation message"}
-        })
-        valid_envelope = send_resp.json()["envelope"]
-        valid_envelope["key_id"] = active_key_id
+        self.assertNotEqual(first["kem_ciphertext"], second["kem_ciphertext"])
+        self.assertNotEqual(first["key_id"], third["key_id"])
+        self.assert_rejected(self.client_c, first, "Recipient binding violation")
+        self.assert_delivered(self.client_b, first, payload)
+        self.assert_delivered(self.client_b, second, payload)
+        self.assert_delivered(self.client_c, third, payload)
+        self.assert_rejected(self.client_b, first, "Duplicate message_id")
 
-        # 2. Revoke active key via /keys/revoke
-        revoke_resp = self.client_a.post("/keys/revoke", json={
-            "key_id": active_key_id,
-            "reason": "Compromised device key during security inspection",
-            "role": "admin"
-        })
-        self.assertEqual(revoke_resp.status_code, 200)
-        rev_data = revoke_resp.json()
-        self.assertEqual(rev_data["status"], "revoked")
-        self.assertEqual(rev_data["key_id"], active_key_id)
+    def test_envelope_requires_signed_key_id_and_kem_ciphertext(self):
+        self.connect(self.client_a, self.client_b)
+        payload = {"message": "authenticated metadata"}
+        envelope = self.send(self.client_a, "node-b", payload)
+        other = self.send(self.client_a, "node-b", payload)
 
-        # Assert propagation latency is recorded and returned
-        self.assertIn("propagation_latency_ms", rev_data)
-        self.assertGreaterEqual(rev_data["propagation_latency_ms"], 0.0)
+        self.assert_rejected(self.client_b, dict(envelope, key_id="unrecognized"), "signature")
+        self.assert_rejected(
+            self.client_b, dict(envelope, kem_ciphertext=other["kem_ciphertext"]), "signature"
+        )
+        self.assert_delivered(self.client_b, envelope, payload)
 
-        # Sync revocation broadcast to node-b and node-c
-        self.client_b.post("/keys/revoke", json={"key_id": active_key_id, "reason": "broadcast", "role": "admin"})
-        self.client_c.post("/keys/revoke", json={"key_id": active_key_id, "reason": "broadcast", "role": "admin"})
+    def test_rotation_grace_survives_restart_and_enforces_cutoff(self):
+        self.connect(self.client_a, self.client_b)
+        old_bundle = self.client_b.get("/keys/public").json()
+        old_message = self.send(self.client_a, "node-b", {"phase": "grace"})
+        late_message = self.send(self.client_a, "node-b", {"phase": "after cutoff"})
+        rotate = self.client_b.post("/keys/rotate", json={"role": "admin"})
+        self.assertEqual(rotate.status_code, 200, rotate.text)
+        new_bundle = self.client_b.get("/keys/public").json()
+        self.assertNotEqual(new_bundle["kem_key_id"], old_bundle["kem_key_id"])
+        cutoff = self.client_b.app.state.key_manager.keys[old_bundle["kem_key_id"]].grace_period_cutoff
 
-        # 3. Assert all nodes reject requests referencing the revoked key
-        env_for_b = dict(valid_envelope)
-        env_for_b["recipient_id"] = "node-b"
-        env_for_b["key_id"] = active_key_id
+        restarted = self.create_node("node-b", self.token)
+        self.enroll_peer(restarted, self.client_a.get("/keys/public").json())
+        self.assert_delivered(restarted, old_message, {"phase": "grace"})
+        with patch("src.identity.key_manager.time.time", return_value=cutoff):
+            self.assert_rejected(restarted, late_message, "Recipient key is expired")
 
-        env_for_c = dict(valid_envelope)
-        env_for_c["recipient_id"] = "node-c"
-        env_for_c["key_id"] = active_key_id
+        self.enroll_peer(self.client_a, new_bundle)
+        stale = self.client_a.post("/peers", json=old_bundle, headers=self.operator)
+        self.assertEqual(stale.status_code, 409)
+        current = self.send(self.client_a, "node-b", {"phase": "new key"})
+        self.assert_delivered(restarted, current, {"phase": "new key"})
 
-        env_for_a = dict(valid_envelope)
-        env_for_a["sender_id"] = "node-b"
-        env_for_a["recipient_id"] = "node-a"
-        env_for_a["key_id"] = active_key_id
+    def test_revocation_isolates_recipient_and_replacement_restores_access(self):
+        self.connect(self.client_a, self.client_b)
+        self.connect(self.client_a, self.client_c)
+        addressed_to_b = self.send(self.client_a, "node-b", {"message": "in flight"})
+        addressed_to_c = self.send(self.client_a, "node-c", {"message": "unaffected"})
+        revoked = self.client_b.post(
+            "/keys/revoke", json={"key_id": addressed_to_b["key_id"], "role": "admin"}
+        )
+        self.assertEqual(revoked.status_code, 200, revoked.text)
+        self.assert_rejected(self.client_b, addressed_to_b, "Recipient key is revoked")
+        self.assert_delivered(self.client_c, addressed_to_c, {"message": "unaffected"})
 
-        for client, nid, test_env in [
-            (self.client_a, "node-a", env_for_a),
-            (self.client_b, "node-b", env_for_b),
-            (self.client_c, "node-c", env_for_c),
-        ]:
-            rev_recv = client.post("/receive", json=test_env)
-            self.assertEqual(
-                rev_recv.status_code,
-                400,
-                f"Node {nid} accepted a revoked key!"
-            )
-            self.assertIn("revoked", rev_recv.json()["detail"].lower())
-
-        # 4. Re-enroll alice on a new device with a fresh key
-        new_alice_pub, _ = self.kem.generate_keypair()
-        reenroll_resp = self.client_a.post("/enroll", json={
-            "node_id": "alice",
-            "device_id": "dev-alice-laptop-02-replacement",
-            "public_key_b64": base64.b64encode(new_alice_pub).decode(),
-            "role": "node"
-        })
-        self.assertEqual(reenroll_resp.status_code, 200)
-        self.assertEqual(reenroll_resp.json()["status"], "enrolled")
-        new_key_id = reenroll_resp.json()["key_state"]["key_id"]
-
-        # 5. Verify alice (new device) operates normally
-        alice_send = self.client_a.post("/send", json={
-            "target_node_url": "http://node-b:8002",
-            "recipient_id": "node-b",
-            "payload": {"msg": "Alice is back online on new device"}
-        })
-        self.assertEqual(alice_send.status_code, 200)
-        alice_env = alice_send.json()["envelope"]
-        alice_env["key_id"] = new_key_id
-        alice_recv = self.client_b.post("/receive", json=alice_env)
-        self.assertEqual(alice_recv.status_code, 200)
-        self.assertEqual(alice_recv.json()["status"], "delivered")
-
-        # 6. Verify unaffected user bob continues operating normally
-        bob_send = self.client_b.post("/send", json={
-            "target_node_url": "http://node-a:8001",
-            "recipient_id": "node-a",
-            "payload": {"msg": "Bob unaffected message"}
-        })
-        self.assertEqual(bob_send.status_code, 200)
-        bob_env = bob_send.json()["envelope"]
-        bob_recv = self.client_a.post("/receive", json=bob_env)
-        self.assertEqual(bob_recv.status_code, 200)
-        self.assertEqual(bob_recv.json()["status"], "delivered")
+        self.assertEqual(self.client_b.post("/keys/rotate", json={"role": "admin"}).status_code, 200)
+        self.enroll_peer(self.client_a, self.client_b.get("/keys/public").json())
+        new_message = self.send(self.client_a, "node-b", {"message": "replacement key"})
+        self.assert_delivered(self.client_b, new_message, {"message": "replacement key"})
 
     def test_unauthorized_key_rotation_rejected(self):
-        """Verify non-admin role is blocked from rotating keys."""
-        resp = self.client_a.post("/keys/rotate", json={"role": "guest"})
-        self.assertEqual(resp.status_code, 403)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        response = self.client_a.post("/keys/rotate", json={"role": "guest"})
+        self.assertEqual(response.status_code, 403)

@@ -137,8 +137,10 @@ class KeyManager:
         """
         now = time.time()
         old_record = self.keys.get(self.active_key_id) if self.active_key_id else None
-        new_version = (old_record.version + 1) if old_record else 1
+        last_record = self.keys.get(self.key_history[-1]) if self.key_history else None
+        new_version = last_record.version + 1 if last_record else 1
         algo = algorithm or (old_record.algorithm if old_record else "ML-KEM-768")
+        grace_cutoff = now + self.grace_period_seconds
 
         new_key_id = f"key-{self.node_id[:8]}-{secrets.token_hex(4)}"
         new_record = KeyRecord(
@@ -161,13 +163,14 @@ class KeyManager:
                 {
                     "old_key_id": old_record.key_id if old_record else None,
                     "new_key_record": new_record.to_dict(include_private=True),
+                    "grace_period_cutoff": grace_cutoff if old_record else None,
                 },
             )
 
         # Transition old key into GRACE_PERIOD
         if old_record and old_record.state == KeyStateEnum.ACTIVE:
             old_record.state = KeyStateEnum.GRACE_PERIOD
-            old_record.grace_period_cutoff = now + self.grace_period_seconds
+            old_record.grace_period_cutoff = grace_cutoff
 
         self.keys[new_key_id] = new_record
         self.active_key_id = new_key_id

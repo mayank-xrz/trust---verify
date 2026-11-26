@@ -152,6 +152,12 @@ python3 scripts/benchmark.py
 ./scripts/run_demo.sh
 ```
 
+The walkthrough starts nodes on loopback and generates an operator token for peer enrollment. It exercises the same `/send` and `/receive` endpoints for normal traffic, a recipient key in grace, expiry, revocation, and replacement. It also verifies that revoking node-b's recipient key leaves messages to node-c deliverable.
+
+For a separately running demo cluster, set `DEMO_PEER_ENROLL_TOKEN` on each node. Get each node's public bundle from `GET /keys/public` over a trusted channel. Register the bundle on each communicating peer with `POST /peers` and its operator bearer token. `/send` resolves the recipient by its enrolled `recipient_id` and returns a signed envelope for relay to that recipient's `/receive` endpoint. Refresh the enrolled KEM bundle after rotation. New messages use ML-KEM-768 to generate a fresh content key, and the recipient checks the signed key version against its local lifecycle state before decrypting.
+
+Demo peer registrations and ML-DSA signing identities are process-local. Restarting the demo cluster requires a fresh peer enrollment. The demo retains recipient KEM keys in its local WAL for crash recovery, so access to those files can disclose traffic encrypted for those keys. The separate hybrid session path uses ephemeral exchange keys for forward secrecy in completed sessions.
+
 ---
 
 ## 📊 Performance & Detection Benchmarks

@@ -15,7 +15,13 @@ import json
 import secrets
 import time
 import uuid
-from typing import Any, Dict, Optional, Set, Tuple
+from threading import Lock
+from typing import Any, Callable, Dict, Optional, Set, Tuple
+
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from src.crypto.primitives import canonical, unb64
 
 try:
     from pqcrypto.kem import ml_kem_768
@@ -32,31 +38,6 @@ try:
     PQCRYPTO_AVAILABLE = True
 except ImportError:
     PQCRYPTO_AVAILABLE = False
-
-try:
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    CRYPTO_AEAD_AVAILABLE = True
-except ImportError:
-    CRYPTO_AEAD_AVAILABLE = False
-
-# RFC 3526 2048-bit MODP Group used only if pqcrypto wheel is absent locally
-_MODP_P = int(
-    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1"
-    "29024E088A67CC74020BBEA63B139B22514A08798E3404DD"
-    "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245"
-    "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED"
-    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D"
-    "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F"
-    "83655D23DCA3AD961C62F356208552BB9ED529077096966D"
-    "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B"
-    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9"
-    "DE2BCBF6955817183995497CEA956AE515D2261898FA0510"
-    "15728E5A8AACAA68FFFFFFFFFFFFFFFF",
-    16,
-)
-_MODP_G = 2
-_MODP_Q = (_MODP_P - 1) // 2
-
 
 class RecipientMismatchError(Exception):
     """Raised when envelope recipient binding does not match local node ID."""
@@ -146,40 +127,6 @@ class MLDSASignature:
         return sig_verify(ml_dsa_65, public_key, message, signature)
 
 
-class _FallbackAEAD:
-    @staticmethod
-    def _block(key: bytes, nonce: bytes, counter: int) -> bytes:
-        return hashlib.sha256(key + nonce + counter.to_bytes(4, "big")).digest()
-
-    @classmethod
-    def encrypt(cls, key: bytes, nonce: bytes, plaintext: bytes, aad: bytes) -> bytes:
-        enc_k = hashlib.sha256(key + b":enc").digest()
-        mac_k = hashlib.sha256(key + b":mac").digest()
-        chunks = [
-            bytes(b ^ k for b, k in zip(plaintext[i:i + 32], cls._block(enc_k, nonce, i // 32)))
-            for i in range(0, len(plaintext), 32)
-        ]
-        ct = b"".join(chunks)
-        mac = hmac.new(mac_k, aad + nonce + ct, hashlib.sha256).digest()
-        return ct + mac
-
-    @classmethod
-    def decrypt(cls, key: bytes, nonce: bytes, ct_and_tag: bytes, aad: bytes) -> bytes:
-        if len(ct_and_tag) < 32:
-            raise ValueError("Ciphertext too short.")
-        ct, mac = ct_and_tag[:-32], ct_and_tag[-32:]
-        enc_k = hashlib.sha256(key + b":enc").digest()
-        mac_k = hashlib.sha256(key + b":mac").digest()
-        expected = hmac.new(mac_k, aad + nonce + ct, hashlib.sha256).digest()
-        if not hmac.compare_digest(mac, expected):
-            raise MessageTamperedError("AEAD authentication tag verification failed.")
-        chunks = [
-            bytes(b ^ k for b, k in zip(ct[i:i + 32], cls._block(enc_k, nonce, i // 32)))
-            for i in range(0, len(ct), 32)
-        ]
-        return b"".join(chunks)
-
-
 class ReplayProtectionCache:
     """Sliding-window sequence cache + TTL seen message ID deduplication."""
 
@@ -223,6 +170,40 @@ class SecureMessaging:
         self.node_id = node_id
         self.peer_replay_caches: Dict[str, ReplayProtectionCache] = collections.defaultdict(ReplayProtectionCache)
         self.outbound_seq_counters: Dict[str, int] = collections.defaultdict(int)
+        self._counter_lock = Lock()
+
+    def seal_for_recipient(
+        self,
+        recipient_id: str,
+        plaintext: bytes,
+        recipient_key_id: str,
+        recipient_public_key: bytes,
+        kem: MLKEMKeyExchange,
+        signer: MLDSASignature,
+    ) -> Dict[str, Any]:
+        """Encapsulate a fresh content key for this message and recipient."""
+        kem_ciphertext, content_key = kem.encapsulate(recipient_public_key)
+        return self.pack_envelope(
+            self.node_id, recipient_id, plaintext, content_key, signer,
+            kem_ciphertext=kem_ciphertext, recipient_key_id=recipient_key_id,
+        )
+
+    def open_for_recipient(
+        self,
+        envelope: Dict[str, Any],
+        kem: MLKEMKeyExchange,
+        verifier_sig: MLDSASignature,
+        sender_public_key: bytes,
+        resolve_private_key: Callable[[str], bytes],
+    ) -> bytes:
+        """Verify the sender before resolving and using a local recipient key."""
+        self._verify_envelope(envelope, verifier_sig, sender_public_key)
+        key_id = envelope.get("key_id")
+        if not isinstance(key_id, str) or not key_id:
+            raise MessageTamperedError("Missing recipient key ID")
+        kem_ciphertext = unb64(envelope.get("kem_ciphertext"), ml_kem_768.CIPHERTEXT_SIZE)
+        content_key = kem.decapsulate(kem_ciphertext, resolve_private_key(key_id))
+        return self._decrypt_envelope(envelope, content_key)
 
     def pack_envelope(
         self,
@@ -234,12 +215,15 @@ class SecureMessaging:
         session_id: Optional[str] = None,
         kem_public_key: Optional[bytes] = None,
         kem_ciphertext: Optional[bytes] = None,
+        recipient_key_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         message_id = str(uuid.uuid4())
-        seq = self.outbound_seq_counters[recipient_id]
-        self.outbound_seq_counters[recipient_id] += 1
+        with self._counter_lock:
+            seq = self.outbound_seq_counters[recipient_id]
+            self.outbound_seq_counters[recipient_id] += 1
         timestamp_ns = time.time_ns()
         nonce = secrets.token_bytes(12)
+        session_id = session_id or ("sess-" + secrets.token_hex(16))
 
         aad_bytes = json.dumps(
             {
@@ -249,22 +233,19 @@ class SecureMessaging:
                 "dst": recipient_id,
                 "seq": seq,
                 "ts": timestamp_ns,
-                "sess": session_id or "",
+                "sess": session_id,
             },
             sort_keys=True,
         ).encode("utf-8")
 
-        if CRYPTO_AEAD_AVAILABLE:
-            ciphertext_bytes = AESGCM(shared_key[:32]).encrypt(nonce, plaintext, aad_bytes)
-        else:
-            ciphertext_bytes = _FallbackAEAD.encrypt(shared_key[:32], nonce, plaintext, aad_bytes)
+        ciphertext_bytes = AESGCM(shared_key[:32]).encrypt(nonce, plaintext, aad_bytes)
 
         envelope: Dict[str, Any] = {
             "version": "1.0.0",
             "message_id": message_id,
             "sender_id": sender_id,
             "recipient_id": recipient_id,
-            "session_id": session_id or ("sess-" + secrets.token_hex(16)),
+            "session_id": session_id,
             "sequence_number": seq,
             "timestamp_ns": timestamp_ns,
             "algorithm_suite": {"kem": "ML-KEM-768", "sig": "ML-DSA-65", "aead": "AES-256-GCM"},
@@ -276,6 +257,8 @@ class SecureMessaging:
             envelope["ephemeral_kem_public_key"] = base64.b64encode(kem_public_key).decode("ascii")
         if kem_ciphertext:
             envelope["kem_ciphertext"] = base64.b64encode(kem_ciphertext).decode("ascii")
+        if recipient_key_id is not None:
+            envelope["key_id"] = recipient_key_id
 
         sig_bytes = signer.sign(self._canonical_signature_payload(envelope))
         envelope["signature"] = base64.b64encode(sig_bytes).decode("ascii")
@@ -288,20 +271,21 @@ class SecureMessaging:
         verifier_sig: Any,
         sender_public_key: bytes,
     ) -> bytes:
+        self._verify_envelope(envelope, verifier_sig, sender_public_key)
+        return self._decrypt_envelope(envelope, shared_key)
+
+    def _verify_envelope(self, envelope: Dict[str, Any], verifier_sig: Any, sender_public_key: bytes) -> None:
         if envelope.get("recipient_id") != self.node_id:
             raise RecipientMismatchError(
                 f"Recipient binding violation! Target is {envelope.get('recipient_id')}, but local node is {self.node_id}"
             )
 
-        sender_id = envelope["sender_id"]
-        raw_sig = base64.b64decode(envelope["signature"])
+        raw_sig = base64.b64decode(envelope["signature"], validate=True)
         if not verifier_sig.verify(self._canonical_signature_payload(envelope), raw_sig, sender_public_key):
             raise MessageTamperedError("ML-DSA signature verification failed on envelope.")
 
-        self.peer_replay_caches[sender_id].check_and_record(
-            envelope["message_id"], envelope["sequence_number"], envelope["timestamp_ns"]
-        )
-
+    def _decrypt_envelope(self, envelope: Dict[str, Any], shared_key: bytes) -> bytes:
+        sender_id = envelope["sender_id"]
         aad_bytes = base64.b64decode(envelope["additional_authenticated_data"])
         nonce = base64.b64decode(envelope["nonce"])
         ciphertext_bytes = base64.b64decode(envelope["ciphertext"])
@@ -309,28 +293,25 @@ class SecureMessaging:
         if aad_obj.get("dst") != self.node_id or aad_obj.get("src") != sender_id:
             raise RecipientMismatchError("AAD internal recipient/sender binding mismatch!")
 
-        if CRYPTO_AEAD_AVAILABLE:
-            try:
-                return AESGCM(shared_key[:32]).decrypt(nonce, ciphertext_bytes, aad_bytes)
-            except Exception as exc:
-                raise MessageTamperedError(f"AEAD decryption failed: {exc}") from exc
-        return _FallbackAEAD.decrypt(shared_key[:32], nonce, ciphertext_bytes, aad_bytes)
+        try:
+            plaintext = AESGCM(shared_key[:32]).decrypt(nonce, ciphertext_bytes, aad_bytes)
+        except InvalidTag as exc:
+            raise MessageTamperedError("AEAD authentication failed") from exc
+        with self._counter_lock:
+            self.peer_replay_caches[sender_id].check_and_record(
+                envelope["message_id"], envelope["sequence_number"], envelope["timestamp_ns"]
+            )
+        return plaintext
 
     @staticmethod
     def _canonical_signature_payload(envelope: Dict[str, Any]) -> bytes:
-        fields = [
-            envelope.get("version", ""),
-            envelope.get("message_id", ""),
-            envelope.get("sender_id", ""),
-            envelope.get("recipient_id", ""),
-            envelope.get("session_id", ""),
-            str(envelope.get("sequence_number", 0)),
-            str(envelope.get("timestamp_ns", 0)),
-            envelope.get("ciphertext", ""),
-            envelope.get("nonce", ""),
-            envelope.get("additional_authenticated_data", ""),
-        ]
-        return b"|".join(f.encode("utf-8") for f in fields)
+        fields = (
+            "version", "message_id", "sender_id", "recipient_id", "session_id",
+            "sequence_number", "timestamp_ns", "ciphertext", "nonce",
+            "additional_authenticated_data", "algorithm_suite", "key_id", "kem_ciphertext",
+            "ephemeral_kem_public_key",
+        )
+        return b"tbv/demo/envelope/v1\x00" + canonical({field: envelope.get(field) for field in fields})
 
 
 class SessionManager:

@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import secrets
 import sys
 import threading
 import time
@@ -25,13 +26,16 @@ from typing import Any, Dict, List, Optional
 
 import jsonschema
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
+from pqcrypto.kem import ml_kem_768
+from pqcrypto.sign import ml_dsa_65
+from pydantic import BaseModel, Field
 
 from demo.node.adapters import NodeAdapters
 from demo.node.sandbox_api import SandboxController, create_sandbox_router
 from demo.node.ui import render_dashboard_html
+from src.crypto.primitives import CryptoError, unb64
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
@@ -55,8 +59,17 @@ class EnrollRequest(BaseModel):
     role: str = "node"
     device_id: Optional[str] = None
 
+
+class PeerKeys(BaseModel):
+    node_id: str = Field(min_length=1)
+    signing_public_key_b64: str
+    kem_key_id: str = Field(min_length=1)
+    kem_key_version: int = Field(ge=1)
+    kem_public_key_b64: str
+
+
 class SendRequest(BaseModel):
-    target_node_url: str
+    target_node_url: Optional[str] = None
     recipient_id: str
     payload: Dict[str, Any]
 
@@ -72,11 +85,40 @@ class RevokeKeyRequest(BaseModel):
     role: str = "admin"
 
 
+def _schema_envelope(envelope: Dict[str, Any]) -> Dict[str, Any]:
+    fields = (
+        "sender_id", "recipient_id", "session_id", "kem_ciphertext", "nonce", "ciphertext", "signature"
+    )
+    header = {field: envelope.get(field) for field in ("sender_id", "recipient_id", "session_id")}
+    header["seq_num"] = envelope.get("sequence_number")
+    suite = envelope.get("algorithm_suite")
+    if suite != {"kem": "ML-KEM-768", "sig": "ML-DSA-65", "aead": "AES-256-GCM"}:
+        raise ValueError("Unsupported envelope algorithms")
+    if envelope.get("version") != "1.0.0":
+        raise ValueError("Unsupported envelope version")
+    if (
+        envelope.get("associated_data", header) != header
+        or envelope.get("seq_num", header["seq_num"]) != header["seq_num"]
+    ):
+        raise ValueError("Envelope header is inconsistent")
+    result = {field: envelope.get(field) for field in fields}
+    result.update(
+        version=envelope["version"],
+        seq_num=header["seq_num"],
+        associated_data=header,
+        sig_alg=suite["sig"],
+        kem_alg=suite["kem"],
+    )
+    jsonschema.validate(instance=result, schema=ENVELOPE_SCHEMA)
+    return result
+
+
 def create_app(
     node_id: Optional[str] = None,
     data_dir: Optional[str] = None,
     grace_period_seconds: Optional[float] = None,
     peer_nodes: Optional[List[str]] = None,
+    peer_enroll_token: Optional[str] = None,
 ) -> FastAPI:
     # Resolve configuration from environment variables or params
     node_id = node_id or os.environ.get("NODE_ID", "node-a")
@@ -85,6 +127,7 @@ def create_app(
 
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
+    peer_enroll_token = peer_enroll_token or os.environ.get("DEMO_PEER_ENROLL_TOKEN")
 
     app = FastAPI(title=f"Trust-But-Verify Node Service [{node_id}]", version="1.0.0")
 
@@ -96,12 +139,14 @@ def create_app(
     crypto = adapters.crypto
     identity = adapters.identity
     audit = adapters.audit
+    if crypto.is_mock or identity.is_mock:
+        raise RuntimeError("Protected transport requires real crypto and lifecycle providers")
+    key_lock = threading.Lock()
 
     # In-memory peer bindings and operational metrics
     enrolled_nodes: Dict[str, Dict[str, Any]] = {}
     recent_alerts: List[Dict[str, Any]] = []
-    peer_shared_keys: Dict[str, bytes] = {}
-    peer_public_keys: Dict[str, bytes] = {}
+    trusted_peers: Dict[str, PeerKeys] = {}
     message_stats = {"sent": 0, "received": 0, "rejected": 0}
     crypto_latencies: List[float] = []
     last_revocation_ms = 0.0
@@ -115,8 +160,6 @@ def create_app(
     app.state.messaging = crypto.messaging
     app.state.sig_provider = crypto.sig
     app.state.kem_provider = crypto.kem
-    app.state.peer_shared_keys = peer_shared_keys
-    app.state.peer_public_keys = peer_public_keys
     app.state.enrolled_nodes = enrolled_nodes
     app.state.recent_alerts = recent_alerts
 
@@ -131,8 +174,22 @@ def create_app(
     )
     app.include_router(create_sandbox_router(sandbox))
 
+    def active_key():
+        with key_lock:
+            return identity.key_manager.get_active_key()
+
+    def recipient_private_key(key_id: str) -> bytes:
+        with key_lock:
+            record = identity.key_manager.get_key_for_decryption(key_id)
+            if record is not None and record.owner_node_id == node_id and record.private_key_b64:
+                return unb64(record.private_key_b64, ml_kem_768.SECRET_KEY_SIZE)
+            record = identity.key_manager.keys.get(key_id)
+            if record is not None and record.owner_node_id == node_id:
+                raise CryptoError(f"Recipient key is {record.state.value.lower()}")
+        raise CryptoError("Unknown recipient key")
+
     def _service_info() -> Dict[str, Any]:
-        active = identity.key_manager.get_active_key()
+        active = active_key()
         return {
             "name": "Trust-But-Verify",
             "tagline": "Post-Quantum Cryptographic Zero-Trust Defense & Explainable Detection",
@@ -152,6 +209,8 @@ def create_app(
                 "rotate_key": "POST /keys/rotate",
                 "revoke_key": "POST /keys/revoke",
                 "enroll_device": "POST /enroll",
+                "public_keys": "GET /keys/public",
+                "enroll_peer": "POST /peers",
             },
         }
 
@@ -168,7 +227,7 @@ def create_app(
 
     @app.get("/health")
     def health_check():
-        active = identity.key_manager.get_active_key()
+        active = active_key()
         return {
             "status": "healthy",
             "node_id": node_id,
@@ -177,6 +236,45 @@ def create_app(
             "uptime_seconds": round(time.time() - boot_time, 2),
             "timestamp_ns": time.time_ns(),
         }
+
+    @app.get("/keys/public", response_model=PeerKeys)
+    def public_keys():
+        active = active_key()
+        if active is None:
+            raise HTTPException(status_code=503, detail="No active recipient key")
+        return PeerKeys(
+            node_id=node_id,
+            signing_public_key_b64=base64.b64encode(crypto.sig_public_key).decode("ascii"),
+            kem_key_id=active.key_id,
+            kem_key_version=active.version,
+            kem_public_key_b64=active.public_key_b64,
+        )
+
+    @app.post("/peers")
+    def enroll_peer(keys: PeerKeys, authorization: Optional[str] = Header(default=None)):
+        if not peer_enroll_token:
+            raise HTTPException(status_code=503, detail="Peer enrollment is disabled")
+        expected = f"Bearer {peer_enroll_token}".encode("utf-8")
+        if not authorization or not secrets.compare_digest(authorization.encode("utf-8"), expected):
+            raise HTTPException(status_code=401, detail="Peer enrollment requires an operator token")
+        try:
+            unb64(keys.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
+            unb64(keys.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE)
+        except CryptoError as exc:
+            raise HTTPException(status_code=422, detail="Invalid peer public keys") from exc
+        with key_lock:
+            previous = trusted_peers.get(keys.node_id)
+            if previous is not None and previous != keys:
+                same_signer = previous.signing_public_key_b64 == keys.signing_public_key_b64
+                fresh_key = (
+                    keys.kem_key_version > previous.kem_key_version
+                    and keys.kem_key_id != previous.kem_key_id
+                    and keys.kem_public_key_b64 != previous.kem_public_key_b64
+                )
+                if not same_signer or not fresh_key:
+                    raise HTTPException(status_code=409, detail="Conflicting or stale peer key binding")
+            trusted_peers[keys.node_id] = keys
+        return {"status": "enrolled", "node_id": keys.node_id, "kem_key_id": keys.kem_key_id}
 
     @app.post("/enroll")
     def enroll_device(req: EnrollRequest):
@@ -206,11 +304,6 @@ def create_app(
                 raise HTTPException(status_code=422, detail=f"Key state schema validation failed: {e.message}")
 
         enrolled_nodes[req.node_id] = key_state_record
-        if req.public_key_b64:
-            try:
-                peer_public_keys[req.node_id] = base64.b64decode(req.public_key_b64)
-            except Exception:
-                peer_public_keys[req.node_id] = req.public_key_b64.encode()
 
         rec = audit.logger.log_event(
             service=node_id,
@@ -254,55 +347,18 @@ def create_app(
             )
             raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
 
-        # 2. Prepare envelope
-        shared_key = peer_shared_keys.get(recipient_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
+        with key_lock:
+            peer = trusted_peers.get(recipient_id)
+        if peer is None:
+            raise HTTPException(status_code=403, detail="Recipient transport keys are not enrolled")
         plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
-
-        seq = message_stats["sent"] + 1
-        sess_id = f"sess-{sender_id}-{recipient_id}"
-
-        # Raw pack
-        raw_env = crypto.messaging.pack_envelope(
-            sender_id=sender_id,
-            recipient_id=recipient_id,
-            plaintext=plaintext_bytes,
-            shared_key=shared_key,
-            signer=crypto.sig,
+        raw_env = crypto.messaging.seal_for_recipient(
+            recipient_id, plaintext_bytes, peer.kem_key_id,
+            unb64(peer.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE), crypto.kem, crypto.sig,
         )
-
-        # Build schema-compliant envelope for schemas/envelope.schema.json
-        envelope = {
-            "version": "1.0",
-            "sender_id": sender_id,
-            "recipient_id": recipient_id,
-            "seq_num": raw_env.get("sequence_number", seq),
-            "session_id": raw_env.get("session_id", sess_id),
-            "kem_ciphertext": raw_env.get("kem_ciphertext") or base64.b64encode(b"MOCK_KEM_CIPHERTEXT").decode("ascii"),
-            "nonce": raw_env.get("nonce"),
-            "ciphertext": raw_env.get("ciphertext"),
-            "associated_data": {
-                "sender_id": sender_id,
-                "recipient_id": recipient_id,
-                "seq_num": raw_env.get("sequence_number", seq),
-                "session_id": raw_env.get("session_id", sess_id),
-            },
-            "signature": raw_env.get("signature"),
-            "sig_alg": "ML-DSA-65",
-            "kem_alg": "ML-KEM-768",
-        }
-
-        # Also preserve legacy fields for backward compatibility with in-memory unpackers
-        raw_env["seq_num"] = envelope["seq_num"]
-        raw_env["associated_data"] = envelope["associated_data"]
-        raw_env["sig_alg"] = "ML-DSA-65"
-        raw_env["kem_alg"] = "ML-KEM-768"
-
-        # Validate with envelope schema
-        if ENVELOPE_SCHEMA:
-            try:
-                jsonschema.validate(instance=envelope, schema=ENVELOPE_SCHEMA)
-            except jsonschema.ValidationError as e:
-                raise HTTPException(status_code=422, detail=f"Envelope schema violation: {e.message}")
+        envelope = _schema_envelope(raw_env)
+        for field in ("seq_num", "associated_data", "sig_alg", "kem_alg"):
+            raw_env[field] = envelope[field]
 
         latency = (time.perf_counter() - t0) * 1000.0
         crypto_latencies.append(latency)
@@ -322,31 +378,12 @@ def create_app(
     @app.post("/receive")
     def receive_message(envelope: Dict[str, Any]):
         t0 = time.perf_counter()
-        sender_id = envelope.get("sender_id", "unknown")
-
-        # 1. Schema Validation
-        # If envelope has associated_data as a dict, validate against frozen schema
-        if isinstance(envelope.get("associated_data"), dict) and ENVELOPE_SCHEMA:
-            # Prepare canonical schema dict for validation
-            schema_target = {
-                "version": envelope.get("version", "1.0"),
-                "sender_id": envelope.get("sender_id", ""),
-                "recipient_id": envelope.get("recipient_id", ""),
-                "seq_num": envelope.get("seq_num", envelope.get("sequence_number", 0)),
-                "session_id": envelope.get("session_id", ""),
-                "kem_ciphertext": envelope.get("kem_ciphertext") or base64.b64encode(b"MOCK_KEM_CT").decode(),
-                "nonce": envelope.get("nonce", ""),
-                "ciphertext": envelope.get("ciphertext", ""),
-                "associated_data": envelope["associated_data"],
-                "signature": envelope.get("signature", ""),
-                "sig_alg": envelope.get("sig_alg", "ML-DSA-65"),
-                "kem_alg": envelope.get("kem_alg", "ML-KEM-768"),
-            }
-            try:
-                jsonschema.validate(instance=schema_target, schema=ENVELOPE_SCHEMA)
-            except jsonschema.ValidationError as e:
-                message_stats["rejected"] += 1
-                raise HTTPException(status_code=422, detail=f"Envelope schema validation failed: {e.message}")
+        try:
+            _schema_envelope(envelope)
+        except (ValueError, jsonschema.ValidationError) as exc:
+            message_stats["rejected"] += 1
+            raise HTTPException(status_code=422, detail="Invalid protected envelope") from exc
+        sender_id = envelope["sender_id"]
 
         # 2. Lateral movement check
         viol = audit.lateral_graph.check_call(sender_id, node_id, "RECEIVE_MESSAGE")
@@ -370,34 +407,19 @@ def create_app(
             )
             raise HTTPException(status_code=403, detail=alert_obj["description"])
 
-        # 3. Key Status Check (reject revoked or expired keys)
-        if hasattr(identity.key_manager, "enforce_cutoffs"):
-            identity.key_manager.enforce_cutoffs()
-
-        target_key_id = envelope.get("key_id")
-        if target_key_id and hasattr(identity.key_manager, "is_revoked") and identity.key_manager.is_revoked(target_key_id):
+        with key_lock:
+            peer = trusted_peers.get(sender_id)
+        if peer is None:
             message_stats["rejected"] += 1
-            raise HTTPException(status_code=400, detail=f"Key '{target_key_id}' is revoked")
-
-        # 4. Decrypt and verify
-        shared_key = peer_shared_keys.get(sender_id, b"DEFAULT-DEMO-SHARED-KEY-32BYTES!")
-        sender_pubkey = peer_public_keys.get(sender_id, b"DEFAULT-PUBKEY-32BYTES-MOCK!!!!")
-
-        # Normalize envelope fields for unpacker
-        if "seq_num" in envelope and "sequence_number" not in envelope:
-            envelope["sequence_number"] = envelope["seq_num"]
-        if "additional_authenticated_data" not in envelope and "associated_data" in envelope:
-            if isinstance(envelope["associated_data"], dict):
-                envelope["additional_authenticated_data"] = base64.b64encode(json.dumps(envelope["associated_data"]).encode()).decode("ascii")
-            elif isinstance(envelope["associated_data"], str):
-                envelope["additional_authenticated_data"] = envelope["associated_data"]
+            raise HTTPException(status_code=403, detail="Sender transport keys are not enrolled")
 
         try:
-            plaintext = crypto.messaging.unpack_envelope(
+            plaintext = crypto.messaging.open_for_recipient(
                 envelope=envelope,
-                shared_key=shared_key,
+                kem=crypto.kem,
                 verifier_sig=crypto.sig,
-                sender_public_key=sender_pubkey,
+                sender_public_key=unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE),
+                resolve_private_key=recipient_private_key,
             )
             latency = (time.perf_counter() - t0) * 1000.0
             crypto_latencies.append(latency)
@@ -425,7 +447,7 @@ def create_app(
                 "payload": dec_payload,
             }
 
-        except (crypto.RecipientMismatchError, crypto.ReplayAttackError, crypto.MessageTamperedError, Exception) as e:
+        except (crypto.RecipientMismatchError, crypto.ReplayAttackError, crypto.MessageTamperedError, KeyError, TypeError, ValueError) as e:
             message_stats["rejected"] += 1
             err_type = type(e).__name__
             audit.logger.log_event(
@@ -470,7 +492,8 @@ def create_app(
             raise HTTPException(status_code=403, detail="Unauthorized: admin role required for key rotation")
 
         new_pub, new_priv = crypto.kem.generate_keypair()
-        new_rec, old_rec = identity.key_manager.rotate_key(new_pub, new_priv)
+        with key_lock:
+            new_rec, old_rec = identity.key_manager.rotate_key(new_pub, new_priv)
 
         audit.logger.log_event(
             service=node_id,
@@ -495,7 +518,8 @@ def create_app(
         t0 = time.perf_counter()
         target = req.target_node_id or node_id
         rev_ev = identity.revocation.create_revocation(req.key_id, target, req.reason, signer=crypto.sig)
-        identity.key_manager.revoke_key(req.key_id, req.reason)
+        with key_lock:
+            identity.key_manager.revoke_key(req.key_id, req.reason)
 
         # Broadcast to peers if configured
         for peer_url in peers_list:
@@ -553,7 +577,7 @@ def create_app(
 
     @app.get("/metrics")
     def node_metrics():
-        active = identity.key_manager.get_active_key()
+        active = active_key()
         sorted_lats = sorted(crypto_latencies) if crypto_latencies else [0.0]
         p50 = sorted_lats[int(len(sorted_lats) * 0.50)]
         p95 = sorted_lats[int(len(sorted_lats) * 0.95)] if len(sorted_lats) > 1 else p50
@@ -623,5 +647,6 @@ if __name__ == "__main__":
     node_id = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NODE_ID", "node-a")
     port = int(sys.argv[2]) if len(sys.argv) > 2 else int(os.environ.get("PORT", "8001"))
     server_app = create_app(node_id=node_id)
-    print(f"🚀 Starting Trust-But-Verify Node [{node_id}] on http://0.0.0.0:{port}")
-    uvicorn.run(server_app, host="0.0.0.0", port=port, log_level="warning")
+    host = os.environ.get("DEMO_BIND_HOST", "0.0.0.0")
+    print(f"🚀 Starting Trust-But-Verify Node [{node_id}] on http://{host}:{port}")
+    uvicorn.run(server_app, host=host, port=port, log_level="warning")

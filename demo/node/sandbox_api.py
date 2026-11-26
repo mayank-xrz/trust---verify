@@ -106,9 +106,6 @@ class SandboxController:
         self.sig = MLDSASignature()
         self.sig_pub, self.sig_priv = self.sig.generate_keypair()
 
-        self.shared_key = secrets.token_bytes(32)
-        self.bob_shared_key = secrets.token_bytes(32)
-
         self.alice_msg = SecureMessaging("node-a")
         self.bob_msg = SecureMessaging("node-b")
         self.charlie_msg = SecureMessaging("node-c")
@@ -294,13 +291,17 @@ class SandboxController:
             "checklist_total": len(self.checklist),
         }
 
+    def _recipient_kem_private_key(self, node_id: str, key_id: str) -> bytes:
+        record = self.node_kms[node_id].get_key_for_decryption(key_id)
+        if record is None:
+            raise ValueError("Recipient key is unavailable")
+        return base64.b64decode(record.private_key_b64, validate=True)
+
     def run_pqc_transfer(self, payload: TransferPayload) -> Dict[str, Any]:
         t0 = time.perf_counter()
-        ephem_pub, ephem_priv = self.kem.generate_keypair()
-        kem_ct, session_secret = self.kem.encapsulate(ephem_pub)
-        recovered_secret = self.kem.decapsulate(kem_ct, ephem_priv)
-        assert session_secret == recovered_secret
-
+        recipient_key = self.node_kms["node-b"].get_active_key()
+        if recipient_key is None:
+            return {"ok": False, "detail": "No active recipient key"}
         plaintext = json.dumps({
             "from": payload.sender,
             "to": payload.recipient,
@@ -308,19 +309,15 @@ class SandboxController:
             "ts": time.strftime("%H:%M:%SZ", time.gmtime()),
         }).encode("utf-8")
 
-        envelope = self.alice_msg.pack_envelope(
-            sender_id="node-a",
-            recipient_id="node-b",
-            plaintext=plaintext,
-            shared_key=session_secret,
-            signer=self.sig,
-            kem_ciphertext=kem_ct,
+        envelope = self.alice_msg.seal_for_recipient(
+            "node-b", plaintext, recipient_key.key_id,
+            base64.b64decode(recipient_key.public_key_b64, validate=True), self.kem, self.sig,
         )
-        envelope["session_secret_b64"] = base64.b64encode(session_secret).decode("ascii")
-        self.last_envelope = dict(envelope)
-
-        decrypted = self.bob_msg.unpack_envelope(envelope, session_secret, self.sig, self.sig_pub)
-        self.kem.wipe_keys()
+        decrypted = self.bob_msg.open_for_recipient(
+            envelope, self.kem, self.sig, self.sig_pub,
+            lambda key_id: self._recipient_kem_private_key("node-b", key_id),
+        )
+        self.last_envelope = envelope
         latency_ms = round((time.perf_counter() - t0) * 1000.0, 2)
 
         self._record_event(
@@ -353,9 +350,11 @@ class SandboxController:
         if not self.last_envelope:
             self.run_pqc_transfer(TransferPayload())
         env = dict(self.last_envelope)
-        secret = base64.b64decode(env["session_secret_b64"])
         try:
-            self.bob_msg.unpack_envelope(env, secret, self.sig, self.sig_pub)
+            self.bob_msg.open_for_recipient(
+                env, self.kem, self.sig, self.sig_pub,
+                lambda key_id: self._recipient_kem_private_key("node-b", key_id),
+            )
             return {"ok": False, "detail": "Replay unexpectedly succeeded"}
         except ReplayAttackError as e:
             self._record_event(
@@ -373,9 +372,11 @@ class SandboxController:
         if not self.last_envelope:
             self.run_pqc_transfer(TransferPayload())
         env = dict(self.last_envelope)
-        secret = base64.b64decode(env["session_secret_b64"])
         try:
-            self.charlie_msg.unpack_envelope(env, secret, self.sig, self.sig_pub)
+            self.charlie_msg.open_for_recipient(
+                env, self.kem, self.sig, self.sig_pub,
+                lambda key_id: self._recipient_kem_private_key("node-c", key_id),
+            )
             return {"ok": False, "detail": "Recipient swap unexpectedly succeeded"}
         except RecipientMismatchError as e:
             self._record_event(

@@ -44,8 +44,15 @@ def benchmark_envelope_operations(iterations: int = 500) -> Dict[str, Any]:
     alice = SecureMessaging("node-alice")
     bob = SecureMessaging("node-bob")
     signer = MLDSASignature()
-    pub, priv = signer.generate_keypair()
-    shared_key = b"BENCHMARK_SHARED_SECRET_32BYTES!"
+    signer_pub, _ = signer.generate_keypair()
+    kem = MLKEMKeyExchange()
+    recipient_pub, recipient_priv = kem.generate_keypair()
+
+    def recipient_key(key_id: str) -> bytes:
+        if key_id != "benchmark-recipient":
+            raise ValueError("Unknown benchmark recipient key")
+        return recipient_priv
+
     payload = b'{"operation": "SECURE_TRANSFER", "amount": 5000, "token": "USD", "memo": "PQC Protected"}'
 
     pack_latencies: List[float] = []
@@ -56,13 +63,13 @@ def benchmark_envelope_operations(iterations: int = 500) -> Dict[str, Any]:
     for _ in range(iterations):
         # Sign + Encrypt
         t0 = time.perf_counter()
-        envelope = alice.pack_envelope("node-alice", "node-bob", payload, shared_key, signer)
+        envelope = alice.seal_for_recipient("node-bob", payload, "benchmark-recipient", recipient_pub, kem, signer)
         t_pack = (time.perf_counter() - t0) * 1000.0
         pack_latencies.append(t_pack)
 
         # Verify + Decrypt
         t1 = time.perf_counter()
-        _decrypted = bob.unpack_envelope(envelope, shared_key, signer, pub)
+        bob.open_for_recipient(envelope, kem, signer, signer_pub, recipient_key)
         t_unpack = (time.perf_counter() - t1) * 1000.0
         unpack_latencies.append(t_unpack)
 

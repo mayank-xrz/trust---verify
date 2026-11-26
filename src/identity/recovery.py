@@ -19,9 +19,11 @@ class WALManager:
         self._ensure_file()
 
     def _ensure_file(self) -> None:
-        if not os.path.exists(self.wal_path):
-            os.makedirs(os.path.dirname(os.path.abspath(self.wal_path)), exist_ok=True)
-            with open(self.wal_path, "w", encoding="utf-8") as f:
+        os.makedirs(os.path.dirname(os.path.abspath(self.wal_path)), exist_ok=True)
+        fd = os.open(self.wal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "a", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
+            if os.fstat(f.fileno()).st_size == 0:
                 f.write("# TBV WAL V1\n")
 
     def append_entry(self, op_type: str, payload: Dict[str, Any]) -> int:
