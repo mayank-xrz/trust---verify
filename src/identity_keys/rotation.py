@@ -102,7 +102,7 @@ def verify_cluster_sync(payload: dict[str, Any], signature_hex: str) -> bool:
     if not secret:
         return False
     expected = hmac.new(secret, canonical_json_bytes(payload), "sha256").hexdigest()
-    return hmac.compare_digest(expected, signature_hex)
+    return hmac.compare_digest(expected.encode(), signature_hex.encode())
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -263,7 +263,7 @@ class RotationService:
         if user is not None and user.status != "active":
             raise NotAuthorized("User is not active", reason_code="USER_INACTIVE")
         device = session.get(Device, actor_ctx.device_id)
-        if device is not None and (device.user_id != actor_ctx.user_id or device.status != "active"):
+        if device is not None and (device.user_id != actor_ctx.user_id or device.status != "enrolled"):
             raise NotAuthorized("Device is not active", reason_code="DEVICE_REVOKED")
         has_perm = (
             session.execute(

@@ -64,4 +64,10 @@ def test_arm_crash_requires_sandbox_mode_and_authentication(tmp_path, monkeypatc
         assert client.post(path, json={}, headers=headers).status_code == 404
         monkeypatch.setenv("SANDBOX_MODE", "1")
         assert client.post(path, json={}).status_code == 401
-        assert client.post(path, json={}, headers=headers).status_code == 200
+        assert client.post(path, json={}, headers=headers).status_code == 403
+        crash_token = secrets.token_urlsafe(32)
+        monkeypatch.setenv("SANDBOX_CRASH_TOKEN", crash_token)
+        assert client.post(path, json={}, headers=headers).status_code == 403
+        assert client.post(
+            path, json={}, headers={**headers, "X-Sandbox-Crash-Token": crash_token}
+        ).status_code == 200

@@ -17,6 +17,7 @@ from .clock import Clock, SystemClock
 from .db import create_db_engine, create_session_factory
 from .errors import IdentityKeysError, NotAuthorized, StateUnavailable
 from .key_lifecycle import EnvelopeEncryptionService, load_wrap_master_key
+from .models import Device, User
 from .reenroll import ReenrollmentService
 from .revocation import NodeSyncManager, RevocationService
 from .rotation import RotationService, arm_crash_point, verify_cluster_sync
@@ -119,7 +120,7 @@ def _admin_enroll_token_valid(provided: str | None) -> bool:
     expected = os.environ.get("ADMIN_ENROLL_TOKEN", "").strip()
     if not expected or not provided:
         return False
-    return compare_digest(provided.strip(), expected)
+    return compare_digest(provided.strip().encode(), expected.encode())
 
 
 def create_app(
@@ -188,6 +189,17 @@ def create_app(
         except NotAuthorized as exc:
             raise HTTPException(status_code=401, detail=exc.reason_code) from exc
 
+    def require_enrolled_actor(actor: ActorContext = Depends(require_actor)) -> ActorContext:
+        with session_factory() as session:
+            user = session.get(User, actor.user_id)
+            device = session.get(Device, actor.device_id)
+            if (
+                user is None or user.status != "active"
+                or device is None or device.user_id != actor.user_id or device.status != "enrolled"
+            ):
+                raise HTTPException(status_code=403, detail="INACTIVE_USER_OR_DEVICE")
+        return actor
+
     def authenticate_enrollment_caller(
         *,
         authorization: str | None,
@@ -206,6 +218,14 @@ def create_app(
         if not authorization:
             raise HTTPException(status_code=401, detail="ENROLL_AUTH_REQUIRED")
         actor = require_actor(authorization)
+        # Bootstrap callers may lack a device record. A recorded device must
+        # still be enrolled and belong to the authenticated user.
+        with session_factory() as session:
+            device = session.get(Device, actor.device_id)
+            if device is not None and (
+                device.user_id != actor.user_id or device.status != "enrolled"
+            ):
+                raise HTTPException(status_code=403, detail="INACTIVE_USER_OR_DEVICE")
         return EnrollmentCaller(actor_id=actor.user_id, is_admin=False)
 
     def assert_enrollment_target(caller: EnrollmentCaller, target_user_id: str) -> None:
@@ -364,7 +384,7 @@ def create_app(
 
     @app.post("/revocations/device")
     def api_revoke_device(
-        req: RevokeDeviceRequest, actor: ActorContext = Depends(require_actor)
+        req: RevokeDeviceRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, Any]:
         try:
             return revocation_svc.revoke_device(actor, req.device_id, req.reason_code)
@@ -373,7 +393,7 @@ def create_app(
 
     @app.post("/revocations/key-version")
     def api_revoke_key_version(
-        req: RevokeKeyVersionRequest, actor: ActorContext = Depends(require_actor)
+        req: RevokeKeyVersionRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, Any]:
         try:
             return revocation_svc.revoke_key_version(actor, req.key_version_id, req.reason_code)
@@ -382,7 +402,7 @@ def create_app(
 
     @app.post("/revocations/permission")
     def api_revoke_permission(
-        req: RevokePermissionRequest, actor: ActorContext = Depends(require_actor)
+        req: RevokePermissionRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, Any]:
         try:
             return revocation_svc.revoke_permission(
@@ -393,7 +413,7 @@ def create_app(
 
     @app.post("/rotations/emergency")
     def api_emergency_rotate(
-        req: EmergencyRotateRequest, actor: ActorContext = Depends(require_actor)
+        req: EmergencyRotateRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, Any]:
         try:
             return revocation_svc.emergency_rotate(
@@ -405,12 +425,12 @@ def create_app(
             raise HTTPException(status_code=403, detail=exc.reason_code) from exc
 
     @app.post("/reenroll/recovery-codes")
-    def api_generate_codes(actor: ActorContext = Depends(require_actor)) -> dict[str, Any]:
+    def api_generate_codes(actor: ActorContext = Depends(require_enrolled_actor)) -> dict[str, Any]:
         return {"codes": reenroll_svc.generate_recovery_codes(actor.user_id)}
 
     @app.post("/reenroll/approve")
     def api_approve_reenroll(
-        req: AdminApprovalRequest, actor: ActorContext = Depends(require_actor)
+        req: AdminApprovalRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, Any]:
         try:
             return reenroll_svc.create_admin_approval(
@@ -448,7 +468,7 @@ def create_app(
 
     @app.post("/rotations")
     def create_rotation(
-        req: InitiateRotationRequest, actor: ActorContext = Depends(require_actor)
+        req: InitiateRotationRequest, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, str]:
         try:
             rot_id = rotation_svc.initiate_rotation(
@@ -490,7 +510,7 @@ def create_app(
 
     @app.post("/resources/{resource_id}/rewrap")
     def rewrap_resource(
-        resource_id: str, actor: ActorContext = Depends(require_actor)
+        resource_id: str, actor: ActorContext = Depends(require_enrolled_actor)
     ) -> dict[str, str]:
         try:
             return envelope_svc.rewrap_resource(resource_id, actor)
@@ -520,7 +540,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="Not Found")
 
     @app.post("/internal/test/arm-crash", dependencies=[Depends(require_sandbox_mode), Depends(require_actor)])
-    def arm_crash(req: ArmCrashRequest) -> dict[str, Any]:
+    def arm_crash(
+        req: ArmCrashRequest,
+        x_sandbox_crash_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        expected = os.environ.get("SANDBOX_CRASH_TOKEN", "").strip()
+        if not expected or not x_sandbox_crash_token or not compare_digest(
+            x_sandbox_crash_token.encode(), expected.encode()
+        ):
+            raise HTTPException(status_code=403, detail="SANDBOX_CRASH_DENIED")
         try:
             arm_crash_point(req.crash_point)
             return {"armed": req.crash_point}

@@ -475,3 +475,29 @@ def test_unauthenticated_enrollment_takeover_is_blocked(env, monkeypatch) -> Non
             session.execute(select(Device).where(Device.user_id == victim)).scalars().all()
         )
     assert after == before
+
+
+def test_recovery_and_enrollment_recheck_device_status(env, monkeypatch) -> None:
+    alice = env["users"]["alice"]
+    device_id, *_ = _enroll_new_device(env, alice)
+    app, client = _enrollment_api(env, monkeypatch)
+    token = app.state.token_authority.issue(alice, device_id)
+    headers = {"Authorization": f"Bearer {token}"}
+    path = "/reenroll/recovery-codes"
+    assert client.post(path, headers=headers).status_code == 200
+    start = client.post(_start_body(alice), headers=headers)
+    assert start.status_code == 200
+
+    with tx_session(env["sf"]) as session:
+        device = session.get(Device, device_id)
+        assert device is not None
+        device.status = "revoked"
+        device.revoked_at = env["clock"].now()
+        device.revoked_reason = "lost"
+    response = client.post(path, headers=headers)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "INACTIVE_USER_OR_DEVICE"}
+    assert client.post(_start_body(alice), headers=headers).status_code == 403
+    response = client.post("/api/v1/enroll", headers=headers, json=_enroll_payload(start.json()))
+    assert response.status_code == 403
+    assert response.json() == {"detail": "INACTIVE_USER_OR_DEVICE"}

@@ -142,7 +142,7 @@ server never embeds it. The CLI reads the same token from its environment.
 | `GET /logs/verify`, `GET /metrics`, `GET /api/info` | Operator bearer required because they expose audit, detector, or deployment details. The JSON variant of `/` uses the same scope. |
 | `POST /receive`, `GET /inbox/{receipt_id}` | Receive checks the enrolled peer's signature and recipient binding; inbox reads require the recipient bearer. |
 | `GET /` (HTML), `/health`, `/keys/public` | Public UI shell, health probe, and public key discovery. Public keys must still be enrolled through the authenticated peer route. |
-| `POST /internal/test/arm-crash` | Identity API requires sandbox mode and a valid actor bearer. |
+| `POST /internal/test/arm-crash` | Identity API requires `SANDBOX_MODE=1`, a valid actor bearer, and a separate `X-Sandbox-Crash-Token` matching `SANDBOX_CRASH_TOKEN`. |
 
 5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
 
