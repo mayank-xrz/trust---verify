@@ -18,7 +18,7 @@ The system lets services deliver protected messages, withdraw trust from a lost 
 
 ## Measured evidence
 
-- The protected HTTP walkthrough runs three processes with separate state directories. The receiver denies first delivery under a revoked recipient key, two peers acknowledge durable application and block fresh sends, and unaffected traffic and replacement-key delivery succeed.
+- The protected HTTP walkthrough runs three processes with separate state directories. The receiver denies first delivery under a revoked recipient key, two peers acknowledge durable application and block fresh sends, and unaffected traffic and replacement-key delivery succeed. The extended demo checks device-authorized sends and reconnect recovery.
 - A separate local HTTP benchmark measured 5.95 ms p50 and 149.4 serial deliveries/s across three in-process runs of 300 deliveries after 30 warmups each. A crypto-only round trip measured 3.51 ms p50 across 500 envelopes.
 
 - Three independently running localhost nodes confirmed device revocation within {{REVOCATION_MS}} ms of the authority timestamp in the recorded run. All accepted the replacement credential and preserved the unaffected user's access.
@@ -42,7 +42,7 @@ Track 4 hackathon submission
 ## What the evidence covers
 
 - The revocation measurement includes commit, HTTP acknowledgement, and probe delay. Separately running nodes shared one SQLite database. Database enforcement and replication watermark convergence are distinct.
-- Both detector datasets are synthetic and were scored with the same rules. The second dataset exposed six missed suspicious report-archive downloads. LOW stale-key notices account for the reported benign alerts when all severities are counted.
+- Both detector datasets are synthetic and were scored with the same rules. The contextual challenge detects six report-archive downloads with denied export entitlement; the prior fixture omitted entitlement context. LOW stale-key notices account for the reported benign alerts when all severities are counted.
 - Endpoint compromise and network-level denial of service remain outside the prototype's guarantees. A trusted checkpoint or anchor is needed to detect wholesale audit replacement.
 
 ## Reproduce the submission checks

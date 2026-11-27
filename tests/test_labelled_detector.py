@@ -1,4 +1,4 @@
-from scripts.evaluate_detector import evaluate
+from scripts.evaluate_detector import CHALLENGE, evaluate
 from src.detector.rules import ContextRuleEngine
 
 
@@ -31,3 +31,29 @@ def test_recent_stale_key_context_and_repeat():
     event["metadata"]["recipient_key_state"] = "revoked"
     event["metadata"]["error"] = "Recipient key is revoked"
     assert ContextRuleEngine().evaluate_event(event)[0].severity == "HIGH"
+
+
+def test_archive_export_rule_distinguishes_entitlement_context():
+    rule = "UNAUTHORIZED_REPORT_ARCHIVE_EXPORT"
+    event = {
+        "event_id": "archive-1",
+        "action": "DOWNLOAD_REPORT_ARCHIVE",
+        "status": "SUCCESS",
+        "subject": "operator",
+        "resource": "/reports/archive",
+    }
+    engine = ContextRuleEngine()
+    for metadata in ({}, {"archive_export_authorized": True}):
+        assert not engine.evaluate_event({**event, "metadata": metadata})
+    alert, = engine.evaluate_event({**event, "metadata": {"archive_export_authorized": False}})
+    assert alert.evidence["rule_id"] == rule
+    assert not ContextRuleEngine().evaluate_event({
+        **event, "status": "DENIED", "metadata": {"archive_export_authorized": False},
+    })
+
+
+def test_contextual_challenge_preserves_non_low_false_positive_rate():
+    result = evaluate(CHALLENGE)
+    assert result.true_positives == 36
+    assert result.false_negatives == 0
+    assert result.false_positives == 0

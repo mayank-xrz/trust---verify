@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import jsonschema
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -159,12 +160,24 @@ def create_app(
     data_dir = data_dir or os.environ.get("DATA_DIR", f"/tmp/tbv_data_{node_id}")
     grace_period_sec = float(grace_period_seconds or os.environ.get("GRACE_PERIOD_SECONDS", "5.0"))
 
+    device_authority = os.environ.get("DEMO_DEVICE_AUTHORITY_URL", "").rstrip("/")
+    device_resources = json.loads(os.environ.get("DEMO_DEVICE_RESOURCES", "{}"))
+    peer_authorities = json.loads(os.environ.get("DEMO_PEER_AUTHORITIES", "{}"))
+    for mapping in (device_resources, peer_authorities):
+        if not isinstance(mapping, dict) or not all(
+            isinstance(value, str) and value for value in mapping.values()
+        ):
+            raise ValueError("Device resources and peer authorities must be JSON string maps")
+    if bool(device_authority) != bool(device_resources):
+        raise ValueError("Device authorization requires an authority URL and recipient resource map")
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
     peer_enroll_token = peer_enroll_token or os.environ.get("DEMO_PEER_ENROLL_TOKEN")
     operator_token = operator_token or os.environ.get("DEMO_OPERATOR_TOKEN")
     recipient_token = recipient_token or os.environ.get("DEMO_RECIPIENT_TOKEN")
     revocation_sync_token = revocation_sync_token or os.environ.get("DEMO_REVOCATION_SYNC_TOKEN")
+    if peer_authorities and not revocation_sync_token:
+        raise ValueError("Peer authorities require a revocation sync credential")
     credentials = [token for token in (peer_enroll_token, operator_token, recipient_token, revocation_sync_token) if token]
     if len(credentials) != len(set(credentials)):
         raise ValueError("Demo peer, operator, recipient and sync credentials must be distinct")
@@ -389,8 +402,66 @@ def create_app(
             "audit_sequence": getattr(rec, "sequence", 0),
         }
 
+    def authorize_sending_device(recipient_id: str, authorization: str | None) -> None:
+        if not device_authority:
+            return
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Device credential required")
+        resource_id = device_resources.get(recipient_id)
+        if resource_id is None:
+            raise HTTPException(status_code=403, detail="Recipient has no device authorization policy")
+        try:
+            response = httpx.post(
+                f"{device_authority}/api/v1/authorize",
+                headers={"Authorization": authorization},
+                json={"resource_id": resource_id, "permission": "resource:write"},
+                timeout=2.0,
+                trust_env=False,
+            )
+            if response.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid device credential")
+            response.raise_for_status()
+            decision = response.json()
+            if not isinstance(decision, dict) or type(decision.get("allowed")) is not bool:
+                raise ValueError("Invalid authorization decision")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Device authorization unavailable") from exc
+        if not decision["allowed"]:
+            reason = decision.get("reason_code", "DEVICE_AUTHORIZATION_DENIED")
+            audit.logger.log_event(
+                service=node_id, action="DEVICE_SEND_DENIED", subject="device-authority",
+                resource=f"node://{recipient_id}", status="DENIED",
+                metadata={"reason_code": reason, "decision_id": decision.get("decision_id")},
+            )
+            if reason in {"STALE_STATE", "STATE_UNAVAILABLE"}:
+                raise HTTPException(status_code=503, detail=reason)
+            raise HTTPException(status_code=403, detail=reason)
+
+    def pull_peer_revocations(recipient_id: str, authority: str) -> None:
+        try:
+            response = httpx.get(
+                f"{authority.rstrip('/')}/internal/keys/revocations",
+                headers={"Authorization": f"Bearer {revocation_sync_token}"},
+                timeout=1.0,
+                trust_env=False,
+            )
+            response.raise_for_status()
+            snapshot = response.json()
+            if not isinstance(snapshot, dict) or snapshot.get("node_id") != recipient_id:
+                raise ValueError("Revocation authority identity mismatch")
+            key_ids = snapshot.get("revoked_key_ids")
+            if not isinstance(key_ids, list) or not all(isinstance(key, str) for key in key_ids):
+                raise ValueError("Invalid revocation snapshot")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Peer revocation state unavailable") from exc
+        inbox.revoke_peer_keys(recipient_id, key_ids)
+
     @app.post("/send")
-    def send_message(req: SendRequest, _actor: str = Depends(require_operator)):
+    def send_message(
+        req: SendRequest,
+        _actor: str = Depends(require_operator),
+        device_credential: str | None = Header(default=None, alias="X-Device-Authorization"),
+    ):
         t0 = time.perf_counter()
         sender_id = node_id
         recipient_id = req.recipient_id
@@ -414,6 +485,10 @@ def create_app(
                 metadata={"reason": "unauthorized lateral path"},
             )
             raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
+
+        authorize_sending_device(recipient_id, device_credential)
+        if authority := peer_authorities.get(recipient_id):
+            pull_peer_revocations(recipient_id, authority)
 
         plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
         with key_lock:
@@ -617,6 +692,15 @@ def create_app(
 
     def require_revocation_peer(authorization: Optional[str] = Header(default=None)):
         _require_bearer(authorization, revocation_sync_token, "Peer revocation")
+
+    @app.get("/internal/keys/revocations", dependencies=[Depends(require_revocation_peer)])
+    def revocation_snapshot():
+        with key_lock:
+            revoked = sorted(
+                record.key_id for record in identity.key_manager.keys.values()
+                if record.state == identity.KeyStateEnum.REVOKED
+            )
+        return {"node_id": node_id, "revoked_key_ids": revoked}
 
     @app.post("/internal/keys/revoke", dependencies=[Depends(require_revocation_peer)])
     def sync_revocation(req: PeerRevocation):

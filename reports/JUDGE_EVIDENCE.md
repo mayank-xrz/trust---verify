@@ -44,20 +44,19 @@ revoked, and Bob retained access to his resource.
 
 Both datasets are synthetic. The original fixture is regression evidence. The second
 fixture uses a different seeded generator with new identities, services, actions,
-timing, clock offsets, and out-of-order arrivals. Detector rules were unchanged.
+timing, clock offsets, and out-of-order arrivals. It includes explicit allow/deny entitlement context for report-archive downloads.
 
 | Dataset | Alert policy | F1 | Median time to alert (ms) | False alerts / 1,000 benign |
 | --- | --- | ---: | ---: | ---: |
 | regression | All severities | 0.8333 | 0.0020 | 11.7188 |
 | regression | Non-LOW alerts | 1.0000 | 0.0020 | 0.0000 |
-| challenge | All severities | 0.7792 | 0.0016 | 10.5769 |
-| challenge | Non-LOW alerts | 0.9091 | 0.0016 | 0.0000 |
+| challenge | All severities | 0.8675 | 0.0019 | 10.5769 |
+| challenge | Non-LOW alerts | 1.0000 | 0.0019 | 0.0000 |
 
 Each event is counted once per policy. The median measures in-memory time to an
 alert for correctly detected suspicious events. The original fixture has 1,024
 benign and 30 suspicious events. The second has 1,040 benign and 36 suspicious events.
-Both alert policies missed six suspicious report-archive downloads on the second
-fixture. Counting LOW notices also counts benign stale-key events as false alerts.
+The previous challenge fixture carried no export entitlement context, and both policies missed all six suspicious archive downloads (30/36 detected). With explicit denial context and matching authorized downloads, both policies detect 36/36. The Non-LOW policy still produces zero false alerts on the fixture. Counting LOW notices produces the same 11 benign stale-key alerts. The new rule requires an explicit denial from trusted event metadata. Events with missing entitlement context remain outside this rule.
 
 The separate authenticated localhost HTTP demo measured **0.8994 ms median** over 21 requests.
 That includes request handling, audit logging, evaluation and the alert response.

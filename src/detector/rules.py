@@ -212,6 +212,24 @@ class ContextRuleEngine:
                     r2.description = "Authenticated sender used a recently expired recipient key"
             alerts.append(r2)
 
+        # A successful export with an explicit denied entitlement is a policy violation.
+        if (
+            event.get("action") == "DOWNLOAD_REPORT_ARCHIVE"
+            and event.get("status") == "SUCCESS"
+            and event.get("metadata", {}).get("archive_export_authorized") is False
+        ):
+            alerts.append(RuleAlert(
+                alert_id=f"alert-archive-{event.get('event_id', '')}",
+                rule_name="UNAUTHORIZED_REPORT_ARCHIVE_EXPORT",
+                severity="HIGH",
+                timestamp_ns=event.get("timestamp_ns", time.time_ns()),
+                subject=event.get("subject", ""),
+                service=event.get("service", ""),
+                resource=event.get("resource", ""),
+                description="Report archive download succeeded despite a denied export entitlement",
+                evidence={"archive_export_authorized": False},
+            ))
+
         # 3. Burst frequency check (brute force / flood)
         subject = event.get("subject", "")
         if subject:

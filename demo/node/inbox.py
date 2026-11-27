@@ -49,8 +49,15 @@ class RecipientInbox:
             )
 
     def revoke_peer_key(self, peer_id: str, key_id: str) -> None:
-        with closing(sqlite3.connect(self.path)) as db, db:
-            db.execute("INSERT OR IGNORE INTO revoked_peer_keys VALUES (?, ?)", (peer_id, key_id))
+        self.revoke_peer_keys(peer_id, [key_id])
+
+    def revoke_peer_keys(self, peer_id: str, key_ids: list[str]) -> None:
+        if key_ids:
+            with closing(sqlite3.connect(self.path)) as db, db:
+                db.executemany(
+                    "INSERT OR IGNORE INTO revoked_peer_keys VALUES (?, ?)",
+                    ((peer_id, key_id) for key_id in key_ids),
+                )
 
     def is_peer_key_revoked(self, peer_id: str, key_id: str) -> bool:
         with closing(sqlite3.connect(self.path)) as db:

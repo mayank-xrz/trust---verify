@@ -36,4 +36,4 @@ The [live demo](demo_run.md) separately verifies recipient-key revocation throug
 
 ## 4. Known Limitations & Next Steps
 - Single shared DB (`SELECT ... FOR UPDATE`), env-supplied `WRAP_MASTER_KEY_B64`, HMAC `CLUSTER_SYNC_SECRET`, and single-host SQLite/`TestClient` execution (Docker daemon / `psql` not running locally).
-- **Next steps:** Run `docker compose up` in CI with PostgreSQL 16 and integrate device-level `AuthzService` decisions into messaging/session endpoints. The demo HTTP transport enforces its own recipient-key revocation.
+- **Next steps:** Run `docker compose up` in CI with PostgreSQL 16 and extend the device authorization policy to session endpoints. In device-authority mode, the demo HTTP sender now enforces live `AuthzService` decisions before sealing and supports missed recipient-key revocation recovery for configured peers.

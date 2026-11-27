@@ -161,13 +161,17 @@ python3 -m demo.node.operator_cli alerts
 - `DEMO_RECIPIENT_TOKEN` authorizes reads from that node's `GET /inbox/{receipt_id}`. Use a different recipient token for each node. `POST /receive` verifies and accepts a signed envelope and returns an opaque receipt, which grants no read access by itself.
 - `DEMO_REVOCATION_SYNC_TOKEN` authorizes only peer revocation updates. Configure it across the trusted nodes when enabling `PEER_NODES`. Use a protected transport for bearer credentials outside loopback.
 
+To enable device authorization on `POST /send`, set `DEMO_DEVICE_AUTHORITY_URL` to the identity service and `DEMO_DEVICE_RESOURCES` to a JSON object mapping recipient IDs to identity resource IDs. Send the device's access token as `X-Device-Authorization: Bearer <token>` alongside the operator credential. The authority checks `resource:write` for each send. An unconfigured node retains the operator-only demo path.
+
+To enable reconnect recovery, set `DEMO_PEER_AUTHORITIES` to a JSON object mapping recipient IDs to their trusted HTTP URLs, with the shared revocation sync token set on the sender and recipients. Before sealing to a configured recipient, the sender pulls the recipient's durable revoked-key snapshot and merges it into local state. Sends to those recipients fail closed if the snapshot is unavailable. Use trusted HTTPS URLs outside loopback.
+
 Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
 
 5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
 
 [Live run results](reports/demo_run.md)
 
-The live assessment runs three loopback node processes with separate state directories. It verifies protected delivery, rotation grace and cutoff, receiver-side denial after recipient-key revocation, and rejection of new sends under the revoked key on both peers. It then checks unaffected traffic, delivery with a replacement key, and the audit chains. The peer acknowledgement includes an audit sequence for that specific revocation. This push-only demo has no heartbeat or catch-up for offline peers. Its recipient-key lifecycle and the device-authorization benchmark below are separate entry points.
+The live assessment runs three loopback node processes with separate state directories. It verifies protected delivery, rotation grace and cutoff, receiver-side denial after recipient-key revocation, and rejection of new sends under the revoked key on both peers. It then checks unaffected traffic, delivery with a replacement key, and the audit chains. The peer acknowledgement includes an audit sequence for that specific revocation. The extended check also revokes a signed-in device, verifies a fresh send is denied while another device still delivers, and restarts a sender that missed a recipient-key revocation. The restarted sender fetches the recipient's current revocation snapshot before sealing.
 
 ## Checklist coverage
 

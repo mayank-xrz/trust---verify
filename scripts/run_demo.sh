@@ -313,6 +313,7 @@ python3 -m demo.node.operator_cli alerts
 
 echo ""
 echo "======================================================================"
+python3 -m scripts.demo_device_security
 python3 -m scripts.track4_checklist
 echo "🎉 WALKTHROUGH DEMO COMPLETED SUCCESSFULLY"
 echo "======================================================================"

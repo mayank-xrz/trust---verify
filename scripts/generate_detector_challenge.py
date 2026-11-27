@@ -44,15 +44,21 @@ def generate():
         elif index % 43 == 0:
             add(False, identity, "ROTATE_KEY", "SUCCESS", metadata={"role": "admin"})
         else:
-            add(False, identity, rng.choice(benign_actions), rng.choice(("SUCCESS", "SUCCESS", "DENIED")))
+            action = rng.choice(benign_actions)
+            status = rng.choice(("SUCCESS", "SUCCESS", "DENIED"))
+            if index % 71 == 0:
+                add(False, identity, "DOWNLOAD_REPORT_ARCHIVE", "SUCCESS",
+                    metadata={"archive_export_authorized": True})
+            else:
+                add(False, identity, action, status)
 
     for group in range(6):
         add(True, f"operator-temp-{group}", "REVOKE_KEY", "DENIED", metadata={"role": "viewer"})
         add(True, f"relay-temp-{group}", "REQUEST_DUPLICATE", "DENIED", metadata={"error": "Duplicate message"})
         add(True, f"outbound-relay-{group}", "DELIVER", "DENIED", metadata={"error": "Signature invalid"})
         add(True, f"svc-analytics-{group}", "READ_INVOICE", "SUCCESS", edge=["audit-service", "invoice-api"])
-        # The label describes the synthetic scenario even if the rule does not detect it.
-        add(True, f"report-exporter-{group}", "DOWNLOAD_REPORT_ARCHIVE", "SUCCESS")
+        add(True, f"report-exporter-{group}", "DOWNLOAD_REPORT_ARCHIVE", "SUCCESS",
+            metadata={"archive_export_authorized": False})
         add(True, f"forwarder-{group}", "DELIVER", "DENIED", metadata={"error": "Authenticated recipient mismatch"})
 
     # Swap neighboring arrivals without changing their source timestamps or labels.
