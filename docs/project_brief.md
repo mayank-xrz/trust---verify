@@ -19,7 +19,7 @@ The system lets services deliver protected messages, withdraw trust from a lost 
 ## Measured evidence
 
 - The protected HTTP walkthrough runs three processes with separate state directories. The receiver denies first delivery under a revoked recipient key, two peers acknowledge durable application and block fresh sends, and unaffected traffic and replacement-key delivery succeed. The extended demo checks device-authorized sends and reconnect recovery.
-- A separate local HTTP benchmark measured 5.95 ms p50 and 149.4 serial deliveries/s across three in-process runs of 300 deliveries after 30 warmups each. A crypto-only round trip measured 3.51 ms p50 across 500 envelopes.
+- A separate local HTTP benchmark measured 6.30 ms p50 and 142.5 serial deliveries/s across three in-process runs of 300 deliveries after 30 warmups each. A crypto-only round trip measured 3.52 ms p50 across 500 envelopes.
 
 - Three independently running localhost nodes confirmed device revocation within {{REVOCATION_MS}} ms of the authority timestamp in the recorded run. All accepted the replacement credential and preserved the unaffected user's access.
 - The original synthetic fixture is regression evidence. All severities yielded F1 {{REG_ALL_F1}}, median {{REG_ALL_MEDIAN}} ms, and {{REG_ALL_FP}} false alerts per 1,000 benign events. Non-LOW alerts yielded F1 {{REG_HIGH_F1}}, median {{REG_HIGH_MEDIAN}} ms, and {{REG_HIGH_FP}} false alerts per 1,000 benign events.

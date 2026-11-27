@@ -69,7 +69,7 @@ python -m scripts.measure_detector_http
 python -m scripts.evaluate_detector
 ```
 
-To score independent labels, run `python -m scripts.evaluate_detector --dataset path/to/labels.jsonl`.
+The fixture scores measure rule behavior on labelled synthetic data. There is no independent holdout score in this submission. To score independent labels, run `python -m scripts.evaluate_detector --dataset path/to/labels.jsonl`.
 Use one event per JSONL row in the [fixture format](../tests/fixtures/track4_detector.jsonl),
 with `expected_suspicious` set to a boolean. Include benign and suspicious events.
 

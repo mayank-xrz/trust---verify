@@ -363,8 +363,10 @@ class CryptoTests(unittest.TestCase):
             node_bridge._stop_worker()
             node_bridge._NODE_BIN = None
             with patch("src.crypto.node_bridge.shutil.which", return_value=None):
-                with self.assertRaises(CryptoError) as ctx_missing:
-                    aead.decrypt(key, nonce, b"aad", ct, tag)
+                self.assertEqual(aead.decrypt(key, nonce, b"aad", ct, tag), b"hello")
+                with patch.object(aead, "AESGCM", None):
+                    with self.assertRaises(CryptoError) as ctx_missing:
+                        aead.decrypt(key, nonce, b"aad", ct, tag)
                 self.assertIn("not found", str(ctx_missing.exception))
         finally:
             node_bridge._NODE_BIN = orig_bin
@@ -441,11 +443,11 @@ class CryptoTests(unittest.TestCase):
 
     def test_worker_reused_for_multiple_calls(self):
         from src.crypto import node_bridge
-        from src.crypto.primitives import hkdf
         node_bridge._stop_worker()
-        hkdf(b"secret", b"salt", b"one")
+        request = {"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}
+        node_bridge.call_node(request, CryptoError)
         pid = node_bridge._worker.pid
-        hkdf(b"secret", b"salt", b"two")
+        node_bridge.call_node(request, CryptoError)
         self.assertEqual(node_bridge._worker.pid, pid)
 
     def test_adapter_at_rest_encryption_audit_chain_and_challenge_bounds(self):

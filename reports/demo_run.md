@@ -12,12 +12,12 @@ Run `make demo` after activating the project virtual environment. The run below 
 | Recovery and evidence | The WAL reader discarded a torn entry, the backup verifier rejected damaged data, and all three audit chains verified. |
 | Explainable alerts | The operator saw the policy denials for a disallowed service path and an unauthenticated key administration request. |
 
-In this run, the operator request took **19.83 ms** through peer acknowledgement. The first receiver denial was observed **23.39 ms** after the client started the operator request. The client checked denial after the operator response returned, so that observation includes the peer acknowledgement wait. These are two observations from one loopback run. The [device-authorization benchmark](revocation_latency.md) separately measures commit-to-denial and watermark convergence with shared SQLite.
+In this run, the operator request took **10.64 ms** through peer acknowledgement. The first receiver denial was observed **12.95 ms** after the client started the operator request. The client checked denial after the operator response returned, so that observation includes the peer acknowledgement wait. These are two observations from one loopback run. The [device-authorization benchmark](revocation_latency.md) separately measures commit-to-denial and watermark convergence with shared SQLite.
 
 ## Extended live checks
 
 The expanded `make demo` starts an identity authority and a separate sender and receiver. It delivers a message using an enrolled device, revokes that device, checks that its fresh send receives `403 DEVICE_REVOKED`, then delivers a message from a second device. With the sender stopped, the receiver revokes its recipient key. On restart the sender starts with the old peer key, pulls the receiver's durable snapshot, persists the missed revocation locally, rejects the old key, and seals successfully after refreshing the replacement bundle.
 
-The walkthrough video below shows the original recipient-key assessment. The extended checks can be rerun with `python -m scripts.demo_device_security`.
+The walkthrough video shows both extended checks. Rerun them with `python -m scripts.demo_device_security`.
 
 [Walkthrough video](../docs/demo-walkthrough.mp4)

@@ -31,8 +31,15 @@ def state_dir():
     if env_dir:
         root = Path(env_dir) / "track4-local"
     else:
-        root = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
-    if root.exists():
+        legacy = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
+        state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+        if not state_home.is_absolute():
+            raise CryptoError("XDG_STATE_HOME must be an absolute path")
+        root = state_home / "trust-but-verify" / "track4-local"
+        # Keep using existing state until the operator explicitly moves it.
+        if not root.exists() and not root.is_symlink() and (legacy.exists() or legacy.is_symlink()):
+            root = legacy
+    if root.exists() or root.is_symlink():
         if root.is_symlink() or not root.is_dir():
             raise CryptoError("unsafe state directory")
         st = root.lstat()

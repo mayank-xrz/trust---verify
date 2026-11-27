@@ -1,8 +1,16 @@
 # Trust-But-Verify
 
-Post-quantum protected messaging, key lifecycle management, tamper-evident audit logging and explainable lateral-movement detection for multi-node services. Built for Track 4, "Trust, but verify".
+Trust-But-Verify protects service-to-service messages with hybrid post-quantum cryptography and verifies that revoked devices lose access while authorized traffic keeps flowing.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[Watch the 53-second walkthrough](docs/demo-walkthrough.mp4) · [Live results](reports/demo_run.md) · [Project brief](docs/project_brief.pdf)
+
+[![Verified demo output showing device revocation and recovery after a missed revocation](docs/live-assessment.png)](docs/demo-walkthrough.mp4)
+
+- **Device revocation:** An enrolled device delivers, its next send returns `DEVICE_REVOKED` after revocation, and a second device still delivers.
+- **Reconnect recovery:** A restarted sender learns the revocation it missed, blocks the old key, and seals with the replacement key.
+- **Run it locally:** Install the [pinned dependencies](#setup-clean-machine), then run `make demo` for the live flow and all 12 Track 4 checks.
+
+The submission entry points are [the organizer adapter](track4_service.py), [the HTTP demo](scripts/run_demo.sh), and [the test suite](tests/). See the [implementation inventory](docs/DUPLICATES.md) for earlier standalone components.
 
 ## What it does
 
@@ -53,7 +61,7 @@ flowchart TD
 
 ## Setup (clean machine)
 
-Requirements: Linux or macOS (POSIX file locking is required), Python 3.11+, and Node.js on `PATH` (the AEAD helper `src/crypto/node_aead.cjs` uses only Node built-ins). Docker is optional and only needed for `make up`.
+Requirements: Linux or macOS (POSIX file locking is required) and Python 3.11+. The normal transport uses the pinned Python crypto libraries. Install Node.js for the offline crypto fallback and its tests. Docker is optional and only needed for `make up`.
 
 ```bash
 python3 -m venv .venv
@@ -118,6 +126,9 @@ server never embeds it. The CLI reads the same token from its environment.
 | `GET /` (HTML), `/health`, `/keys/public` | Public UI shell, health probe, and public key discovery. Public keys must still be enrolled through the authenticated peer route. |
 | `POST /internal/test/arm-crash` | Identity API requires sandbox mode and a valid actor bearer. |
 
+<details>
+<summary>Acceptance checks, operator commands, and manual configuration</summary>
+
 ### Track 4 checklist
 
 `make demo` runs the local HTTP walkthrough and prints a pass/fail table for
@@ -173,6 +184,11 @@ Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelope
 
 The live assessment runs three loopback node processes with separate state directories. It verifies protected delivery, rotation grace and cutoff, receiver-side denial after recipient-key revocation, and rejection of new sends under the revoked key on both peers. It then checks unaffected traffic, delivery with a replacement key, and the audit chains. The peer acknowledgement includes an audit sequence for that specific revocation. The extended check also revokes a signed-in device, verifies a fresh send is denied while another device still delivers, and restarts a sender that missed a recipient-key revocation. The restarted sender fetches the recipient's current revocation snapshot before sealing.
 
+</details>
+
+<details>
+<summary>Implementation coverage and runtime parameters</summary>
+
 ## Checklist coverage
 
 | Track 4 objective | Code | Tests |
@@ -198,7 +214,9 @@ The live assessment runs three loopback node processes with separate state direc
 
 **Delivery and replay.** Incomplete chunked messages are discarded after `DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0` and logged as `delivery_failed_incomplete`. The replay cache keeps a sliding window of 256 counters per (sender, recipient, session).
 
-**State on disk.** The track-4 adapter keeps sessions, enrolments, revocations and its audit chain under `TRACK4_STATE_DIR` (default: a `track4-local` folder in the system temp directory, which may be cleared; set it to a private durable directory). State files contain private key material and must be protected like secrets. Locking uses `fcntl` and is not distributed across hosts.
+**State on disk.** The track-4 adapter keeps sessions, enrolments, revocations and its audit chain under `TRACK4_STATE_DIR` (default: `$XDG_STATE_HOME/trust-but-verify/track4-local` or `~/.local/state/trust-but-verify/track4-local` for fresh state). An existing per-user temporary state directory remains readable for compatibility. To migrate it, stop the adapter and move the entire directory, including hidden files, to the durable path before restarting. State files contain private key material and must be protected like secrets. Locking uses `fcntl` and is not distributed across hosts.
+
+</details>
 
 ## Detection results
 
@@ -215,7 +233,7 @@ checklist and labelled fixture for submission evidence.
 
 `make bench` measures cryptographic operation latency and the protected HTTP workflow from send through durable receipt to authenticated inbox read. It also reports detector throughput and Python allocation overhead.
 
-On macOS arm64 with Python 3.15.2, three local in-process HTTP runs with 30 warmup messages and 300 measured deliveries each gave a median-of-runs **5.95 ms p50** and **149.4 serial deliveries/s**. Each delivery includes sealing, receipt persistence, and authenticated inbox read. The separate crypto-only sign/encrypt and verify/decrypt round trip measured **3.51 ms p50** and **285.3 envelopes/s** across 500 envelopes.
+On macOS arm64 with Python 3.15.2, three local in-process HTTP runs with 30 warmup messages and 300 measured deliveries each gave a median-of-runs **6.30 ms p50** and **142.5 serial deliveries/s**. Each delivery includes sealing, receipt persistence, and authenticated inbox read. The separate crypto-only sign/encrypt and verify/decrypt round trip measured **3.52 ms p50** and **283.8 envelopes/s** across 500 envelopes.
 
 Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
 

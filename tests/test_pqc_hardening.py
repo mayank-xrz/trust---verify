@@ -72,9 +72,10 @@ def test_protected_read_and_audit_interoperability(tmp_path: Path) -> None:
     assert audit == {"request_id": "pr-01", "decision": "allow"}
 
 
-def test_protected_read_uid_scoped_fallback_dir(tmp_path: Path, monkeypatch) -> None:
+def test_protected_read_state_dir_uses_durable_default_and_supports_legacy(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("TRACK4_STATE_DIR", raising=False)
     monkeypatch.setattr(track4_service.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
 
     # Symlink trap must fail closed
     trap = tmp_path / f"track4-local-{os.getuid()}"
@@ -85,8 +86,12 @@ def test_protected_read_uid_scoped_fallback_dir(tmp_path: Path, monkeypatch) -> 
         track4_service.state_dir()
     trap.unlink()
 
+    trap.mkdir(mode=0o700)
+    assert track4_service.state_dir() == trap
+    trap.rmdir()
+
     safe = track4_service.state_dir()
-    assert safe.name == f"track4-local-{os.getuid()}"
+    assert safe == tmp_path / "state" / "trust-but-verify" / "track4-local"
     assert (safe.stat().st_mode & 0o777) == 0o700
 
 

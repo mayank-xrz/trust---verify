@@ -3,7 +3,6 @@ import base64
 import binascii
 import hashlib
 import json
-import shutil
 
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
@@ -99,15 +98,13 @@ def hkdf(secret, salt, info, length=32):
         raise CryptoError("invalid KDF input")
     if not 1 <= length <= 255 * 32:
         raise CryptoError("invalid KDF length")
-    if shutil.which("node"):
-        request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
-        result = call_node(request, CryptoError)
-        return unb64(result["data"], length)
     try:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-    except ImportError as exc:
-        raise CryptoError("HKDF requires Node.js or cryptography") from exc
+    except ImportError:
+        request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
+        result = call_node(request, CryptoError)
+        return unb64(result["data"], length)
     return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(secret)
 
 

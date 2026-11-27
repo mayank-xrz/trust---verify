@@ -1,18 +1,19 @@
 """Ephemeral X25519 via Node.js runtime or Python cryptography library."""
 
-import shutil
+try:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+except ImportError:
+    X25519PrivateKey = None
 
 from .node_bridge import call_node
 from .primitives import CryptoError, b64, unb64
 
 
 def keypair():
-    if shutil.which("node"):
+    if X25519PrivateKey is None:
         result = call_node({"op": "x25519_keypair"}, CryptoError)
         return unb64(result["public_key"], 44), unb64(result["private_key"], 48)
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-
     priv = X25519PrivateKey.generate()
     pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     priv_der = priv.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
@@ -22,15 +23,12 @@ def keypair():
 def ephemeral_shared(peer_public_key):
     if not isinstance(peer_public_key, bytes) or len(peer_public_key) != 44:
         raise CryptoError("invalid X25519 key length")
-    if shutil.which("node"):
+    if X25519PrivateKey is None:
         result = call_node(
             {"op": "x25519_ephemeral_shared", "peer_public_key": b64(peer_public_key)},
             CryptoError,
         )
         return unb64(result["public_key"], 44), unb64(result["data"], 32)
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-
     priv = X25519PrivateKey.generate()
     pub_der = priv.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
     try:
@@ -46,15 +44,12 @@ def ephemeral_shared(peer_public_key):
 def shared(private_key, public_key):
     if not isinstance(private_key, bytes) or len(private_key) != 48 or not isinstance(public_key, bytes) or len(public_key) != 44:
         raise CryptoError("invalid X25519 key length")
-    if shutil.which("node"):
+    if X25519PrivateKey is None:
         result = call_node(
             {"op": "x25519_shared", "private_key": b64(private_key), "public_key": b64(public_key)},
             CryptoError,
         )
         return unb64(result["data"], 32)
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-
     try:
         priv = serialization.load_der_private_key(private_key, password=None)
         pub = serialization.load_der_public_key(public_key)
