@@ -2,7 +2,7 @@
 
 Trust-But-Verify protects service-to-service messages with hybrid post-quantum cryptography and verifies that revoked devices lose access while authorized traffic keeps flowing.
 
-[Watch the 53-second walkthrough](docs/demo-walkthrough.mp4) · [Live results](reports/demo_run.md) · [Project brief](docs/project_brief.pdf)
+[Watch the five-minute walkthrough](docs/demo-walkthrough.mp4) · [Live results](reports/demo_run.md) · [Project brief](docs/project_brief.pdf)
 
 [![Verified demo output showing device revocation and recovery after a missed revocation](docs/live-assessment.png)](docs/demo-walkthrough.mp4)
 
@@ -137,6 +137,8 @@ server never embeds it. The CLI reads the same token from its environment.
 | `POST /internal/test/arm-crash` | Identity API requires sandbox mode and a valid actor bearer. |
 
 5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
+
+For the final submission, publish the recording at an HTTPS URL accessible without signing in. Set `VIDEO_URL` in `docs/project_brief.md`, rebuild with `python -m scripts.build_submission_brief`, and run `make check-release`. Open the link in a signed-out browser to confirm playback.
 
 See [demo operations and implementation coverage](docs/DEMO_OPERATIONS.md) for the acceptance checklist, credentials, operator commands, and runtime parameters.
 

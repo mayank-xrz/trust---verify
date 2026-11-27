@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -60,6 +61,12 @@ def check_link(destination):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--require-public-video", action="store_true",
+        help="require the configured HTTPS walkthrough link in the PDF and README",
+    )
+    args = parser.parse_args()
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     pdf = PdfReader(ROOT / "docs/project_brief.pdf")
     errors = []
@@ -67,17 +74,29 @@ def main():
         errors.append(f"expected two PDF pages, found {len(pdf.pages)}")
 
     pdf_text = []
+    pdf_links = set()
     for page in pdf.pages:
         pdf_text.append(page.extract_text() or "")
         for annotation in page.get("/Annots", []):
             action = annotation.get_object().get("/A", {})
             if action.get("/URI"):
-                pdf_text.append(str(action["/URI"]))
+                destination = str(action["/URI"])
+                pdf_links.add(destination)
+                pdf_text.append(destination)
     for name, contents in (("README.md", readme), ("docs/project_brief.pdf", "\n".join(pdf_text))):
         errors.extend(f"{name} contains forbidden text: {word}" for word in FORBIDDEN if word in contents)
 
     prose = re.sub(r"(?ms)^(`{3,}|~{3,})[^\n]*\n.*?^\1[ \t]*$", "", readme)
     links = sorted({link for pattern in LINK_PATTERNS for link in re.findall(pattern, prose)})
+    if args.require_public_video:
+        source = (ROOT / "docs/project_brief.md").read_text(encoding="utf-8")
+        video = re.search(r"(?m)^VIDEO_URL:\s*(\S+)$", source)
+        url = urlsplit(video[1]) if video else None
+        if url is None or url.scheme != "https" or not url.hostname:
+            errors.append("Set VIDEO_URL in docs/project_brief.md to the public HTTPS walkthrough URL.")
+        elif video[1] not in pdf_links or video[1] not in links:
+            errors.append("Rebuild the brief so the public walkthrough URL appears in both the PDF and README.")
+
     with ThreadPoolExecutor(max_workers=8) as pool:
         errors.extend(error for error in pool.map(check_link, links) if error is not None)
     if errors:

@@ -7,7 +7,7 @@ Track 4 hackathon submission
 
 ## What the prototype does
 
-The system lets services deliver protected messages, withdraw trust from a lost device, recover key state, and explain security decisions. The included walkthrough is {{VIDEO_URL}}.
+The system lets services deliver protected messages, withdraw trust from a lost device, recover key state, and explain security decisions. Five-minute narrated walkthrough: {{VIDEO_URL}}.
 
 ## System design
 

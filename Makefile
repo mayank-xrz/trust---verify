@@ -1,4 +1,4 @@
-.PHONY: help setup up down test check chaos bench demo demo-recorded clean
+.PHONY: help setup up down test check check-release chaos bench demo demo-recorded clean
 
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
@@ -11,6 +11,7 @@ help:
 	@echo "  make down  - Stop and tear down sandbox cluster"
 	@echo "  make test  - Run full test suite"
 	@echo "  make check - Verify the two-page brief and README links"
+	@echo "  make check-release - Also require a public walkthrough link"
 	@echo "  make chaos - Run lifecycle & crash chaos tests"
 	@echo "  make bench - Run latency & throughput benchmarks"
 	@echo "  make demo  - Run the live judge walkthrough"
@@ -31,6 +32,9 @@ test:
 
 check:
 	$(PYTHON) -m scripts.check_submission
+
+check-release:
+	$(PYTHON) -m scripts.check_submission --require-public-video
 
 chaos:
 	$(PYTHON) -m pytest tests/test_lifecycle_chaos.py -v || $(PYTHON) -m unittest tests/test_lifecycle_chaos.py -v
