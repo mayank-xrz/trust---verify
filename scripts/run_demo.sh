@@ -166,14 +166,18 @@ print("\n▶ STEP 3: Rotate node-b's recipient key and verify grace and hard cut
 grace_payload = {"message": "In flight before rotation"}
 grace = send("node-b", grace_payload)
 late = send("node-b", {"message": "First delivery after cutoff"})
-call("node-b", "/keys/rotate", {}, OPERATOR)
-cutoff_check = time.monotonic() + int(os.environ["DEMO_GRACE_SECONDS"])
+rotation = call("node-b", "/keys/rotate", {}, OPERATOR)
+grace_key = rotation["grace_key"]
+assert grace_key["key_id"] == grace["key_id"]
+# The API truncates the server's cutoff to whole Unix seconds.
+cutoff_check = grace_key["grace_period_cutoff"] + 1
 expect_delivery("node-b", grace, grace_payload)
 bundle = enroll("node-a", "node-b")
 assert bundle["kem_key_id"] != grace["key_id"]
 current = {"message": "Delivered with the new key"}
 expect_delivery("node-b", send("node-b", current), current)
-time.sleep(max(0, cutoff_check - time.monotonic()))
+while (remaining := cutoff_check - time.time()) > 0:
+    time.sleep(remaining)
 expect_denial("node-b", late, "Recipient key is expired")
 print(f"  Old key accepted during {os.environ['DEMO_GRACE_SECONDS']} s grace and rejected after cutoff. New key delivered during grace.")
 

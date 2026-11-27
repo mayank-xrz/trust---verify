@@ -1,16 +1,21 @@
+import hashlib
+import json
 from datetime import timedelta
+
+import pytest
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
 
-from src.crypto.primitives import kem_keypair
+from src.crypto.primitives import canonical, kem_keypair
 from src.identity_keys.clock import SystemClock
 from src.identity_keys.crypto import b64e
 from src.identity_keys.tokens import TokenAuthority
-from track4_service import dispatch
+from track4_service import _compute_entry_hash, _save_audit_anchor, dispatch
 
 
-def test_prs_requires_pinned_issuer_and_uses_verified_subject(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy_state", [False, True])
+def test_prs_requires_pinned_issuer_and_uses_verified_subject(tmp_path, monkeypatch, legacy_state):
     monkeypatch.delenv("TRACK4_TRUSTED_HARNESS")
     monkeypatch.setenv("TRACK4_STATE_DIR", str(tmp_path))
     setup = {"op": "setup", "owners": {"report": "alice"}, "contents": {"report": "brief"}, "disabled": []}
@@ -55,6 +60,19 @@ def test_prs_requires_pinned_issuer_and_uses_verified_subject(tmp_path, monkeypa
     assert call(request, "alice") == {"decision": "deny"}
     issuer.clock = SystemClock()
     assert set(call(request, "alice")) == {"ciphertext", "proof"}
+    if legacy_state:
+        root = tmp_path / "track4-local"
+        state_path = root / "state.json"
+        state = json.loads(state_path.read_text())
+        context = canonical({"actor": "alice", "asset": "report", "request_id": "verified-read"})
+        legacy_hash = hashlib.sha256(context + b"\x00fresh").hexdigest()
+        state["used_challenges"] = {legacy_hash: next(iter(state["used_challenges"].values()))}
+        entry = state["audit_log"][-1]
+        del entry["ts_utc"]
+        del entry["entry_hash"]
+        entry["entry_hash"] = _compute_entry_hash(entry["prev_hash"], entry)
+        state_path.write_text(json.dumps(state))
+        _save_audit_anchor(root, state["audit_log"])
     assert call({**request, "request_id": "different-request"}, "alice") == {"decision": "deny"}
     assert set(call({**request, "challenge": "another-challenge"}, "alice")) == {"ciphertext", "proof"}
     revoke = {"op": "revoke", "actor": "alice"}
