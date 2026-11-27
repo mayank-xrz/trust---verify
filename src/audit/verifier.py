@@ -436,7 +436,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             f"{result.verified_checkpoints} checkpoints.\n"
         )
         return 0
-    sys.stderr.write(f"❌ TAMPERING DETECTED: {result.first_error}\n")
+    sys.stdout.write(f"❌ TAMPERING DETECTED: {result.first_error}\n")
     return 2
 
 

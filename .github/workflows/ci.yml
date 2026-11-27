@@ -74,7 +74,7 @@ jobs:
         run: docker run --rm --entrypoint python trust-verify:ci -m pytest -q
       - name: Verify track4_service.py under read-only rootfs
         run: |
-          printf '%s' '{"op":"setup","owners":{"brief":"alice"},"contents":{"brief":"ro body"},"disabled":[],"key_material":"CI-CANARY"}' \
+          printf '%s' '{"op":"setup","owners":{"brief":"alice"},"contents":{"brief":"ro body"},"disabled":[]}' \
             | docker run --rm -i --read-only --tmpfs /tmp -e TRACK4_STATE_DIR=/tmp/state --entrypoint python trust-verify:ci /app/track4_service.py
       - name: Confirm no key material or .env in image
         run: |

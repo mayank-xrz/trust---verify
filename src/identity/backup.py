@@ -11,7 +11,12 @@ import secrets
 import time
 from typing import Any, Dict
 
-from src.identity_keys.crypto import canonical_json_bytes, generate_ml_dsa_keypair, ml_dsa_sign, ml_dsa_verify
+from src.identity_keys.crypto import (
+    canonical_json_bytes,
+    generate_ml_dsa_keypair,
+    ml_dsa_sign,
+    ml_dsa_verify,
+)
 
 
 class BackupIntegrityError(Exception):
