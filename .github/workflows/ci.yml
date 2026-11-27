@@ -26,6 +26,8 @@ jobs:
           git archive HEAD | tar -x -C "$export_dir"
           cd "$export_dir"
           python -m pytest -q
+      - name: Verify audit log CLI
+        run: python -m src.cli verify-logs
       - name: Run doc-check
         run: python -m src.cli doc-check
       - name: Test optional SLH-DSA suite
