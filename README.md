@@ -93,6 +93,12 @@ ML-KEM remains in `pqcrypto`. The web stack still uses its pinned dependencies.
 Allowed and denied protected reads append audit events and update the local
 audit anchor.
 
+### Protected read caller authentication
+
+Configure `TRACK4_ISSUER_PUBLIC_KEY_B64` with the trusted identity issuer's raw 32-byte Ed25519 public key, base64-encoded. Keep the signing key at the issuer. Pass the issuer's signed access token in the JSON field `authorization` as `Bearer <token>`. The adapter checks the signature and token validity before reading state. The verified `user_id` determines ownership. If a read also supplies `actor`, it must match that subject. Configure `TRACK4_ADMIN_SUBJECTS` as a comma-separated list of issuer subject IDs allowed to run `setup`, `revoke`, and `audit`. During setup, asset owners must use the issuer's subject IDs.
+
+The adapter is a stdin CLI. If you expose it through an HTTP service, use TLS at the HTTP boundary and keep its process environment under operator control. For the original offline organizer protocol, set `TRACK4_TRUSTED_HARNESS=1` only in a controlled harness that already verifies caller identity. That setting has no effect when an issuer key is configured. With neither setting, the adapter denies requests. Signed credentials establish the caller as of issuance, and the adapter applies its local subject revocation list on each read.
+
 ## Demo
 
 ```bash

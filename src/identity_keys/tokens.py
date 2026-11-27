@@ -65,29 +65,35 @@ class TokenAuthority:
         return f"{b64e(payload_b)}.{b64e(sig_b)}"
 
     def verify(self, token: str, *, max_clock_skew_seconds: int = 30) -> ActorContext:
-        """Verify token signature, iat skew, and expiry; raise NotAuthorized on any failure."""
-        try:
-            parts = token.split(".")
-            if len(parts) != 2:
-                raise NotAuthorized("Malformed bearer token", reason_code="INVALID_TOKEN")
-            payload_b = b64d(parts[0])
-            sig_b = b64d(parts[1])
-            if not ed25519_verify(self._pub, payload_b, sig_b):
-                raise NotAuthorized("Invalid token signature", reason_code="INVALID_TOKEN")
-            claims = json.loads(payload_b.decode("utf-8"))
-            now_ts = int(self.clock.now().timestamp())
-            exp_ts = int(claims["exp"])
-            iat_ts = int(claims["iat"])
-            if iat_ts > now_ts + max_clock_skew_seconds or iat_ts > exp_ts:
-                raise NotAuthorized("Bearer token issued in the future", reason_code="TOKEN_IAT_INVALID")
-            if now_ts >= exp_ts:
-                raise NotAuthorized("Bearer token expired", reason_code="TOKEN_EXPIRED")
-            return ActorContext(
-                user_id=str(claims["user_id"]),
-                device_id=str(claims["device_id"]),
-                token_jti=str(claims["jti"]),
-            )
-        except NotAuthorized:
-            raise
-        except Exception as exc:
-            raise NotAuthorized("Token verification failed", reason_code="INVALID_TOKEN") from exc
+        return verify_bearer_token(self._pub, self.clock, token, max_clock_skew_seconds=max_clock_skew_seconds)
+
+
+def verify_bearer_token(
+    public_key: bytes, clock: Clock, token: str, *, max_clock_skew_seconds: int = 30
+) -> ActorContext:
+    """Verify token signature, iat skew, and expiry; raise NotAuthorized on any failure."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 2:
+            raise NotAuthorized("Malformed bearer token", reason_code="INVALID_TOKEN")
+        payload_b = b64d(parts[0])
+        sig_b = b64d(parts[1])
+        if not ed25519_verify(public_key, payload_b, sig_b):
+            raise NotAuthorized("Invalid token signature", reason_code="INVALID_TOKEN")
+        claims = json.loads(payload_b.decode("utf-8"))
+        now_ts = int(clock.now().timestamp())
+        exp_ts = int(claims["exp"])
+        iat_ts = int(claims["iat"])
+        if iat_ts > now_ts + max_clock_skew_seconds or iat_ts > exp_ts:
+            raise NotAuthorized("Bearer token issued in the future", reason_code="TOKEN_IAT_INVALID")
+        if now_ts >= exp_ts:
+            raise NotAuthorized("Bearer token expired", reason_code="TOKEN_EXPIRED")
+        return ActorContext(
+            user_id=str(claims["user_id"]),
+            device_id=str(claims["device_id"]),
+            token_jti=str(claims["jti"]),
+        )
+    except NotAuthorized:
+        raise
+    except Exception as exc:
+        raise NotAuthorized("Token verification failed", reason_code="INVALID_TOKEN") from exc

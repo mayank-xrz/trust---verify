@@ -242,22 +242,56 @@ def _lookup_read_decision(audit_log, request_id):
     return None
 
 
+def _authenticated_actor(request, op):
+    """Resolve the caller from the pinned issuer, or from the explicitly trusted harness."""
+    public_key = os.environ.get("TRACK4_ISSUER_PUBLIC_KEY_B64")
+    if public_key is None and os.environ.get("TRACK4_TRUSTED_HARNESS") == "1":
+        return request.get("actor")
+
+    authorization = request.get("authorization")
+    if not public_key or not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+        raise CryptoError("caller authentication required")
+    from src.identity_keys.clock import SystemClock
+    from src.identity_keys.errors import NotAuthorized
+    from src.identity_keys.tokens import verify_bearer_token
+
+    token = authorization[len("Bearer "):]
+    if not token or len(token) > 4096:
+        raise CryptoError("invalid caller credential")
+    try:
+        actor = verify_bearer_token(unb64(public_key, 32), SystemClock(), token).user_id
+    except NotAuthorized as exc:
+        raise CryptoError("invalid caller credential") from exc
+    if op in {"setup", "revoke", "audit"}:
+        admins = {item.strip() for item in os.environ.get("TRACK4_ADMIN_SUBJECTS", "").split(",")}
+        if not actor or actor not in admins:
+            raise CryptoError("adapter administrator required")
+    elif "actor" in request and request["actor"] != actor:
+        raise CryptoError("request actor does not match caller")
+    return actor
+
+
 def dispatch(request):
     if not isinstance(request, dict):
         raise ValueError("request must be object")
+    op = request.get("op")
+    if not isinstance(op, str) or op not in {"setup", "revoke", "audit", "read", "protected_read"}:
+        raise ValueError("unsupported operation")
+    try:
+        authenticated_actor = _authenticated_actor(request, op)
+    except (CryptoError, ImportError):
+        return {"decision": "deny"}
     root = state_dir()
     with (root / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = root / "state.json"
         state = load(path)
-        op = request.get("op")
         anchor = None if op == "setup" else _load_audit_anchor(root)
         if not verify_chain(state.get("audit_log", []), anchor=anchor):
             raise CryptoError("audit chain verification failed")
         # The judged adapter keeps enrollment and prekey state in the same deterministic directory.
         registry = TrustRegistry(root / "trust_registry.json")
         prekeys = PrekeyStore(root / "prekeys.json", registry=registry)
-        op = request.get("op")
         if op == "setup":
             owners, contents, disabled = request.get("owners"), request.get("contents"), request.get("disabled")
             if not isinstance(owners, dict) or not isinstance(contents, dict) or not isinstance(disabled, list):
@@ -307,7 +341,7 @@ def dispatch(request):
             save(path, state)
             return {"request_id": request_id, "decision": decision}
         if op in ("read", "protected_read"):
-            actor, asset = request.get("actor"), request.get("asset")
+            actor, asset = authenticated_actor, request.get("asset")
             if not isinstance(actor, str) or not isinstance(asset, str):
                 raise ValueError("invalid identity")
             allowed = state["owners"].get(asset) == actor and actor not in state["disabled"] and asset in state["contents"]

@@ -16,6 +16,13 @@ from src.audit.logger import AuditLogger
 from src.crypto._pqcrypto_compat import sig_keygen
 
 
+@pytest.fixture(autouse=True)
+def trusted_organizer_adapter(monkeypatch):
+    """Existing organizer protocol tests run inside the explicit trusted harness."""
+    monkeypatch.setenv("TRACK4_TRUSTED_HARNESS", "1")
+    monkeypatch.delenv("TRACK4_ISSUER_PUBLIC_KEY_B64", raising=False)
+
+
 @pytest.fixture
 def runtime_identities() -> Dict[str, tuple[bytes, bytes]]:
     """Generate fresh ML-DSA-65 identity keypairs at runtime."""
