@@ -2,11 +2,11 @@
 
 ## Requirements Pin
 
-- Verified that `requirements.txt` pins the PQC stack at `pqcrypto==1.0.0` (alongside the other pinned dependencies).
+- Verified that `requirements.txt` pins the PQC stack at the official judging version, `pqcrypto==0.4.0` (alongside the other pinned dependencies).
 - Command: `grep '^pqcrypto' requirements.txt`
 - Output:
 ```
-pqcrypto==1.0.0
+pqcrypto==0.4.0
 ```
 
 ## Requirements Demo

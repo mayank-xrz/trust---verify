@@ -21,5 +21,5 @@
 | `docs/05-migration-engineering.md` | Inventory, ClientHello frag, SUPERCOP, PQCA, AWS, LMS/HSS, CNSA 2.0 | `python -m src.cli doc-check` |
 | `docs/06-math-foundations.md` | LLL, SIS vs Module-SIS, LWE vs Module-LWE, cross-links | `python -m src.cli doc-check` |
 | `docs/07-corrections-and-scope.md` | Corrections 7.1–7.5 & Part B checklist | `python -m src.cli doc-check` |
-| `requirements.txt` | Pin `pqcrypto==1.0.0` (matches `.venv`) | Clean-machine setup |
+| `requirements.txt` | Pin `pqcrypto==0.4.0` to match the official Track 4 Python 3.12 runtime | Clean-machine setup |
 | `README.md` | Scope, provenance, setup, pinned deps, snippet, timing, limits, delta | `python -m src.cli doc-check` |

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_requirements_pin() -> None:
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    assert "pqcrypto==1.0.0" in requirements
+    assert "pqcrypto==0.4.0" in requirements
     unpinned = [
         line.strip()
         for line in requirements.splitlines()

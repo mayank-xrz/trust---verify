@@ -1,5 +1,5 @@
 # Multi-stage reproducible build with zero secrets and pinned dependencies
-FROM python:3.11-slim AS builder
+FROM python:3.12-slim AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements-demo.txt
 
 # Runtime Stage
-FROM python:3.11-slim AS runtime
+FROM python:3.12-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
