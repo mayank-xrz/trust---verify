@@ -1,4 +1,4 @@
-"""FIX-06 regression tests: operator CLI verifies checkpoint signatures.
+"""Operator CLI verifies checkpoint signatures.
 
 The shipped verifier and `src.cli verify-logs` previously ignored the
 `signature` field on checkpoint records (they only verified it when a Python

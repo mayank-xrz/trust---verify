@@ -39,6 +39,7 @@ from demo.node.sandbox_api import SandboxController, create_sandbox_router
 from demo.node.ui import render_dashboard_html
 from src.crypto.primitives import CryptoError, unb64
 from src.crypto.replay_cache import CounterOutOfWindowError, ReplayRejectedError
+from src.detector.rules import RuleAlert
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
@@ -208,16 +209,26 @@ def create_app(
             _require_bearer(authorization, operator_token, "Key administration")
         except HTTPException as exc:
             if exc.status_code == 401:
-                audit.logger.log_event(
+                denial = audit.logger.log_event(
                     service=node_id, action="OPERATOR_AUTH_DENIED", subject="unauthenticated",
                     resource=request.url.path, status="DENIED",
                 )
-                recent_alerts.append({
-                    "alert_id": f"alert-operator-{time.time_ns()}",
-                    "rule_name": "UNAUTHORIZED_KEY_ADMINISTRATION",
-                    "severity": "HIGH",
-                    "description": f"Unauthenticated request to {request.url.path}",
-                })
+                recent_alerts.append(RuleAlert(
+                    alert_id=f"alert-operator-{denial.event_id}",
+                    rule_name="UNAUTHORIZED_KEY_ADMINISTRATION",
+                    severity="HIGH",
+                    timestamp_ns=denial.timestamp_ns,
+                    subject=denial.subject,
+                    service=denial.service,
+                    resource=denial.resource,
+                    description=f"Unauthenticated request to {denial.resource}",
+                    evidence={
+                        "event_id": denial.event_id,
+                        "sequence": denial.sequence,
+                        "action": denial.action,
+                        "status": denial.status,
+                    },
+                ).to_dict())
             raise
         return "demo-operator"
 

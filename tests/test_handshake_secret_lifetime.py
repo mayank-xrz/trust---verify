@@ -1,4 +1,4 @@
-"""FIX-03 regression tests: session-key and ephemeral secret zeroization.
+"""Session-key and ephemeral secret zeroization.
 
 These tests assert observable behaviour, not implementation details:
 
@@ -38,7 +38,7 @@ def _read(addr: int, length: int) -> bytes:
 
 def _session_keys() -> SessionKeys:
     return SessionKeys(
-        session_id="sess-fix03",
+        session_id="test-session",
         transcript_hash="00" * 32,
         tx_key=os.urandom(KEY_LEN),
         rx_key=os.urandom(KEY_LEN),
@@ -65,23 +65,13 @@ def test_session_keys_zeroize_overwrites_live_material() -> None:
         assert getattr(keys, name) == b""
 
 
-def test_dropping_session_keys_scrubs_material(monkeypatch) -> None:
-    calls: list[int] = []
-    real_zeroize = handshake_module._zeroize_bytes
-
-    def recording_zeroize(value):
-        if isinstance(value, bytes) and value:
-            calls.append(len(value))
-        return real_zeroize(value)
-
-    monkeypatch.setattr(handshake_module, "_zeroize_bytes", recording_zeroize)
-
+def test_dropping_session_keys_scrubs_material() -> None:
     keys = _session_keys()
+    originals = (keys.tx_key, keys.rx_key, keys.resumption_secret)
     del keys
     gc.collect()
 
-    # tx_key, rx_key and resumption_secret must each have been scrubbed.
-    assert sorted(calls) == [KEY_LEN, KEY_LEN, KEY_LEN]
+    assert originals == (b"\x00" * KEY_LEN,) * 3
 
 
 def test_mlkem_keygen_private_bytes_are_scrubbed(monkeypatch) -> None:

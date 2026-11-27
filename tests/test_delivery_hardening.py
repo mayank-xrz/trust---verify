@@ -1,4 +1,4 @@
-"""FIX-11 regression tests: delivery chunk-metadata binding and plaintext zeroization.
+"""Delivery chunk-metadata binding and plaintext zeroization.
 
 Objective 11 already reassembled/tamper-checked correctly, but a receiver would
 happily mix chunks that disagreed on sender/session/chunk_count/whole hash

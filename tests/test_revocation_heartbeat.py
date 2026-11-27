@@ -1,4 +1,4 @@
-"""FIX-07 regression tests: periodic revocation heartbeat and enforcement delta.
+"""Periodic revocation heartbeat and enforcement delta.
 
 Objective 2 previously had no periodic heartbeat/poll thread: `pull_revocations()`
 was manual/on-demand, so a node only converged when a push notification arrived

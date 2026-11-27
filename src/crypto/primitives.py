@@ -3,7 +3,6 @@ import base64
 import binascii
 import hashlib
 import json
-import shutil
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
@@ -11,7 +10,6 @@ from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
 from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_keygen, sig_sign, sig_verify
-from .node_bridge import call_node
 
 SUITE = "ML-KEM-768+X25519+ML-DSA-65+AES-256-GCM+HKDF-SHA256/v1"
 
@@ -101,10 +99,6 @@ def hkdf(secret, salt, info, length=32):
         raise CryptoError("invalid KDF input")
     if not 1 <= length <= 255 * 32:
         raise CryptoError("invalid KDF length")
-    if shutil.which("node"):
-        request = {"op": "hkdf", "ikm": b64(secret), "salt": b64(salt), "info": b64(info), "length": length}
-        result = call_node(request, CryptoError)
-        return unb64(result["data"], length)
     return HKDF(algorithm=hashes.SHA256(), length=length, salt=salt, info=info).derive(secret)
 
 

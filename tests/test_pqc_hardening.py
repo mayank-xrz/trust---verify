@@ -23,6 +23,7 @@ from src.crypto import (
     SecureCryptoSystem,
 )
 from src.crypto._pqcrypto_compat import kem_decaps, kem_keygen
+from src.crypto.agility import slh_dsa_sha2_128f
 from src.crypto.delivery import ChunkReceiver, chunk_and_seal
 from src.crypto.envelope import AEADFailedError, EnvelopeError, open_envelope, seal_envelope
 from src.crypto.handshake import HandshakeError
@@ -137,6 +138,10 @@ def test_track4_service_works_without_node_in_path(tmp_path: Path, monkeypatch) 
 
 
 def test_hybrid_lattice_plus_code_kem_roundtrip_and_dual_sigs() -> None:
+    if slh_dsa_sha2_128f is None:
+        with pytest.raises(HandshakeError, match="requires pqcrypto with SLH-DSA"):
+            DualIdentityKeypair.generate()
+        return
     alice_id = DualIdentityKeypair.generate()
     bob_id = DualIdentityKeypair.generate()
 

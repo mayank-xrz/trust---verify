@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import base64
+import tomllib
 from pathlib import Path
 
 from pqcrypto.kem import ml_kem_768
@@ -20,7 +21,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_requirements_pin() -> None:
     requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    assert "pqcrypto==1.0.0" in requirements
+    assert "pqcrypto==0.4.0" in requirements.splitlines()
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        project = tomllib.load(file).get("project", {})
+    if "dependencies" in project:
+        assert "pqcrypto==0.4.0" in project["dependencies"]
     unpinned = [
         line.strip()
         for line in requirements.splitlines()

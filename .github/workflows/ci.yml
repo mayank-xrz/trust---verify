@@ -20,7 +20,29 @@ jobs:
           pip install -r requirements.txt ruff==0.8.0
       - name: Lint with ruff
         run: ruff check src tests track4_service.py
-      - name: Run pytest
-        run: pytest -q
+      - name: Run pytest from a source export
+        run: |
+          export_dir="$(mktemp -d)"
+          git archive HEAD | tar -x -C "$export_dir"
+          cd "$export_dir"
+          python -m pytest -q
       - name: Run doc-check
         run: python -m src.cli doc-check
+      - name: Test optional SLH-DSA suite
+        run: |
+          python -m pip install pqcrypto==1.0.0
+          python -m pytest -q tests/test_pqc_hardening.py::test_hybrid_lattice_plus_code_kem_roundtrip_and_dual_sigs
+
+  container-acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime image
+        run: docker build -t trust-but-verify-ci .
+      - name: Run lifecycle acceptance and cluster integration tests
+        run: |
+          docker run --rm trust-but-verify-ci python scripts/demo_e2e.py
+          docker run --rm trust-but-verify-ci python -m pytest -q tests/test_integration_e2e.py tests/test_part3_revocation_reenroll.py
+          docker run --rm trust-but-verify-ci bash scripts/run_demo.sh
+      - name: Run adversarial regression suite
+        run: docker run --rm trust-but-verify-ci python -m pytest -q tests/test_judge_redteam.py tests/test_security_regression.py

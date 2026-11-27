@@ -1,4 +1,4 @@
-"""FIX-10 regression tests: ingestion-sequence tiebreak and release watermark.
+"""Ingestion-sequence tiebreak and release watermark.
 
 Objective 8 previously ordered equal timestamps arbitrarily (heap compared
 `timestamp_ns` only) and had no watermark, so a future-dated event was released

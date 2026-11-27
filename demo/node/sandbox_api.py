@@ -758,32 +758,26 @@ class SandboxController:
         }
 
     def run_audit_tamper_action(self, action: str) -> Dict[str, Any]:
-        log_path = getattr(self.audit_logger, "log_file_path", "")
-        if action == "tamper" and os.path.exists(log_path):
-            with open(log_path, "r", encoding="utf-8") as f:
-                content = f.read()
-            if "SUCCESS" in content:
-                content = content.replace("SUCCESS", "TAMPERD", 1)
-            else:
-                content += '{"sequence": 9999, "forged": true}\n'
-            with open(log_path, "w", encoding="utf-8") as f:
-                f.write(content)
-        elif action == "restore":
-            if os.path.exists(log_path):
-                os.remove(log_path)
-            self.audit_logger._current_sequence = 0
-            self.audit_logger._init_or_resume_log()
-            from src.audit.logger import GENESIS_HASH
-            self.audit_logger._last_hash = GENESIS_HASH
-            self._seed_initial_audit()
-
-        res = self.audit_verifier.verify_file(log_path)
-        res_dict = res.to_dict() if hasattr(res, "to_dict") else {"is_valid": False}
+        log_path = self.audit_logger.log_file_path
         if action == "tamper":
-            self._mark("log_integrity", not res.is_valid, f"1-byte mutation caught at seq {res.corrupted_sequence}")
-        elif res.is_valid:
-            self._mark("log_integrity", True, f"Hash chain verified ({res.total_records} records valid)")
-        return {"ok": True, "action": action, "verification": res_dict}
+            with tempfile.TemporaryDirectory(prefix="tbv-audit-demo-") as directory:
+                sample_path = os.path.join(directory, "tampered.log")
+                with open(log_path, "rb") as source, open(sample_path, "wb") as sample:
+                    for line in source:
+                        if b'"status":"SUCCESS"' in line:
+                            sample.write(line.replace(b'"status":"SUCCESS"', b'"status":"XUCCESS"', 1))
+                            shutil.copyfileobj(source, sample)
+                            break
+                        sample.write(line)
+                    else:
+                        sample.write(b'{"sequence": 9999, "forged": true}\n')
+                result = self.audit_verifier.verify_file(sample_path)
+            self._mark("log_integrity", not result.is_valid, f"Tampered copy checked at seq {result.corrupted_sequence}")
+        else:
+            result = self.audit_verifier.verify_file(log_path)
+            if result.is_valid:
+                self._mark("log_integrity", True, f"Hash chain verified ({result.total_records} records valid)")
+        return {"ok": True, "action": action, "verification": result.to_dict()}
 
     def run_lateral_movement_test(self) -> Dict[str, Any]:
         viol = self.lateral_graph.check_call("audit-service", "node-c", "READ_KEY_STORE")

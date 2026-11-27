@@ -1,4 +1,4 @@
-"""FIX-04 regression tests: ML-DSA-65 resumption tickets and peer identity hash."""
+"""ML-DSA-65 resumption tickets and peer identity hash."""
 
 from __future__ import annotations
 

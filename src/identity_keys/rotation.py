@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import os
 import secrets
@@ -88,15 +87,15 @@ def sign_cluster_sync(payload: dict[str, Any]) -> str:
     secret = os.environ.get("CLUSTER_SYNC_SECRET", "").encode("utf-8")
     if not secret:
         raise StateUnavailable("CLUSTER_SYNC_SECRET is not configured")
-    return hmac.new(secret, canonical_json_bytes(payload), hashlib.sha256).hexdigest()
+    return hmac.digest(secret, canonical_json_bytes(payload), "sha256").hex()
 
 
 def verify_cluster_sync(payload: dict[str, Any], signature_hex: str) -> bool:
     """Verify HMAC-SHA-256 cluster sync signature."""
     secret = os.environ.get("CLUSTER_SYNC_SECRET", "").encode("utf-8")
-    if not secret:
+    if not secret or not signature_hex.isascii():
         return False
-    expected = hmac.new(secret, canonical_json_bytes(payload), hashlib.sha256).hexdigest()
+    expected = hmac.digest(secret, canonical_json_bytes(payload), "sha256").hex()
     return hmac.compare_digest(expected, signature_hex)
 
 

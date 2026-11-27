@@ -1,4 +1,4 @@
-"""FIX-08 regression tests: approved change-ticket suppression.
+"""Approved change-ticket suppression.
 
 Objective 6 previously had no change-ticket/window concept: an approved
 deploy bot rotating a key was alerted as `UNAUTHORIZED_PRIVILEGE_ELEVATION`.

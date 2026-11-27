@@ -1,10 +1,4 @@
-"""Detector Benchmark and Evaluation Test:
-- Precision, Recall, F1 >= 0.90
-- MTTA (Mean Time To Alert) measurement
-- False Positives per 1k events
-- Clock Skew tolerance
-- Lateral movement graph violations
-"""
+"""Regression scenarios for detector decisions, timing and policy boundaries."""
 
 import time
 import unittest
@@ -12,64 +6,61 @@ import unittest
 from src.detector.clock_sync import ClockSyncBuffer, SkewStatus
 from src.detector.graph_lateral import LateralMovementGraph
 from src.detector.metrics import compute_f1_mtta
-from src.detector.rules import ContextRuleEngine
+from src.detector.rules import ChangeTicket, ChangeTicketRegistry, ContextRuleEngine
 
 
 class TestDetectorEval(unittest.TestCase):
 
-    def test_detector_f1_and_mtta_benchmark(self):
-        """Runs a synthetic labeled evaluation suite and verifies F1 >= 0.90 and low MTTA."""
-        engine = ContextRuleEngine(burst_threshold=20)
-        evaluations = []
-        alert_latencies_ms = []
+    def test_mixed_operational_trace(self):
+        base_ns = 1_800_000_000 * 1_000_000_000
+        second = 1_000_000_000
+        tickets = ChangeTicketRegistry([
+            ChangeTicket("CHG-42", "deploy-bot", base_ns, base_ns + 60 * second),
+        ])
+        engine = ContextRuleEngine(change_tickets=tickets)
+        change = {"role": "user", "change_ticket": "CHG-42", "change_window": "approved"}
 
-        base_time = 1_700_000_000.0
-
-        # 100 Routine events (negative class) spread across distinct sessions
-        for i in range(100):
-            evt = {
-                "event_id": f"evt-normal-{i}",
-                "timestamp_ns": int((base_time + i * 2.0) * 1_000_000_000),
-                "subject": f"user-{i % 25}",
+        def event(offset, subject, resource, action, status="SUCCESS", metadata=None):
+            return {
+                "event_id": f"event-{offset}-{subject}",
+                "timestamp_ns": base_ns + offset * second,
+                "subject": subject,
                 "service": "api-gateway",
-                "resource": f"/items/{i}",
-                "action": "GET_ITEM",
-                "status": "SUCCESS",
-                "metadata": {"role": "user"},
+                "resource": resource,
+                "action": action,
+                "status": status,
+                "metadata": metadata or {},
             }
-            t0 = time.perf_counter()
-            alerts = engine.evaluate_event(evt)
-            evaluations.append({"is_attack": False, "detected": len(alerts) > 0})
 
-        # 25 Attack events (positive class: unauthorized admin & crypto tamper)
-        for i in range(25):
-            is_admin_attempt = (i % 2 == 0)
-            evt = {
-                "event_id": f"evt-attack-{i}",
-                "timestamp_ns": int((base_time + 500.0 + i) * 1_000_000_000),
-                "subject": f"attacker-{i}",
-                "service": "api-gateway",
-                "resource": "/admin/keys/rotate" if is_admin_attempt else "/api/v1/message",
-                "action": "ROTATE_KEY" if is_admin_attempt else "REPLAY_BLOCKED",
-                "status": "DENIED",
-                "metadata": {"role": "guest", "error": "Replay detected: duplicate message"},
-            }
-            t0 = time.perf_counter()
-            alerts = engine.evaluate_event(evt)
-            lat_ms = (time.perf_counter() - t0) * 1000.0
-
-            is_detected = len(alerts) > 0
-            evaluations.append({"is_attack": True, "detected": is_detected})
-            if is_detected:
-                alert_latencies_ms.append(lat_ms)
-
-        metrics = compute_f1_mtta(evaluations, alert_latencies_ms)
-
-        self.assertGreaterEqual(metrics.precision, 0.90, f"Precision too low: {metrics.precision}")
-        self.assertGreaterEqual(metrics.recall, 0.90, f"Recall too low: {metrics.recall}")
-        self.assertGreaterEqual(metrics.f1_score, 0.90, f"F1 Score must be >= 0.90, got {metrics.f1_score}")
-        self.assertLess(metrics.mtta_ms, 50.0, f"MTTA too high: {metrics.mtta_ms} ms")
-        self.assertEqual(metrics.false_alerts_per_1k, 0.0)
+        # Interleave activity that shares the same routes, actions and identities.
+        # Each label identifies the expected rule at that point in the trace.
+        trace = [
+            ("approved maintenance", event(5, "deploy-bot", "/keys/rotate", "ROTATE_KEY",
+                                          metadata=change), []),
+            ("copied ticket", event(6, "worker", "/keys/rotate", "ROTATE_KEY", "DENIED", change),
+             ["UNAUTHORIZED_PRIVILEGE_ELEVATION"]),
+            ("ordinary denial", event(9, "worker", "/receive", "RECEIVE", "DENIED",
+                                      {"error": "Credential expired"}), []),
+            ("message replay", event(12, "worker", "/receive", "RECEIVE", "DENIED",
+                                     {"error": "Duplicate message"}), ["CRYPTOGRAPHIC_ATTACK_DETECTED"]),
+            ("first sensitive read", event(15, "reader", "/keys/export", "EXPORT_KEY"), []),
+            ("authorized peer traffic", event(35, "peer", "/receive", "RECEIVE"), []),
+            ("second sensitive read", event(45, "reader", "/keys/export", "EXPORT_KEY"), []),
+            ("expired maintenance window", event(61, "deploy-bot", "/keys/rotate", "ROTATE_KEY",
+                                                 "DENIED", change), ["UNAUTHORIZED_PRIVILEGE_ELEVATION"]),
+            ("third sensitive read", event(85, "reader", "/keys/export", "EXPORT_KEY"), []),
+            ("isolated sensitive read", event(95, "peer", "/keys/export", "EXPORT_KEY"), []),
+            ("low-and-slow threshold", event(125, "reader", "/keys/export", "EXPORT_KEY"),
+             ["LOW_AND_SLOW_SENSITIVE_ACCESS"]),
+            ("sensitive history expired", event(450, "reader", "/keys/export", "EXPORT_KEY"), []),
+        ]
+        for label, audit_event, expected_rules in trace:
+            with self.subTest(label=label):
+                alerts = engine.evaluate_event(audit_event)
+                self.assertEqual([alert.rule_name for alert in alerts], expected_rules)
+                for alert in alerts:
+                    self.assertEqual(alert.subject, audit_event["subject"])
+                    self.assertEqual(alert.resource, audit_event["resource"])
 
     def test_median_and_false_alerts_per_benign_event(self):
         metrics = compute_f1_mtta(

@@ -1,4 +1,4 @@
-"""FIX-09 regression tests: lateral hop-velocity aggregation.
+"""Lateral hop-velocity aggregation.
 
 Objective 7 previously had no hop-velocity window, and `GraphViolation` lacked
 the required `identity`, `services`, `event_ids`, and `rule_id` fields.

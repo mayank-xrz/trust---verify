@@ -1,10 +1,20 @@
-# 1-Page Threat Model: Trust-But-Verify
+# Threat Model: Trust-But-Verify
+
+## Judge adapter
+
+The protected asset is the content seeded by `setup`. The trust boundary is the ownership and revocation check before `read` or `protected_read` releases a result. `read` returns plaintext to the authorized owner. `protected_read` encapsulates to the supplied ML-KEM-768 public key and returns a ciphertext and a proof over the challenge and stored body. An audit query returns the recorded decision for a request ID.
+
+The runner is trusted to initialize state, perform revocations and supply the authenticated actor. The adapter accepts the actor as a JSON field and does not authenticate a person from that field. It denies unknown assets, wrong owners and disabled actors. A protected read also requires a well-formed key and a fresh challenge in the request context.
+
+The local service user and its state directory are trusted. The directory holds both the storage key and the encrypted resources. A process that can read or replace the whole directory can recover resources or replace the audit chain and its local anchor. Revocation applies to future requests and cannot recall content already returned. Each adapter state directory is independent.
+
+`threat-model.json` carries the two declaration fields recognized by the organizer. The HTTP demo has a separate boundary and runs on synthetic sandbox state.
+
+## HTTP cluster demonstration
 
 **System:** Multi-Node Distributed Microservice Cluster with Post-Quantum Cryptography & Tamper-Evident Audit Logging  
 **Evaluation Standard:** STRIDE + NIST Post-Quantum Cryptographic Standards (FIPS 203, FIPS 204)  
-**Document Purpose:** Ready-to-export Page 2 briefing for project evaluation and security review.
-
-> **Scope & Disclaimer:** This architecture represents a zero-trust multi-node defense prototype running in an isolated sandbox with vetted NIST PQC primitives. It demonstrates mathematically proven security guarantees without relying on black-box AI/ML models.
+Demonstration nodes use synthetic data. The audit-tamper demonstration verifies a temporary copy of the node's audit log. Public demo deployments should use disposable state and test credentials.
 
 ---
 
@@ -13,8 +23,8 @@
 | Asset | Sensitivity | Objective | Primary Cryptographic / System Mitigation |
 | :--- | :--- | :--- | :--- |
 | **In-Flight Message Payloads & Files** | High | Confidentiality & Integrity | AEAD (**AES-256-GCM**) with Recipient Binding inside Authenticated Associated Data (AAD). |
-| **Long-Term Node Identity Keys** | Critical | Non-Repudiation & Authentication | NIST FIPS 204 **ML-DSA-65** post-quantum signatures; kept in volatile memory; zero secret leaks. |
-| **Ephemeral Session Secrets** | Critical | Strict Forward Secrecy | NIST FIPS 203 **ML-KEM-768** key encapsulation; secrets derived per-session and immediately purged. |
+| **Long-Term Node Identity Keys** | Critical | Authentication | NIST FIPS 204 **ML-DSA-65** signatures and restricted access to node key state. |
+| **Ephemeral Session Secrets** | Critical | Forward Secrecy | Hybrid session key derivation with ML-KEM-768 and X25519. Python secret cleanup is best effort. |
 | **Key Lifecycle State & Backups** | High | Availability & State Integrity | Atomic Write-Ahead Log (**WAL**) with checksums; signed & **HMAC-SHA3-512** authenticated backups. |
 | **Audit Logs & Forensic History** | High | Tamper-Evidence & Verifiability | Continuous SHA-256 cryptographic hash chaining ($H_i = \text{SHA256}(H_{i-1} \parallel E_i)$) with instant CLI verification. |
 
@@ -24,7 +34,7 @@
 
 1. **Harvest-Now-Decrypt-Later (HNDL) Quantum Adversary:**
    - *Capability:* Wiretaps and stores encrypted microservice payloads across public/cloud networks today; will possess cryptanalytically relevant quantum computers (CRQC) running Shor's algorithm to break RSA/ECC tomorrow.
-   - *Mitigation:* All session keys are encapsulated using **ML-KEM-768** (Module Learning with Errors problem, MLWE), rendering recorded historical ciphertext unrecoverable even by quantum computers.
+   - *Mitigation:* The hybrid session protocol combines ML-KEM-768 and X25519. Its post-quantum protection depends on ML-KEM-768 and protection of endpoint state.
 
 2. **Network Man-in-the-Middle (MITM):**
    - *Capability:* Intercepts, delays, drops, replays, or redirects envelopes; attempts recipient-swapping (forwarding Node-B's confidential payload to Node-C).
@@ -46,7 +56,7 @@
 
 ## 3. Security Controls & Trust Assumptions
 
-* **Zero AI/ML Dependencies:** Detection relies exclusively on deterministic graph traversal ($O(1)$ lookup) and context-aware state rules ($< 2\,\mu\text{s}$ evaluation). Zero false hallucinations, zero probabilistic drift, zero model inversion attacks.
+* **Detector coverage:** Deterministic access policies and context rules respond to configured behaviours. Synthetic traces exercise those rules. Field accuracy is unmeasured.
 * **Trust Anchor & Enrollment:** Key authority is trusted during initial device enrollment; subsequent rotations are verified peer-to-peer using cryptographic authority signatures.
 * **Intra-Node Boundary:** Memory inside an active node process is trusted; disk persistence uses fsynced WAL logging to guarantee crash consistency.
 

@@ -31,7 +31,7 @@ from src.identity_keys.key_lifecycle import is_key_acceptable
 from src.identity_keys.models import AuditOutbox, Device, KeyVersion, ResourceGrant
 from src.identity_keys.reenroll import ReenrollmentService
 from src.identity_keys.revocation import RevocationReason, RevocationService
-from src.identity_keys.rotation import RotationService
+from src.identity_keys.rotation import RotationService, sign_cluster_sync
 from src.identity_keys.services import IdentityService
 from src.identity_keys.tokens import ActorContext, TokenAuthority
 
@@ -99,6 +99,27 @@ def _enroll_and_token(p3_env, user_id: str, label: str = "d1"):
         device_id=dev["device_id"], challenge=ch["challenge"], signature_b64=b64e(sig)
     )["access_token"]
     return dev["device_id"], pub, priv, tok
+
+
+def test_signed_sync_across_nodes(p3_env) -> None:
+    p3_env["rot_svc"].create_initial_key_set("auth-sync", "auth")
+    payload = {"key_set_id": "auth-sync", "rotation_id": "test-rotation"}
+    signature = sign_cluster_sync(payload)
+    for node_id in ("node-b", "node-c"):
+        peer = p3_env["clients"][node_id]
+        for body in (
+            {"payload": {**payload, "rotation_id": "changed"}, "hmac": signature},
+            {"payload": payload, "hmac": "é"},
+        ):
+            response = peer.post("/internal/sync", json=body)
+            assert response.status_code == 401
+            assert response.json()["detail"] == "INVALID_CLUSTER_HMAC"
+
+        response = peer.post("/internal/sync", json={"payload": payload, "hmac": signature})
+        assert response.status_code == 200
+        assert response.json()["synced"] is True
+        assert response.json()["node_id"] == node_id
+        assert response.json()["current_version"] == 1
 
 
 def test_revocation_across_three_nodes_scope_isolation_and_idempotency(p3_env) -> None:

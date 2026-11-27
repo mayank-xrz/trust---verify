@@ -174,6 +174,10 @@ class OperatorCLI:
                 src_node = a.get("node", "cluster")
                 print(f"  • [{sev}] on {src_node} -> {rule}")
                 print(f"    Details: {desc}")
+                if a.get("subject"):
+                    print(f"    Subject: {a['subject']}")
+                if a.get("service"):
+                    print(f"    Service: {a['service']}")
                 if a.get("evidence"):
                     print(f"    Evidence: {json.dumps(a.get('evidence'))}")
 

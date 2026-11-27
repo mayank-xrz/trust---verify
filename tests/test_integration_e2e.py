@@ -6,11 +6,14 @@ import sqlite3
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
+from demo.node.operator_cli import OperatorCLI
 from demo.node.server import create_app
 
 
@@ -216,6 +219,56 @@ class TestIntegrationE2E(unittest.TestCase):
         self.assertEqual(actors["ROTATE_KEY_SUCCESS"], "demo-operator")
         self.assertEqual(actors["REVOKE_KEY_SUCCESS"], "demo-operator")
         self.assertEqual(actors["OPERATOR_AUTH_DENIED"], "unauthenticated")
+
+    def test_key_administration_alert_points_to_each_recorded_denial(self):
+        client = self.client_b
+        for _ in range(2):
+            self.assertEqual(client.post("/keys/rotate").status_code, 401)
+
+        dashboard = client.get("/api/sandbox/state").json()
+        cli_metrics = client.get("/metrics").json()
+        denials = {
+            record["event_id"]: record for record in dashboard["audit"]["recent_entries"]
+            if record["action"] == "OPERATOR_AUTH_DENIED"
+        }
+        self.assertEqual(len(denials), 2)
+        for feed in (dashboard["alerts"], cli_metrics["alerts"]):
+            alerts = [alert for alert in feed if alert["rule_name"] == "UNAUTHORIZED_KEY_ADMINISTRATION"]
+            self.assertCountEqual([alert["evidence"]["event_id"] for alert in alerts], denials.keys())
+            for alert in alerts:
+                evidence = alert["evidence"]
+                record = denials[evidence["event_id"]]
+                self.assertEqual(alert["severity"], "HIGH")
+                self.assertEqual(alert["subject"], "unauthenticated")
+                self.assertEqual(alert["service"], "node-b")
+                self.assertEqual(alert["resource"], "/keys/rotate")
+                for field in ("subject", "service", "resource", "timestamp_ns"):
+                    self.assertEqual(alert[field], record[field])
+                for field in ("sequence", "action", "status"):
+                    self.assertEqual(evidence[field], record[field])
+                self.assertEqual(evidence["status"], "DENIED")
+
+        output = StringIO()
+        with patch("demo.node.operator_cli.http_request", return_value=(200, cli_metrics)):
+            with redirect_stdout(output):
+                OperatorCLI({"node-b": "http://node-b"}).alerts()
+        for detail in ("Subject: unauthenticated", "Service: node-b", "UNAUTHORIZED_KEY_ADMINISTRATION", *denials):
+            self.assertIn(detail, output.getvalue())
+
+    def test_sandbox_audit_tamper_demo_preserves_node_audit_evidence(self):
+        client = self.client_b
+        self.assertEqual(client.post("/keys/rotate").status_code, 401)
+        log_path = Path(client.app.state.audit_logger.log_file_path)
+        original_log = log_path.read_bytes()
+
+        for action, expected_validity in (("tamper", False), ("restore", True), ("verify", True)):
+            with self.subTest(action=action):
+                response = client.post("/api/sandbox/audit/tamper", json={"action": action})
+                self.assertEqual(response.status_code, 200)
+                self.assertIs(response.json()["verification"]["is_valid"], expected_validity)
+                self.assertEqual(log_path.read_bytes(), original_log)
+
+        self.assertEqual(client.get("/logs/verify").status_code, 200)
 
     def test_receipt_is_public_and_inbox_requires_the_intended_recipients_credential(self):
         self.connect(self.client_a, self.client_b)

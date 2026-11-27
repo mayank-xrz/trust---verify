@@ -1,4 +1,4 @@
-"""FIX-01 regression tests: signed rotation cutoffs, clock high-water, key_version binding."""
+"""Signed rotation cutoffs, clock high-water, key_version binding."""
 
 from __future__ import annotations
 

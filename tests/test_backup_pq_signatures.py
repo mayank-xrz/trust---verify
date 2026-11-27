@@ -1,4 +1,4 @@
-"""FIX-05 regression tests: backup manifests are signed with ML-DSA-65."""
+"""Backup manifests are signed with ML-DSA-65."""
 
 from __future__ import annotations
 

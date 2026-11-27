@@ -322,8 +322,7 @@ def render_dashboard_html() -> str:
       <div class="btn-row" style="margin-bottom:12px;">
         <button class="act primary" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'verify'}, 'audit-out')">Verify Log Chain</button>
         <button class="act warn" onclick="apiCall('/api/sandbox/audit/injection', {}, 'audit-out')">Test Newline/JSON Injection</button>
-        <button class="act danger" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'tamper'}, 'audit-out')">Mutate 1 Byte (Test Tamper Detection)</button>
-        <button class="act success" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'restore'}, 'audit-out')">Restore Clean Signed Chain</button>
+        <button class="act danger" onclick="apiCall('/api/sandbox/audit/tamper', {action: 'tamper'}, 'audit-out')">Verify a Tampered Copy</button>
       </div>
       <pre class="console" id="audit-out" style="max-height:140px;margin-bottom:12px;">Run chain verification, newline injection test, or 1-byte mutation test.</pre>
       <div style="overflow-x:auto;">
@@ -349,7 +348,7 @@ def render_dashboard_html() -> str:
         </div>
         <div class="btn-row">
           <button class="act warn" onclick="apiCall('/api/sandbox/detector/clock-skew', {}, 'det-out')">Test Clock Skew (&plusmn;2000ms + Flag)</button>
-          <button class="act primary" onclick="apiCall('/api/sandbox/detector/eval-metrics', {}, 'det-out')">Run Labelled Log Benchmark (550 Events)</button>
+          <button class="act primary" onclick="apiCall('/api/sandbox/detector/eval-metrics', {}, 'det-out')">Run Synthetic Detector Check</button>
         </div>
         <div id="eval-metrics-box" style="margin-top:12px;"></div>
         <pre class="console" id="det-out" style="margin-top:12px;">Run lateral movement, privilege escalation, clock-skew ordering, or F1/MTTA benchmark.</pre>
@@ -496,7 +495,7 @@ async function refreshState() {
             <span class="mono" style="color:var(--muted);">${a.service || ''}</span>
           </div>
           <div style="font-size:12.5px;margin:4px 0;">${a.description || ''}</div>
-          <div class="mono" style="font-size:11px;color:var(--muted);">Subject: ${a.subject || '-'} | Evidence: ${JSON.stringify(a.evidence || {})}</div>
+          <div class="mono" style="font-size:11px;color:var(--muted);overflow-wrap:anywhere;">Subject: ${a.subject || '-'} | Evidence: ${JSON.stringify(a.evidence || {})}</div>
         </div>
       `).join('');
 

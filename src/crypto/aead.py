@@ -1,25 +1,27 @@
-"""AES-256-GCM through the guaranteed Node.js runtime; no custom cipher code."""
+"""In-process AES-256-GCM with a detached 16-byte authentication tag."""
 
-from .node_bridge import call_node
-from .primitives import CryptoError, b64, unb64
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+from .primitives import CryptoError
 
 
-def _call(operation, key, nonce, aad, data, tag=None):
+def _cipher(key, nonce):
     if len(key) != 32 or len(nonce) != 12:
         raise CryptoError("invalid AEAD key or nonce")
-    request = {"op": operation, "key": b64(key), "nonce": b64(nonce), "aad": b64(aad), "data": b64(data)}
-    if tag is not None:
-        if len(tag) != 16:
-            raise CryptoError("invalid authentication tag")
-        request["tag"] = b64(tag)
-    return call_node(request, CryptoError)
+    return AESGCM(key)
 
 
 def encrypt(key, nonce, aad, plaintext):
-    result = _call("encrypt", key, nonce, aad, plaintext)
-    return unb64(result["data"]), unb64(result["tag"], 16)
+    sealed = _cipher(key, nonce).encrypt(nonce, plaintext, aad)
+    return sealed[:-16], sealed[-16:]
 
 
 def decrypt(key, nonce, aad, ciphertext, tag):
-    result = _call("decrypt", key, nonce, aad, ciphertext, tag)
-    return unb64(result["data"])
+    cipher = _cipher(key, nonce)
+    if len(tag) != 16:
+        raise CryptoError("invalid authentication tag")
+    try:
+        return cipher.decrypt(nonce, ciphertext + tag, aad)
+    except InvalidTag as exc:
+        raise CryptoError("AEAD authentication failed") from exc

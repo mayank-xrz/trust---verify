@@ -24,7 +24,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pqcrypto.kem import hqc_256, ml_kem_1024
-from pqcrypto.sign import ml_dsa_87, slh_dsa_sha2_128f
+from pqcrypto.sign import ml_dsa_87
+
+try:
+    from pqcrypto.sign import slh_dsa_sha2_128f
+except ImportError:
+    slh_dsa_sha2_128f = None
 
 from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_keygen, sig_sign, sig_verify
 from .handshake import HandshakeError, SessionKeys, _best_effort_zeroize
@@ -43,6 +48,8 @@ class DualIdentityKeypair:
 
     @classmethod
     def generate(cls) -> "DualIdentityKeypair":
+        if slh_dsa_sha2_128f is None:
+            raise HandshakeError("The v2-paranoid suite requires pqcrypto with SLH-DSA-SHA2-128f")
         mldsa_pk, mldsa_sk = sig_keygen(ml_dsa_87)
         slh_pk, slh_sk = sig_keygen(slh_dsa_sha2_128f)
         return cls(
@@ -69,6 +76,8 @@ class ParanoidHandshakeSession:
     """Triple-family KEM (X25519 + ML-KEM-1024 + HQC-256) + Dual Signatures (ML-DSA-87 + SLH-DSA)."""
 
     def __init__(self, identity: str, device: str, identity_keys: DualIdentityKeypair) -> None:
+        if slh_dsa_sha2_128f is None:
+            raise HandshakeError("The v2-paranoid suite requires pqcrypto with SLH-DSA-SHA2-128f")
         self.identity = identity
         self.device = device
         self._id_keys = identity_keys

@@ -1,4 +1,4 @@
-"""FIX-02 regression tests: durable rotation journal and retry after abort."""
+"""Durable rotation journal and retry after abort."""
 
 from __future__ import annotations
 

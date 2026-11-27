@@ -314,60 +314,25 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError):
             initiate(valid_offer, "alice", "phone", self.alice_sk, reg3)
 
-    def test_handshake_node_process_count_and_distinct_errors(self):
-        import subprocess as sp
+    def test_handshake_and_aead_do_not_spawn_subprocesses(self):
         from unittest.mock import patch
 
-        from src.crypto import aead, node_bridge
+        from src.crypto import aead
 
-        prekeys = PrekeyStore()
-        offer = prekeys.offer("bob", "laptop", self.bob_sk)
-
-        real_run = sp.run
-        counts = []
-
-        def counting_run(*args, **kwargs):
-            counts.append(args[0])
-            return real_run(*args, **kwargs)
-
-        with patch("src.crypto.node_bridge.subprocess.run", side_effect=counting_run):
-            counts.clear()
+        with patch("subprocess.Popen", side_effect=AssertionError("unexpected subprocess")):
+            prekeys = PrekeyStore()
+            offer = prekeys.offer("bob", "laptop", self.bob_sk)
             initiation, alice = initiate(offer, "alice", "phone", self.alice_sk, self.registry)
-            self.assertLessEqual(len(counts), 2)
-
-            counts.clear()
-            ack, bob = accept(offer, initiation, self.bob_sk, self.registry, prekeys)
-            self.assertLessEqual(len(counts), 2)
-
-            counts.clear()
+            ack, _ = accept(offer, initiation, self.bob_sk, self.registry, prekeys)
             finish(ack, initiation, self.registry, alice)
-            self.assertLessEqual(len(counts), 1)
 
-        # Distinct error: AEAD tag mismatch vs timeout vs missing node
-        key = b"\x01" * 32
-        nonce = b"\x02" * 12
-        ct, tag = aead.encrypt(key, nonce, b"aad", b"hello")
-        bad_tag = bytes([tag[0] ^ 0xFF]) + tag[1:]
-        with self.assertRaises(CryptoError) as ctx_auth:
-            aead.decrypt(key, nonce, b"aad", ct, bad_tag)
-        self.assertIn("AEAD authentication failed", str(ctx_auth.exception))
-
-        node_bridge._stop_worker()
-        with patch("src.crypto.node_bridge.select.select", return_value=([], [], [])):
-            with self.assertRaises(CryptoError) as ctx_to:
-                node_bridge.call_node({"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}, CryptoError, timeout=0.01)
-            self.assertIn("timed out", str(ctx_to.exception))
-
-        orig_bin = node_bridge._NODE_BIN
-        try:
-            node_bridge._stop_worker()
-            node_bridge._NODE_BIN = None
-            with patch("src.crypto.node_bridge.shutil.which", return_value=None):
-                with self.assertRaises(CryptoError) as ctx_missing:
-                    aead.decrypt(key, nonce, b"aad", ct, tag)
-                self.assertIn("not found", str(ctx_missing.exception))
-        finally:
-            node_bridge._NODE_BIN = orig_bin
+            key = b"\x01" * 32
+            nonce = b"\x02" * 12
+            ciphertext, tag = aead.encrypt(key, nonce, b"aad", b"hello")
+            self.assertEqual(aead.decrypt(key, nonce, b"aad", ciphertext, tag), b"hello")
+            bad_tag = bytes([tag[0] ^ 0xFF]) + tag[1:]
+            with self.assertRaisesRegex(CryptoError, "AEAD authentication failed"):
+                aead.decrypt(key, nonce, b"aad", ciphertext, bad_tag)
 
     def test_per_session_replay_cap_and_auto_rekey(self):
         ledger = ReplayLedger(Path(self.temp.name) / "scoped.db", max_rows=2)
@@ -439,14 +404,13 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError):
             bob.decrypt(p0, ledger)
 
-    def test_worker_reused_for_multiple_calls(self):
-        from src.crypto import node_bridge
+    def test_hkdf_sha256_matches_rfc5869(self):
         from src.crypto.primitives import hkdf
-        node_bridge._stop_worker()
-        hkdf(b"secret", b"salt", b"one")
-        pid = node_bridge._worker.pid
-        hkdf(b"secret", b"salt", b"two")
-        self.assertEqual(node_bridge._worker.pid, pid)
+
+        self.assertEqual(
+            hkdf(b"\x0b" * 22, bytes(range(13)), bytes(range(0xf0, 0xfa)), 42).hex(),
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
+        )
 
     def test_adapter_at_rest_encryption_audit_chain_and_challenge_bounds(self):
         import track4_service
