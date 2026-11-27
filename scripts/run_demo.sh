@@ -19,9 +19,10 @@ export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 
 # Use the project virtualenv unless the caller supplies an interpreter.
 PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"
-if [ ! -x "$PYTHON" ]; then
-    echo "ERROR: Python interpreter '$PYTHON' not found." >&2
-    echo "Run 'make setup' first, or set PYTHON=/path/to/python3.11." >&2
+requested_python="$PYTHON"
+if ! PYTHON="$(command -v -- "$PYTHON")" || [ ! -x "$PYTHON" ]; then
+    echo "ERROR: Python interpreter '$requested_python' not found." >&2
+    echo "Run 'make setup' first, or set PYTHON=python3.11 or PYTHON=/path/to/python3.11." >&2
     exit 1
 fi
 export PATH="$(dirname "$PYTHON"):$PATH"
