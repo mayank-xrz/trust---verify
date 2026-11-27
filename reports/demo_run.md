@@ -18,7 +18,7 @@ In this run, the operator request took **10.64 ms** through peer acknowledgement
 
 The expanded `make demo` starts an identity authority and a separate sender and receiver. It delivers a message using an enrolled device, revokes that device, checks that its fresh send receives `403 DEVICE_REVOKED`, then delivers a message from a second device. With the sender stopped, the receiver revokes its recipient key. On restart the sender starts with the old peer key, pulls the receiver's durable snapshot, persists the missed revocation locally, rejects the old key, and seals successfully after refreshing the replacement bundle.
 
-The walkthrough video shows both extended checks. Rerun them with `python -m scripts.demo_device_security`.
+The five-minute narrated walkthrough uses excerpts from the verified run and shows both extended checks. Rerun them with `python -m scripts.demo_device_security`.
 
 [Walkthrough video](../docs/demo-walkthrough.mp4)
 
