@@ -6,11 +6,11 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from alembic import command
 from scripts.seed_sandbox import seed_database
 from src.identity_keys.api import create_app
 from src.identity_keys.audit_outbox import AuditEmitter
@@ -67,6 +67,19 @@ def test_auth_challenge_is_rate_limited(identity_env) -> None:
     assert exc.value.reason_code == "RATE_LIMITED"
 
 
+def test_auth_challenge_limit_is_isolated_per_requester(identity_env) -> None:
+    svc = identity_env["svc"]
+    device_id = identity_env["device_id"]
+    for _ in range(AUTH_CHALLENGE_LIMIT_PER_WINDOW):
+        svc.issue_challenge(device_id, requester_key="attacker-network")
+    with pytest.raises(NotAuthorized) as exc:
+        svc.issue_challenge(device_id, requester_key="attacker-network")
+    assert exc.value.reason_code == "RATE_LIMITED"
+
+    challenge = svc.issue_challenge(device_id, requester_key="device-owner-network")
+    assert challenge["challenge_id"]
+
+
 def test_failed_verifications_count_toward_rate_limit(identity_env, monkeypatch) -> None:
     monkeypatch.setattr("src.identity_keys.services.AUTH_VERIFY_LIMIT_PER_WINDOW", 2)
     svc = identity_env["svc"]
@@ -82,6 +95,10 @@ def test_failed_verifications_count_toward_rate_limit(identity_env, monkeypatch)
     with pytest.raises(NotAuthorized) as exc:
         svc.verify_identity(**request)
     assert exc.value.reason_code == "RATE_LIMITED"
+
+    with pytest.raises(NotAuthorized) as exc:
+        svc.verify_identity(**request, requester_key="device-owner-network")
+    assert exc.value.reason_code == "INVALID_CHALLENGE"
 
 
 def test_challenge_sweeper_deletes_only_expired_rows(identity_env) -> None:

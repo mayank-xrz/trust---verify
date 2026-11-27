@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -50,13 +51,19 @@ def _as_utc(dt: datetime) -> datetime:
 
 CLOCK_ROLLBACK_REASON = "CLOCK_ROLLBACK_DETECTED"
 
-# Authentication rate limits are per device and per fixed window.  These are
-# intentionally generous for a human login flow but stop unbounded challenge
-# minting / signature guessing.
+# Authentication rate limits are per requester/device pair and fixed window.
+# These are intentionally generous for a human login flow but stop unbounded
+# challenge minting / signature guessing without enabling cross-client lockout.
 AUTH_RATE_WINDOW_SECONDS = 60
 AUTH_CHALLENGE_LIMIT_PER_WINDOW = 30
 AUTH_VERIFY_LIMIT_PER_WINDOW = 60
 CHALLENGE_RETENTION_SECONDS = 3600
+
+
+def _auth_rate_limit_scope(action: str, device_id: str, requester_key: str) -> str:
+    """Build a bounded, privacy-preserving quota key for one requester/device pair."""
+    requester_digest = hashlib.sha256(requester_key.encode("utf-8")).hexdigest()[:32]
+    return f"auth-{action}:{requester_digest}:{device_id}"
 
 
 def _enforce_rate_limit(
@@ -346,7 +353,13 @@ class IdentityService:
                 "public_key_fingerprint": fp,
             }
 
-    def issue_challenge(self, device_id: str, ttl_seconds: int = 120) -> dict[str, str]:
+    def issue_challenge(
+        self,
+        device_id: str,
+        ttl_seconds: int = 120,
+        *,
+        requester_key: str = "service",
+    ) -> dict[str, str]:
         """Issue a single-use short-lived authentication challenge for a device."""
         now = self.clock.now()
         with tx_session(self.session_factory) as session:
@@ -355,7 +368,7 @@ class IdentityService:
                 raise NotFound("Device not found")
             _enforce_rate_limit(
                 session,
-                f"auth-challenge:{device_id}",
+                _auth_rate_limit_scope("challenge", device_id, requester_key),
                 AUTH_CHALLENGE_LIMIT_PER_WINDOW,
                 now,
                 emitter=self.emitter,
@@ -382,6 +395,7 @@ class IdentityService:
         challenge: str,
         signature_b64: str,
         key_version_id: str | None = None,
+        requester_key: str = "service",
     ) -> dict[str, Any]:
         """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
@@ -392,7 +406,7 @@ class IdentityService:
             with tx_session(self.session_factory) as session:
                 _enforce_rate_limit(
                     session,
-                    f"auth-verify:{device_id}",
+                    _auth_rate_limit_scope("verify", device_id, requester_key),
                     AUTH_VERIFY_LIMIT_PER_WINDOW,
                     now,
                     emitter=self.emitter,

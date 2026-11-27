@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from hmac import compare_digest
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Response
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import text
 
@@ -189,6 +189,10 @@ def create_app(
         except NotAuthorized as exc:
             raise HTTPException(status_code=401, detail=exc.reason_code) from exc
 
+    def auth_requester_key(request: Request) -> str:
+        """Return a server-observed requester key; never trust a client-supplied header."""
+        return request.client.host if request.client is not None else "unknown-client"
+
     def require_enrolled_actor(actor: ActorContext = Depends(require_actor)) -> ActorContext:
         with session_factory() as session:
             user = session.get(User, actor.user_id)
@@ -336,19 +340,23 @@ def create_app(
             raise HTTPException(status_code=403, detail=exc.reason_code) from exc
 
     @app.post("/api/v1/auth/challenge")
-    def auth_challenge(device_id: str) -> dict[str, str]:
+    def auth_challenge(request: Request, device_id: str) -> dict[str, str]:
         try:
-            return identity_svc.issue_challenge(device_id=device_id)
+            return identity_svc.issue_challenge(
+                device_id=device_id,
+                requester_key=auth_requester_key(request),
+            )
         except IdentityKeysError as exc:
             raise HTTPException(status_code=404, detail=exc.reason_code) from exc
 
     @app.post("/api/v1/auth/verify")
-    def verify_identity(req: VerifyIdentityRequest) -> dict[str, Any]:
+    def verify_identity(request: Request, req: VerifyIdentityRequest) -> dict[str, Any]:
         try:
             return identity_svc.verify_identity(
                 device_id=req.device_id,
                 challenge=req.challenge,
                 signature_b64=req.signature_b64,
+                requester_key=auth_requester_key(request),
             )
         except IdentityKeysError as exc:
             raise HTTPException(status_code=401, detail=exc.reason_code) from exc
