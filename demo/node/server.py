@@ -392,12 +392,12 @@ def create_app(
             subject=req.node_id,
             resource=f"/enroll/{req.node_id}",
             status="SUCCESS",
-            metadata={"role": req.role, "device_id": dev_id},
+            metadata={"role": "node", "device_id": dev_id, "enrolled_by": _actor},
         )
         return {
             "status": "enrolled",
             "node_id": req.node_id,
-            "role": req.role,
+            "role": "node",
             "key_state": key_state_record,
             "audit_sequence": getattr(rec, "sequence", 0),
         }
@@ -538,39 +538,44 @@ def create_app(
             raise HTTPException(status_code=422, detail="Invalid protected envelope") from exc
         sender_id = envelope["sender_id"]
 
-        # 2. Lateral movement check
-        viol = audit.lateral_graph.check_call(sender_id, node_id, "RECEIVE_MESSAGE")
-        if viol:
-            message_stats["rejected"] += 1
-            alert_obj = {
-                "alert_id": f"alert-lateral-{time.time_ns()}",
-                "rule_name": "LATERAL_MOVEMENT_VIOLATION",
-                "severity": "HIGH",
-                "description": getattr(viol, "reason", "Unauthorized lateral movement path"),
-                "evidence": getattr(viol, "to_dict", lambda: {})(),
-            }
-            recent_alerts.append(alert_obj)
-            audit.logger.log_event(
-                service=node_id,
-                action="LATERAL_RECEIVE_BLOCKED",
-                subject=sender_id,
-                resource="/receive",
-                status="DENIED",
-                metadata={"error": alert_obj["description"]},
-            )
-            raise HTTPException(status_code=403, detail=alert_obj["description"])
-
         with key_lock:
             peer = trusted_peers.get(sender_id)
         if peer is None:
             message_stats["rejected"] += 1
             raise HTTPException(status_code=403, detail="Sender transport keys are not enrolled")
 
+        authenticated_sender = False
+
+        def check_verified_sender() -> None:
+            nonlocal authenticated_sender
+            authenticated_sender = True
+            viol = audit.lateral_graph.check_call(sender_id, node_id, "RECEIVE_MESSAGE")
+            if viol:
+                message_stats["rejected"] += 1
+                alert_obj = {
+                    "alert_id": f"alert-lateral-{time.time_ns()}",
+                    "rule_name": "LATERAL_MOVEMENT_VIOLATION",
+                    "severity": "HIGH",
+                    "description": getattr(viol, "reason", "Unauthorized lateral movement path"),
+                    "evidence": getattr(viol, "to_dict", lambda: {})(),
+                }
+                recent_alerts.append(alert_obj)
+                audit.logger.log_event(
+                    service=node_id,
+                    action="LATERAL_RECEIVE_BLOCKED",
+                    subject=sender_id,
+                    resource="/receive",
+                    status="DENIED",
+                    metadata={"error": alert_obj["description"]},
+                )
+                raise HTTPException(status_code=403, detail=alert_obj["description"])
+
         try:
             sender_public_key = unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
             with key_lock:
                 crypto.messaging.decrypt_for_recipient(
                     envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
+                    on_verified=check_verified_sender,
                 )
                 try:
                     receipt_id = inbox.accept(envelope, sender_public_key)
@@ -599,31 +604,27 @@ def create_app(
         except (crypto.RecipientMismatchError, crypto.ReplayAttackError, crypto.MessageTamperedError, KeyError, TypeError, ValueError) as e:
             message_stats["rejected"] += 1
             err_type = type(e).__name__
-            audit.logger.log_event(
-                service=node_id,
-                action=f"{err_type.upper()}_BLOCKED",
-                subject=sender_id,
-                resource="/receive",
-                status="DENIED",
-                metadata={"error": str(e)},
-            )
-            metadata = {"error": str(e), "source_service": sender_id, "target_service": node_id}
+            subject = sender_id if authenticated_sender else "unauthenticated"
+            metadata = {
+                "error": str(e),
+                "source_service": subject,
+                "target_service": node_id,
+            }
             if isinstance(e, RecipientKeyStateError):
                 metadata.update({
                     "authenticated_sender": True,
                     "recipient_key_state": e.state,
                     "seconds_since_cutoff": time.time() - e.cutoff,
                 })
-            alerts = audit.rule_engine.evaluate_event({
-                "event_id": envelope.get("message_id", str(uuid.uuid4())),
-                "timestamp_ns": time.time_ns(),
-                "action": f"{err_type.upper()}_BLOCKED",
-                "subject": sender_id,
-                "service": node_id,
-                "resource": "/receive",
-                "status": "DENIED",
-                "metadata": metadata,
-            })
+            record = audit.logger.log_event(
+                service=node_id,
+                action=f"{err_type.upper()}_BLOCKED",
+                subject=subject,
+                resource="/receive",
+                status="DENIED",
+                metadata=metadata,
+            )
+            alerts = audit.rule_engine.evaluate_event(record.to_dict())
             for a in alerts:
                 recent_alerts.append(getattr(a, "to_dict", lambda: a)())
             raise HTTPException(status_code=400, detail=str(e))

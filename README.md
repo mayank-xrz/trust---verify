@@ -84,6 +84,14 @@ Make shortcuts: `make setup` (pip install), `make test`, `make chaos`, `make ben
 
 Dependencies and licences are pinned in [`requirements.txt`](requirements.txt): `pqcrypto`, `cryptography`, `fastapi`, `starlette`, `uvicorn`, `pydantic`, `jsonschema`, `pytest`, `httpx`, `click`, `requests`, `sqlalchemy`, `alembic`, `psycopg[binary]`. Third-party attributions are in [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md). There are no AI/ML dependencies.
 
+## Revocation timing
+
+- `HEARTBEAT_INTERVAL_MS` defaults to `0`, which disables background polling. Explicit synchronization and configured pushes can still update revocation state.
+- `STALE_AFTER_MS` defaults to `2000`. The identity authorization endpoint denies access if synchronization fails, has never succeeded, or last succeeded more than two seconds ago.
+- `MAX_CACHE_STALENESS_MS` defaults to `500` in the API and Compose supplies `5000`. The current authorization service stores this setting but does not consult it when deciding access.
+
+For replicas using background polling, configure a positive heartbeat interval below the stale threshold and leave enough margin for network and processing delay.
+
 ## Offline adapter
 
 `track4_service.py` uses `cryptography` for state-at-rest HKDF-SHA256 and

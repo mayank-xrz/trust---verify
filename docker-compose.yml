@@ -59,15 +59,8 @@ services:
       - tbv-sandbox-net
 
   node-a:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt
-        EXPOSE 8101
-        CMD ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
+    build: .
+    command: ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
     container_name: tbv-node-a
     ports:
       - "127.0.0.1:8101:8101"
@@ -90,15 +83,8 @@ services:
       - tbv-sandbox-net
 
   node-b:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt
-        EXPOSE 8102
-        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
+    build: .
+    command: ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
     container_name: tbv-node-b
     ports:
       - "127.0.0.1:8102:8102"
@@ -123,15 +109,8 @@ services:
       - tbv-sandbox-net
 
   node-c:
-    build:
-      context: .
-      dockerfile_inline: |
-        FROM python:3.11-slim
-        WORKDIR /app
-        COPY . /app
-        RUN pip install --no-cache-dir -r requirements.txt
-        EXPOSE 8103
-        CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
+    build: .
+    command: ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
     container_name: tbv-node-c
     ports:
       - "127.0.0.1:8103:8103"

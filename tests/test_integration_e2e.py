@@ -144,10 +144,15 @@ class TestIntegrationE2E(unittest.TestCase):
         envelope = self.send(self.client_a, "node-b", payload)
         other = self.send(self.client_a, "node-b", payload)
 
+        graph = self.client_b.app.state.adapters.audit.lateral_graph
+        edge = ("node-a", "node-b")
+        observed_before = graph.observed_edges.get(edge, 0)
+
         self.assert_rejected(self.client_b, dict(envelope, key_id="unrecognized"), "signature")
         self.assert_rejected(
             self.client_b, dict(envelope, kem_ciphertext=other["kem_ciphertext"]), "signature"
         )
+        self.assertEqual(graph.observed_edges.get(edge, 0), observed_before)
         self.assert_delivered(self.client_b, envelope, payload)
 
     def test_rotation_grace_survives_restart_and_enforces_cutoff(self):
@@ -238,11 +243,17 @@ class TestIntegrationE2E(unittest.TestCase):
         self.assertEqual(client.get("/health").json()["active_key_id"], key_id)
 
         operator = self.bearer(self.operator_token)
+        enrollment = client.post("/enroll", json={"node_id": "node-b", "role": "admin"}, headers=operator)
+        self.assertEqual(enrollment.status_code, 200)
+        self.assertEqual(enrollment.json()["role"], "node")
         self.assertEqual(client.post("/internal/keys/revoke", json=body, headers=operator).status_code, 401)
         self.assertEqual(client.post("/keys/rotate", json=body, headers=operator).status_code, 200)
         self.assertEqual(client.post("/keys/revoke", json=body, headers=operator).status_code, 200)
         with Path(client.app.state.audit_logger.log_file_path).open() as log:
             records = [json.loads(line) for line in log if line.strip() and not line.startswith("#")]
+        enrolled = next(record for record in records if record["action"] == "DEVICE_ENROLLMENT")
+        self.assertEqual(enrolled["metadata"]["role"], "node")
+        self.assertEqual(enrolled["metadata"]["enrolled_by"], "demo-operator")
         actors = {record["action"]: record["subject"] for record in records}
         self.assertEqual(actors["ROTATE_KEY_SUCCESS"], "demo-operator")
         self.assertEqual(actors["REVOKE_KEY_SUCCESS"], "demo-operator")

@@ -26,6 +26,9 @@ def test_velocity_window_aggregates_disallowed_hops() -> None:
         assert violation is not None
         violations.append(violation)
 
+    assert len({violation.violation_id for violation in violations}) == len(violations)
+    assert all(not violation.violation_id.endswith("-") for violation in violations)
+
     for violation in violations:
         data = violation.to_dict()
         assert {"identity", "services", "event_ids", "rule_id"}.issubset(data.keys())

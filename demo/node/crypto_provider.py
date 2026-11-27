@@ -217,9 +217,13 @@ class SecureMessaging:
         verifier_sig: MLDSASignature,
         sender_public_key: bytes,
         resolve_private_key: Callable[[str], bytes],
+        *,
+        on_verified: Callable[[], None] | None = None,
     ) -> bytes:
         """Verify the sender before resolving and using a local recipient key."""
         self._verify_envelope(envelope, verifier_sig, sender_public_key)
+        if on_verified is not None:
+            on_verified()
         key_id = envelope.get("key_id")
         if not isinstance(key_id, str) or not key_id:
             raise MessageTamperedError("Missing recipient key ID")

@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import time
+import uuid
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 HIGH_RISK_ACTION_KEYWORDS = (
@@ -113,7 +114,7 @@ class LateralMovementGraph:
         if allowed_targets is None or target_service not in allowed_targets:
             now_ns = int(self._clock())
             self._hop_seq += 1
-            violation_id = f"viol-{source_service[:4]}-{target_service[:4]}"
+            violation_id = f"viol-{uuid.uuid4().hex}"
             event_id = f"{violation_id}#{self._hop_seq}"
 
             history = self._violation_history[source_service]
@@ -161,7 +162,7 @@ class LateralMovementGraph:
             upper_act = action.upper()
             if any(kw in upper_act for kw in HIGH_RISK_ACTION_KEYWORDS):
                 return GraphViolation(
-                    violation_id=f"viol-act-{source_service[:4]}-{target_service[:4]}",
+                    violation_id=f"viol-{uuid.uuid4().hex}",
                     source_service=source_service,
                     target_service=target_service,
                     action=action,
@@ -171,7 +172,7 @@ class LateralMovementGraph:
             edge_actions = self.allowed_edge_actions.get(edge)
             if edge_actions is not None and action not in edge_actions:
                 return GraphViolation(
-                    violation_id=f"viol-pol-{source_service[:4]}-{target_service[:4]}",
+                    violation_id=f"viol-{uuid.uuid4().hex}",
                     source_service=source_service,
                     target_service=target_service,
                     action=action,
@@ -188,7 +189,7 @@ class LateralMovementGraph:
             distinct_targets = {tgt for _, tgt in dq}
             if len(distinct_targets) >= self.max_distinct_targets:
                 return GraphViolation(
-                    violation_id=f"viol-hop-{identity[:6]}",
+                    violation_id=f"viol-{uuid.uuid4().hex}",
                     source_service=source_service,
                     target_service=target_service,
                     action=action,
