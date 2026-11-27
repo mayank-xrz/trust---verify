@@ -15,6 +15,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+requested_python="${PYTHON:-python3}"
+if ! demo_python="$(command -v -- "$requested_python")" || [ ! -x "$demo_python" ]; then
+    echo "ERROR: Python interpreter '$requested_python' not found." >&2
+    exit 1
+fi
 export DEMO_SANDBOX_ENABLED=1
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 export DEMO_GRACE_SECONDS="${DEMO_GRACE_SECONDS:-2}"
@@ -23,7 +28,7 @@ if [[ ! "$DEMO_GRACE_SECONDS" =~ ^([2-9]|[1-9][0-9]|[12][0-9][0-9]|300)$ ]]; the
     exit 2
 fi
 for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_REVOCATION_SYNC_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
-    value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    value="$("$demo_python" -c 'import secrets; print(secrets.token_urlsafe(32))')"
     export "$credential=$value"
 done
 
@@ -68,7 +73,7 @@ for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     fi
     DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="$DEMO_GRACE_SECONDS" PEER_NODES="$peers" \
         DEMO_RECIPIENT_TOKEN="${!recipient_credential:-}" \
-        python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
+        "$demo_python" -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
     PIDS+=("$pid")
     echo "  🚀 Starting $nid on http://127.0.0.1:$port (pid: $pid)..."
@@ -92,10 +97,10 @@ echo "  ✅ All sandbox nodes online and responding."
 
 # Operator CLI Status
 echo ""
-python3 -m demo.node.operator_cli status
+"$demo_python" -m demo.node.operator_cli status
 
 # Steps 2-4 exercise the same protected transport before, during, and after key changes.
-python3 - "$TEMP_DATA_DIR" <<'PYTHON'
+"$demo_python" - "$TEMP_DATA_DIR" <<'PYTHON'
 import json
 import sys
 from pathlib import Path
@@ -226,7 +231,7 @@ echo "======================================================================"
 echo "▶ STEP 5: Demonstrating Crash Recovery (WAL) & Damaged Backup Rejection"
 echo "======================================================================"
 
-python3 - << 'EOF'
+"$demo_python" - << 'EOF'
 import os, tempfile, json, secrets
 from src.identity.key_manager import KeyManager, KeyStateEnum
 from src.identity.recovery import WALManager
@@ -278,7 +283,7 @@ echo "▶ STEP 6: Cryptographic Log Chain Verification & Explainable Alerts"
 echo "======================================================================"
 
 # Check that local policy denials produce the expected explainable alerts.
-python3 - << 'EOF'
+"$demo_python" - << 'EOF'
 import json
 import os
 from urllib.error import HTTPError
@@ -315,15 +320,15 @@ for port in (8001, 8002, 8003):
 EOF
 
 # Operator CLI: Verify Audit Log Hash Chains
-python3 -m demo.node.operator_cli verify-logs
+"$demo_python" -m demo.node.operator_cli verify-logs
 
 # Operator CLI: View Explainable Alerts
 echo ""
-python3 -m demo.node.operator_cli alerts
+"$demo_python" -m demo.node.operator_cli alerts
 
 echo ""
 echo "======================================================================"
-python3 -m scripts.demo_device_security
-python3 -m scripts.track4_checklist
+"$demo_python" -m scripts.demo_device_security
+"$demo_python" -m scripts.track4_checklist
 echo "🎉 WALKTHROUGH DEMO COMPLETED SUCCESSFULLY"
 echo "======================================================================"

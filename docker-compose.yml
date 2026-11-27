@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD before starting Compose}
       POSTGRES_DB: ${POSTGRES_DB:-tbv_identity}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tbv} -d ${POSTGRES_DB:-tbv_identity}"]
       interval: 5s
@@ -24,7 +24,7 @@ services:
       dockerfile: Dockerfile
     container_name: tbv-key-authority
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - NODE_ID=key-authority
       - DEMO_SANDBOX_ENABLED=1
@@ -44,7 +44,7 @@ services:
       dockerfile: Dockerfile
     container_name: tbv-detector
     ports:
-      - "8005:8005"
+      - "127.0.0.1:8005:8005"
     environment:
       - NODE_ID=detector
       - DEMO_SANDBOX_ENABLED=1
@@ -70,8 +70,8 @@ services:
         CMD ["sh", "-c", "alembic upgrade head && uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8101"]
     container_name: tbv-node-a
     ports:
-      - "8101:8101"
-      - "8001:8001"
+      - "127.0.0.1:8101:8101"
+      - "127.0.0.1:8001:8001"
     environment:
       NODE_ID: node-a
       NODE_PORT: 8101
@@ -101,8 +101,8 @@ services:
         CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8102"]
     container_name: tbv-node-b
     ports:
-      - "8102:8102"
-      - "8002:8002"
+      - "127.0.0.1:8102:8102"
+      - "127.0.0.1:8002:8002"
     environment:
       NODE_ID: node-b
       NODE_PORT: 8102
@@ -134,8 +134,8 @@ services:
         CMD ["sh", "-c", "uvicorn src.identity_keys.api:app --host 0.0.0.0 --port 8103"]
     container_name: tbv-node-c
     ports:
-      - "8103:8103"
-      - "8003:8003"
+      - "127.0.0.1:8103:8103"
+      - "127.0.0.1:8003:8003"
     environment:
       NODE_ID: node-c
       NODE_PORT: 8103

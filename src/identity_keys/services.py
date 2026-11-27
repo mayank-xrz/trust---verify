@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, NoReturn
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from .audit_outbox import AuditEmitter
@@ -24,6 +24,7 @@ from .models import (
     Enrollment,
     KeyVersion,
     Permission,
+    RateLimit,
     Resource,
     ResourceGrant,
     RolePermission,
@@ -46,6 +47,60 @@ def _as_utc(dt: datetime) -> datetime:
 
 
 CLOCK_ROLLBACK_REASON = "CLOCK_ROLLBACK_DETECTED"
+
+# Authentication rate limits are per device and per fixed window.  These are
+# intentionally generous for a human login flow but stop unbounded challenge
+# minting / signature guessing.
+AUTH_RATE_WINDOW_SECONDS = 60
+AUTH_CHALLENGE_LIMIT_PER_WINDOW = 30
+AUTH_VERIFY_LIMIT_PER_WINDOW = 60
+CHALLENGE_RETENTION_SECONDS = 3600
+
+
+def _enforce_rate_limit(
+    session: Session,
+    scope_key: str,
+    limit: int,
+    now: datetime,
+    *,
+    window_seconds: int = AUTH_RATE_WINDOW_SECONDS,
+    emitter: AuditEmitter | None = None,
+    actor_id: str = "unknown",
+) -> None:
+    """Increment a fixed-window counter and fail closed once ``limit`` is hit."""
+    rl = session.get(RateLimit, scope_key)
+    if rl is None:
+        rl = RateLimit(
+            scope_key=scope_key,
+            attempts=0,
+            failures=0,
+            window_start=now,
+            updated_at=now,
+        )
+        session.add(rl)
+        session.flush()
+    if (now - _as_utc(rl.window_start)).total_seconds() >= window_seconds:
+        rl.attempts = 0
+        rl.window_start = now
+        rl.locked_until = None
+    if rl.attempts >= limit:
+        rl.locked_until = now + timedelta(seconds=window_seconds)
+        rl.updated_at = now
+        if emitter is not None:
+            emitter.emit(
+                session,
+                actor_id=actor_id,
+                device_id=None,
+                action="ALERT.auth_rate_limit",
+                target=scope_key,
+                outcome="deny",
+                reason_code="ALERT_LOCKOUT",
+            )
+        session.commit()
+        raise NotAuthorized("Rate limit exceeded", reason_code="RATE_LIMITED")
+    rl.attempts += 1
+    rl.updated_at = now
+
 
 
 def check_and_advance_clock_high_water(
@@ -111,6 +166,24 @@ class IdentityService:
         self.clock = clock
         self.emitter = emitter
         self.token_authority = token_authority
+
+    @staticmethod
+    def _sweep_expired_challenges(session: Session, now: datetime) -> int:
+        """Delete auth challenges older than the retention window.
+
+        Expired and consumed challenges are already rejected at verification
+        time; this only bounds table growth.  The retention window keeps recent
+        rows available for forensic review.
+        """
+        cutoff = now - timedelta(seconds=CHALLENGE_RETENTION_SECONDS)
+        result = session.execute(delete(AuthChallenge).where(AuthChallenge.expires_at < cutoff))
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    def sweep_expired_challenges(self, now: datetime | None = None) -> int:
+        """Public, idempotent challenge sweeper for schedulers and operators."""
+        moment = now or self.clock.now()
+        with tx_session(self.session_factory) as session:
+            return self._sweep_expired_challenges(session, moment)
 
     def get_enrollment_target(self, enrollment_id: str) -> tuple[str, str]:
         """Return the immutable ``(user_id, kind)`` target of an enrollment.
@@ -280,6 +353,15 @@ class IdentityService:
             device = session.get(Device, device_id)
             if not device:
                 raise NotFound("Device not found")
+            _enforce_rate_limit(
+                session,
+                f"auth-challenge:{device_id}",
+                AUTH_CHALLENGE_LIMIT_PER_WINDOW,
+                now,
+                emitter=self.emitter,
+                actor_id=device.user_id,
+            )
+            self._sweep_expired_challenges(session, now)
             challenge = secrets.token_hex(32)
             challenge_id = str(uuid.uuid4())
             session.add(
@@ -304,6 +386,14 @@ class IdentityService:
         """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
         with tx_session(self.session_factory) as session:
+            _enforce_rate_limit(
+                session,
+                f"auth-verify:{device_id}",
+                AUTH_VERIFY_LIMIT_PER_WINDOW,
+                now,
+                emitter=self.emitter,
+                actor_id=device_id,
+            )
             if not check_and_advance_clock_high_water(
                 session, self.emitter.node_id, now, self.clock.monotonic_ns()
             ):

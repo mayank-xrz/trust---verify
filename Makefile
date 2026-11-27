@@ -43,7 +43,7 @@ bench:
 	$(PYTHON) scripts/benchmark.py
 
 demo:
-	./scripts/run_demo.sh
+	PYTHON="$(PYTHON)" ./scripts/run_demo.sh
 
 demo-recorded:
 	@echo "Recorded evidence only. No live checks are running."
