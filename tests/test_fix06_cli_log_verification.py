@@ -133,3 +133,23 @@ def test_src_cli_verify_logs_accepts_public_key(tmp_path: Path) -> None:
 
     forged_result = _run(["-m", "src.cli", "verify-logs", "--path", str(forged), "--public-key", pub_b64])
     assert forged_result.returncode != 0
+
+
+def test_verifier_cli_checks_truncation_against_retained_anchor(tmp_path: Path) -> None:
+    public, secret = sig_keygen(ml_dsa_65)
+    log = tmp_path / "audit.log"
+    anchor = tmp_path / "trusted-head.json"
+    _make_signed_log(log, public, secret)
+    command = [
+        "-m", "src.audit.verifier", str(log), "--public-key", base64.b64encode(public).decode("ascii"),
+    ]
+    exported = _run([*command, "--print-anchor"])
+    assert exported.returncode == 0, exported.stdout + exported.stderr
+    anchor.write_text(exported.stdout, encoding="utf-8")
+    command += ["--anchor-file", str(anchor)]
+    assert _run(command).returncode == 0
+    records = log.read_text(encoding="utf-8").splitlines(keepends=True)
+    log.write_text("".join(records[:-1]), encoding="utf-8")
+    rejected = _run(command)
+    assert rejected.returncode == 2
+    assert "Whole-log truncation/replacement detected" in rejected.stdout
