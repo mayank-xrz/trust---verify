@@ -67,6 +67,23 @@ def test_auth_challenge_is_rate_limited(identity_env) -> None:
     assert exc.value.reason_code == "RATE_LIMITED"
 
 
+def test_failed_verifications_count_toward_rate_limit(identity_env, monkeypatch) -> None:
+    monkeypatch.setattr("src.identity_keys.services.AUTH_VERIFY_LIMIT_PER_WINDOW", 2)
+    svc = identity_env["svc"]
+    request = {
+        "device_id": identity_env["device_id"],
+        "challenge": "unknown",
+        "signature_b64": "",
+    }
+    for _ in range(2):
+        with pytest.raises(NotAuthorized) as exc:
+            svc.verify_identity(**request)
+        assert exc.value.reason_code == "INVALID_CHALLENGE"
+    with pytest.raises(NotAuthorized) as exc:
+        svc.verify_identity(**request)
+    assert exc.value.reason_code == "RATE_LIMITED"
+
+
 def test_challenge_sweeper_deletes_only_expired_rows(identity_env) -> None:
     svc = identity_env["svc"]
     clock = identity_env["clock"]

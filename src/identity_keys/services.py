@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, NoReturn
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as postgres_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from .audit_outbox import AuditEmitter
@@ -68,17 +70,15 @@ def _enforce_rate_limit(
     actor_id: str = "unknown",
 ) -> None:
     """Increment a fixed-window counter and fail closed once ``limit`` is hit."""
-    rl = session.get(RateLimit, scope_key)
-    if rl is None:
-        rl = RateLimit(
-            scope_key=scope_key,
-            attempts=0,
-            failures=0,
-            window_start=now,
-            updated_at=now,
-        )
-        session.add(rl)
-        session.flush()
+    insert = postgres_insert if session.get_bind().dialect.name == "postgresql" else sqlite_insert
+    session.execute(
+        insert(RateLimit)
+        .values(scope_key=scope_key, attempts=0, failures=0, window_start=now, updated_at=now)
+        .on_conflict_do_nothing(index_elements=[RateLimit.scope_key])
+    )
+    rl = session.execute(
+        select(RateLimit).where(RateLimit.scope_key == scope_key).with_for_update()
+    ).scalar_one()
     if (now - _as_utc(rl.window_start)).total_seconds() >= window_seconds:
         rl.attempts = 0
         rl.window_start = now
@@ -385,15 +385,20 @@ class IdentityService:
     ) -> dict[str, Any]:
         """Verify device challenge signature, active user, enrolled device, and auth key."""
         now = self.clock.now()
+        with self.session_factory() as session:
+            known_device = session.get(Device, device_id) is not None
+        # Persist attempts even if subsequent authentication rolls back.
+        if known_device:
+            with tx_session(self.session_factory) as session:
+                _enforce_rate_limit(
+                    session,
+                    f"auth-verify:{device_id}",
+                    AUTH_VERIFY_LIMIT_PER_WINDOW,
+                    now,
+                    emitter=self.emitter,
+                    actor_id=device_id,
+                )
         with tx_session(self.session_factory) as session:
-            _enforce_rate_limit(
-                session,
-                f"auth-verify:{device_id}",
-                AUTH_VERIFY_LIMIT_PER_WINDOW,
-                now,
-                emitter=self.emitter,
-                actor_id=device_id,
-            )
             if not check_and_advance_clock_high_water(
                 session, self.emitter.node_id, now, self.clock.monotonic_ns()
             ):
