@@ -354,7 +354,7 @@ def run_self_test() -> int:
             logger.log_event("svc", "op", f"s{i}", "res")
         clean = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(path)
         if not clean.is_valid or clean.verified_checkpoints != 3:
-            print(f"❌ SELF-TEST FAILED: {clean.first_error}")
+            sys.stderr.write(f"❌ SELF-TEST FAILED: {clean.first_error}\n")
             return 1
 
         lines = open(path, "r", encoding="utf-8").read().splitlines()
@@ -369,20 +369,20 @@ def run_self_test() -> int:
                 forged = True
                 break
         if not forged:
-            print("❌ SELF-TEST FAILED: no signed checkpoint produced")
+            sys.stderr.write("❌ SELF-TEST FAILED: no signed checkpoint produced\n")
             return 1
         open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
         tampered = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(path)
         if tampered.is_valid:
-            print("❌ SELF-TEST FAILED: forged checkpoint accepted")
+            sys.stderr.write("❌ SELF-TEST FAILED: forged checkpoint accepted\n")
             return 1
 
-    print(json.dumps({
+    sys.stdout.write(json.dumps({
         "self_test": "PASS",
         "clean_records": clean.total_records,
         "verified_checkpoints": clean.verified_checkpoints,
         "forged_checkpoint_rejected": True,
-    }, indent=2))
+    }, indent=2) + "\n")
     return 0
 
 
@@ -415,28 +415,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         public_key = _load_public_key(args)
     except Exception as exc:
-        print(f"❌ Invalid public key: {exc}")
+        sys.stderr.write(f"❌ Invalid public key: {exc}\n")
         return 2
 
     verifier = AuditLogVerifier(public_key=public_key, require_signatures=True)
     try:
         result = verifier.verify_file(args.log_file, anchor_path=args.anchor_file)
     except (OSError, ValueError, TypeError) as exc:
-        print(f"❌ Audit verification failed: {exc}")
+        sys.stderr.write(f"❌ Audit verification failed: {exc}\n")
         return 2
     if result.is_valid:
         if args.print_anchor:
             if not result.verified_checkpoints:
-                print("❌ No signed checkpoint to anchor", file=sys.stderr)
+                sys.stderr.write("❌ No signed checkpoint to anchor\n")
                 return 2
-            print(json.dumps(result.verified_anchor, sort_keys=True))
+            sys.stdout.write(json.dumps(result.verified_anchor, sort_keys=True) + "\n")
             return 0
-        print(
+        sys.stdout.write(
             f"✅ LOG INTEGRITY VERIFIED: {result.total_records} records, "
-            f"{result.verified_checkpoints} checkpoints."
+            f"{result.verified_checkpoints} checkpoints.\n"
         )
         return 0
-    print(f"❌ TAMPERING DETECTED: {result.first_error}")
+    sys.stderr.write(f"❌ TAMPERING DETECTED: {result.first_error}\n")
     return 2
 
 

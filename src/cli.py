@@ -93,13 +93,13 @@ def cmd_demo_replay() -> int:
         except RecipientMismatchError:
             wrong_recipient_rejected = True
 
-        print(json.dumps({
+        sys.stdout.write(json.dumps({
             "demo": "demo-replay",
             "valid_accepted": True,
             "replay_rejected": replay_rejected,
             "recipient_mismatch_rejected": wrong_recipient_rejected,
             "log_valid": AuditLogVerifier().verify_file(str(tmp_path / "audit.log")).is_valid,
-        }, indent=2))
+        }, indent=2) + "\n")
         return 0 if (replay_rejected and wrong_recipient_rejected) else 1
 
 
@@ -142,12 +142,12 @@ def cmd_demo_forward_secrecy() -> int:
     except AEADFailedError:
         identity_key_decrypt_failed = True
 
-    print(json.dumps({
+    sys.stdout.write(json.dumps({
         "demo": "demo-forward-secrecy",
         "session_keys_match": alice_keys.tx_key == bob_keys.rx_key,
         "ephemerals_wiped": (not bob_hs.has_ephemeral_secrets() and not alice_hs.has_ephemeral_secrets()),
         "long_term_identity_key_cannot_decrypt": identity_key_decrypt_failed,
-    }, indent=2))
+    }, indent=2) + "\n")
     return 0 if identity_key_decrypt_failed else 1
 
 
@@ -202,12 +202,12 @@ def cmd_demo_chunked_loss() -> int:
         now[0] += 15.0
         timeouts = rx.check_timeouts()
 
-        print(json.dumps({
+        sys.stdout.write(json.dumps({
             "demo": "demo-chunked-loss",
             "reordered_delivered": reordered_ok,
             "incomplete_reported": timeouts,
             "log_valid": AuditLogVerifier().verify_file(str(tmp_path / "audit.log")).is_valid,
-        }, indent=2))
+        }, indent=2) + "\n")
         return 0 if (reordered_ok and len(timeouts) == 1 and timeouts[0]["missing_chunks"] == [1]) else 1
 
 
@@ -251,12 +251,12 @@ def cmd_demo_resumption_binding() -> int:
             new_transcript_hash="th-new-alice",
         )
 
-        print(json.dumps({
+        sys.stdout.write(json.dumps({
             "demo": "demo-resumption-binding",
             "peer_mismatch_rejected": hijack_rejected,
             "legitimate_peer_resumed": new_keys.peer_identity == "alice",
             "log_valid": AuditLogVerifier().verify_file(str(tmp_path / "audit.log")).is_valid,
-        }, indent=2))
+        }, indent=2) + "\n")
         return 0 if (hijack_rejected and new_keys.peer_identity == "alice") else 1
 
 
@@ -278,7 +278,7 @@ def cmd_verify_logs(
     if path is None:
         return run_self_test()
     res = AuditLogVerifier(public_key=public_key, require_signatures=True).verify_file(path)
-    print(json.dumps(res.to_dict(), indent=2))
+    sys.stdout.write(json.dumps(res.to_dict(), indent=2) + "\n")
     return 0 if res.is_valid else 1
 
 
@@ -323,12 +323,12 @@ def cmd_doc_check() -> int:
                     broken_links.append(f"{rel} -> {target}")
 
     ok = not missing and not unchecked and not broken_links
-    print(json.dumps({
+    sys.stdout.write(json.dumps({
         "doc_check": "PASS" if ok else "FAIL",
         "missing_docs": missing,
         "unchecked_items": unchecked,
         "broken_links": broken_links,
-    }, indent=2))
+    }, indent=2) + "\n")
     return 0 if ok else 1
 
 
