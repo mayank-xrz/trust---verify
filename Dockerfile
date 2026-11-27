@@ -24,7 +24,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Non-root unprivileged service account
@@ -39,8 +38,7 @@ RUN chown -R tbvuser:tbvuser /app
 
 USER tbvuser
 
-RUN python -c "import fastapi, uvicorn, pydantic, jsonschema, cryptography, pqcrypto; print('Verified pqcrypto + Track 4 dependencies')" && \
-    node --version
+RUN python -c "import fastapi, uvicorn, pydantic, jsonschema, cryptography, pqcrypto; print('Verified pqcrypto + Track 4 dependencies')"
 
 EXPOSE 8000 8001 8002 8003 8005
 

@@ -314,36 +314,39 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError):
             initiate(valid_offer, "alice", "phone", self.alice_sk, reg3)
 
-    def test_handshake_node_process_count_and_distinct_errors(self):
+    def test_handshake_spawns_no_subprocesses_and_aead_auth_error(self):
         import subprocess as sp
         from unittest.mock import patch
 
-        from src.crypto import aead, node_bridge
+        from src.crypto import aead
 
         prekeys = PrekeyStore()
         offer = prekeys.offer("bob", "laptop", self.bob_sk)
 
         real_run = sp.run
+        real_popen = sp.Popen
         counts = []
 
         def counting_run(*args, **kwargs):
             counts.append(args[0])
             return real_run(*args, **kwargs)
 
-        with patch("src.crypto.node_bridge.subprocess.run", side_effect=counting_run):
+        def counting_popen(*args, **kwargs):
+            counts.append(args[0])
+            return real_popen(*args, **kwargs)
+
+        with patch("subprocess.run", side_effect=counting_run), patch("subprocess.Popen", side_effect=counting_popen):
             counts.clear()
             initiation, alice = initiate(offer, "alice", "phone", self.alice_sk, self.registry)
-            self.assertLessEqual(len(counts), 2)
+            self.assertEqual(len(counts), 0)
 
-            counts.clear()
             ack, bob = accept(offer, initiation, self.bob_sk, self.registry, prekeys)
-            self.assertLessEqual(len(counts), 2)
+            self.assertEqual(len(counts), 0)
 
-            counts.clear()
             finish(ack, initiation, self.registry, alice)
-            self.assertLessEqual(len(counts), 1)
+            self.assertEqual(len(counts), 0)
 
-        # Distinct error: AEAD tag mismatch vs timeout vs missing node
+        # Distinct error on AEAD tag mismatch
         key = b"\x01" * 32
         nonce = b"\x02" * 12
         ct, tag = aead.encrypt(key, nonce, b"aad", b"hello")
@@ -351,25 +354,6 @@ class CryptoTests(unittest.TestCase):
         with self.assertRaises(CryptoError) as ctx_auth:
             aead.decrypt(key, nonce, b"aad", ct, bad_tag)
         self.assertIn("AEAD authentication failed", str(ctx_auth.exception))
-
-        node_bridge._stop_worker()
-        with patch("src.crypto.node_bridge.select.select", return_value=([], [], [])):
-            with self.assertRaises(CryptoError) as ctx_to:
-                node_bridge.call_node({"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}, CryptoError, timeout=0.01)
-            self.assertIn("timed out", str(ctx_to.exception))
-
-        orig_bin = node_bridge._NODE_BIN
-        try:
-            node_bridge._stop_worker()
-            node_bridge._NODE_BIN = None
-            with patch("src.crypto.node_bridge.shutil.which", return_value=None):
-                self.assertEqual(aead.decrypt(key, nonce, b"aad", ct, tag), b"hello")
-                with patch.object(aead, "AESGCM", None):
-                    with self.assertRaises(CryptoError) as ctx_missing:
-                        aead.decrypt(key, nonce, b"aad", ct, tag)
-                self.assertIn("not found", str(ctx_missing.exception))
-        finally:
-            node_bridge._NODE_BIN = orig_bin
 
     def test_per_session_replay_cap_and_auto_rekey(self):
         ledger = ReplayLedger(Path(self.temp.name) / "scoped.db", max_rows=2)
@@ -440,15 +424,6 @@ class CryptoTests(unittest.TestCase):
             self.assertEqual(bob.decrypt(packet, ledger), plain)
         with self.assertRaises(CryptoError):
             bob.decrypt(p0, ledger)
-
-    def test_worker_reused_for_multiple_calls(self):
-        from src.crypto import node_bridge
-        node_bridge._stop_worker()
-        request = {"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}
-        node_bridge.call_node(request, CryptoError)
-        pid = node_bridge._worker.pid
-        node_bridge.call_node(request, CryptoError)
-        self.assertEqual(node_bridge._worker.pid, pid)
 
     def test_adapter_at_rest_encryption_audit_chain_and_challenge_bounds(self):
         import track4_service

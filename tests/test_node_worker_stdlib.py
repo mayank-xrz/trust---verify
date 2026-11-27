@@ -1,48 +1,33 @@
-"""Worker protocol tests runnable without the optional crypto package on the host."""
+"""Tests verifying pure-Python cryptography with no Node.js subprocess boundary."""
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from src.crypto import node_bridge
 
+class PurePythonCryptoTests(unittest.TestCase):
+    def test_node_bridge_files_removed(self):
+        crypto_dir = Path(__file__).resolve().parent.parent / "src" / "crypto"
+        self.assertFalse((crypto_dir / "node_bridge.py").exists())
+        self.assertFalse((crypto_dir / "node_aead.cjs").exists())
 
-class WorkerTests(unittest.TestCase):
-    class Error(ValueError):
-        pass
+    def test_aead_and_kdf_spawn_no_subprocess(self):
+        from src.crypto import aead, classical, primitives
 
-    def tearDown(self):
-        node_bridge._stop_worker()
+        with patch("subprocess.Popen", side_effect=AssertionError("unexpected subprocess")), \
+             patch("subprocess.run", side_effect=AssertionError("unexpected subprocess")):
+            key = b"a" * 32
+            nonce = b"b" * 12
+            ct, tag = aead.encrypt(key, nonce, b"aad", b"secret")
+            self.assertEqual(aead.decrypt(key, nonce, b"aad", ct, tag), b"secret")
 
-    def test_reuses_worker(self):
-        request = {"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}
-        first = node_bridge.call_node(request, self.Error)
-        pid = node_bridge._worker.pid
-        self.assertEqual(first, node_bridge.call_node(request, self.Error))
-        self.assertEqual(pid, node_bridge._worker.pid)
+            bad_tag = bytes([tag[0] ^ 0xFF]) + tag[1:]
+            with self.assertRaisesRegex(primitives.CryptoError, "AEAD authentication failed"):
+                aead.decrypt(key, nonce, b"aad", ct, bad_tag)
 
-    def test_restarts_after_crash(self):
-        request = {"op": "hkdf", "ikm": "YQ==", "salt": "Yg==", "info": "Yw==", "length": 32}
-        node_bridge.call_node(request, self.Error)
-        old_pid = node_bridge._worker.pid
-        node_bridge._worker.kill()
-        node_bridge._worker.wait()
-        node_bridge.call_node(request, self.Error)
-        self.assertNotEqual(node_bridge._worker.pid, old_pid)
+            derived = primitives.hkdf(b"ikm", b"salt", b"info", 32)
+            self.assertEqual(len(derived), 32)
 
-    def test_missing_node_error(self):
-        node_bridge._stop_worker()
-        previous = node_bridge._NODE_BIN
-        node_bridge._NODE_BIN = None
-        try:
-            with patch.object(node_bridge.shutil, "which", return_value=None):
-                with self.assertRaisesRegex(self.Error, "not found in PATH"):
-                    node_bridge.call_node({}, self.Error)
-        finally:
-            node_bridge._NODE_BIN = previous
-
-    def test_authentication_error_is_distinct(self):
-        import base64
-        request = {"op": "decrypt", "key": base64.b64encode(b"a" * 32).decode(),
-                   "nonce": base64.b64encode(b"b" * 12).decode(), "aad": "", "data": "",
-                   "tag": base64.b64encode(b"c" * 16).decode()}
-        with self.assertRaisesRegex(self.Error, "AEAD authentication failed"):
-            node_bridge.call_node(request, self.Error)
+            pub_a, priv_a = classical.keypair()
+            pub_b, ss_b = classical.ephemeral_shared(pub_a)
+            ss_a = classical.shared(priv_a, pub_b)
+            self.assertEqual(ss_a, ss_b)

@@ -27,7 +27,6 @@ from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
 from . import aead, classical
-from .node_bridge import call_node
 from .primitives import (
     SUITE,
     CryptoError,
@@ -283,26 +282,28 @@ def _handshake_derive(kem_shared, dh_shared, init, sender_id, sender_dev, recv_i
     info = b"track4/v1/session-root\x00" + transcript_hash
     s_label = canonical({"identity": sender_id, "device": sender_dev, "epoch": 0})
     r_label = canonical({"identity": recv_id, "device": recv_dev, "epoch": 0})
-    req = {
-        "op": "hkdf_session",
-        "ikm": b64(ikm),
-        "salt": b64(salt),
-        "info": b64(info),
-        "send_salt": b64(hashlib.sha256(b"track4/v1/chain-init\x00" + s_label).digest()),
-        "send_info": b64(b"track4/v1/chain-key\x00" + s_label),
-        "recv_salt": b64(hashlib.sha256(b"track4/v1/chain-init\x00" + r_label).digest()),
-        "recv_info": b64(b"track4/v1/chain-key\x00" + r_label),
-    }
+
+    root = hkdf(ikm, salt, info, 32)
+    send_chain = hkdf(
+        root,
+        hashlib.sha256(b"track4/v1/chain-init\x00" + s_label).digest(),
+        b"track4/v1/chain-key\x00" + s_label,
+        32,
+    )
+    recv_chain = hkdf(
+        root,
+        hashlib.sha256(b"track4/v1/chain-init\x00" + r_label).digest(),
+        b"track4/v1/chain-key\x00" + r_label,
+        32,
+    )
     if with_confirm:
-        req["confirm_salt"] = b64(hashlib.sha256(b"track4/v1/confirm-salt\x00" + transcript_hash).digest())
-        req["confirm_info"] = b64(b"track4/v1/key-confirm\x00" + init["session_id"].encode("ascii"))
-    res = call_node(req, CryptoError)
-    root = unb64(res["root"], 32)
-    send_chain = unb64(res["send_chain"], 32)
-    recv_chain = unb64(res["recv_chain"], 32)
-    if with_confirm:
-        confirm_key = unb64(res["confirm_key"], 32)
-        confirm_mac = hmac.new(confirm_key, transcript_hash, hashlib.sha256).hexdigest()
+        confirm_key = hkdf(
+            root,
+            hashlib.sha256(b"track4/v1/confirm-salt\x00" + transcript_hash).digest(),
+            b"track4/v1/key-confirm\x00" + init["session_id"].encode("ascii"),
+            32,
+        )
+        confirm_mac = hmac.new(confirm_key, transcript_hash, "sha256").hexdigest()
         return root, send_chain, recv_chain, confirm_mac
     return root, send_chain, recv_chain
 
