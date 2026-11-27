@@ -55,6 +55,8 @@ def test_prs_requires_pinned_issuer_and_uses_verified_subject(tmp_path, monkeypa
     assert call(request, "alice") == {"decision": "deny"}
     issuer.clock = SystemClock()
     assert set(call(request, "alice")) == {"ciphertext", "proof"}
+    assert call({**request, "request_id": "different-request"}, "alice") == {"decision": "deny"}
+    assert set(call({**request, "challenge": "another-challenge"}, "alice")) == {"ciphertext", "proof"}
     revoke = {"op": "revoke", "actor": "alice"}
     assert call(revoke, "alice") == {"decision": "deny"}
     assert call(revoke, "administrator") == {}

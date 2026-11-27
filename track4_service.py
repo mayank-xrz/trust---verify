@@ -8,6 +8,7 @@ import secrets
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 try:
@@ -139,11 +140,16 @@ def _compute_entry_hash(prev_hash, entry_body):
     return hashlib.sha256(prev_hash.encode("ascii") + canonical(entry_body)).hexdigest()
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _append_audit(state, op, actor, asset, request_id, decision, threat=None):
     audit_log = state.setdefault("audit_log", [])
     prev_hash = audit_log[-1]["entry_hash"] if audit_log else GENESIS_HASH
     entry_body = {
         "seq": len(audit_log),
+        "ts_utc": _utc_now(),
         "op": op,
         "actor": actor,
         "asset": asset,
@@ -191,11 +197,19 @@ def _check_timezone_policy(state, actor, request):
 
 
 def verify_chain(audit_log, anchor=None):
+    if not isinstance(audit_log, list):
+        return False
     prev_hash = GENESIS_HASH
     for idx, entry in enumerate(audit_log):
         if not isinstance(entry, dict):
             return False
-        if entry.get("seq") != idx or entry.get("prev_hash") != prev_hash:
+        seq = entry.get("seq")
+        if isinstance(seq, bool) or not isinstance(seq, int) or seq != idx:
+            return False
+        if entry.get("prev_hash") != prev_hash:
+            return False
+        ts = entry.get("ts_utc")
+        if "ts_utc" in entry and (not isinstance(ts, str) or not ts.endswith("Z")):
             return False
         body = {k: v for k, v in entry.items() if k != "entry_hash"}
         expected = _compute_entry_hash(prev_hash, body)
@@ -203,13 +217,20 @@ def verify_chain(audit_log, anchor=None):
             return False
         prev_hash = expected
     if anchor is not None:
-        exp_count = int(anchor.get("seq_count", 0))
+        if not isinstance(anchor, dict):
+            return False
+        try:
+            exp_count = int(anchor.get("seq_count", 0))
+            last_seq = int(anchor.get("last_seq", -1))
+        except (TypeError, ValueError):
+            return False
+        if exp_count < 0 or last_seq < -1 or exp_count != last_seq + 1:
+            return False
         if len(audit_log) < exp_count:
             return False
         if exp_count > 0:
             if audit_log[0].get("entry_hash") != anchor.get("genesis_hash"):
                 return False
-            last_seq = int(anchor.get("last_seq", -1))
             if last_seq < 0 or last_seq >= len(audit_log) or audit_log[last_seq].get("entry_hash") != anchor.get("last_hash"):
                 return False
     return True
@@ -336,9 +357,11 @@ def dispatch(request):
             if decision is None:
                 _append_audit(state, "audit_unknown", None, None, request_id, "deny")
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 return {"request_id": request_id, "decision": "deny"}
             _append_audit(state, "audit", None, None, request_id, decision)
             save(path, state)
+            _save_audit_anchor(root, state["audit_log"])
             return {"request_id": request_id, "decision": decision}
         if op in ("read", "protected_read"):
             actor, asset = authenticated_actor, request.get("asset")
@@ -364,16 +387,41 @@ def dispatch(request):
             if req_id is not None and (not isinstance(req_id, str) or not req_id):
                 raise ValueError("invalid request id")
             challenge = request.get("challenge")
-            context = canonical({"actor": actor, "asset": asset, "request_id": req_id})
             valid_challenge = isinstance(challenge, str) and 0 < len(challenge) <= MAX_CHALLENGE_LENGTH
-            challenge_hash = hashlib.sha256(context + b"\x00" + challenge.encode("utf-8")).hexdigest() if valid_challenge else None
             used = state.setdefault("used_challenges", {})
             now = int(time.time())
-            used = {key: expiry for key, expiry in used.items() if isinstance(expiry, int) and expiry > now}
+            used = {key: expiry for key, expiry in used.items() if type(expiry) is int and expiry > now}
             state["used_challenges"] = used
-            replay = challenge_hash is not None and any(secrets.compare_digest(challenge_hash, key) for key in used)
+            challenge_hash = None
+            replay = False
+            if allowed and valid_challenge:
+                context = canonical({"actor": actor, "asset": asset, "challenge": challenge})
+                challenge_hash = hashlib.sha256(context).hexdigest()
+                replay = challenge_hash in used
+                if not replay and used:
+                    # Older records used request-bound hashes. Recover their request IDs
+                    # from successful reads so an upgrade preserves replay history.
+                    for entry in state["audit_log"]:
+                        if (
+                            "ts_utc" in entry
+                            or entry["op"] != "protected_read"
+                            or entry["decision"] != "allow"
+                            or entry["actor"] != actor
+                            or entry["asset"] != asset
+                        ):
+                            continue
+                        legacy_context = canonical(
+                            {"actor": actor, "asset": asset, "request_id": entry["request_id"]}
+                        )
+                        legacy_hash = hashlib.sha256(legacy_context + b"\x00" + challenge.encode("utf-8"))
+                        if legacy_hash.hexdigest() in used:
+                            replay = True
+                            break
             if not allowed or not valid_challenge or replay:
-                _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny", threat=tz_threat)
+                threat = tz_threat
+                if replay:
+                    threat = {"threat": "CHALLENGE_REPLAY", "detail": "challenge was already used"}
+                _append_audit(state, "protected_read", actor, asset, req_id, "deny", threat=threat)
                 save(path, state)
                 _save_audit_anchor(root, state["audit_log"])
                 return {"decision": "deny"}
