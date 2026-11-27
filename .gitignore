@@ -44,3 +44,6 @@ htmlcov/
 /tmp/
 tbv_identity.db
 .DS_Store
+
+# Generated benchmark output
+benchmark_results.json

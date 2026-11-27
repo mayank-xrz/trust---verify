@@ -150,6 +150,7 @@ def benchmark_http_delivery(iterations: int = 300, warmup: int = 30) -> Dict[str
         raise ValueError("Iterations must be positive and warmup must be nonnegative")
     peer_token = secrets.token_urlsafe(32)
     recipient_token = secrets.token_urlsafe(32)
+    operator_token = secrets.token_urlsafe(32)
     enrollment = {"Authorization": f"Bearer {peer_token}"}
     recipient = {"Authorization": f"Bearer {recipient_token}"}
     samples = []
@@ -157,7 +158,7 @@ def benchmark_http_delivery(iterations: int = 300, warmup: int = 30) -> Dict[str
     with ExitStack() as stack:
         state = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="tbv-http-bench-")))
         sender = stack.enter_context(TestClient(create_app(
-            node_id="node-a", data_dir=str(state / "sender"), peer_enroll_token=peer_token,
+            node_id="node-a", data_dir=str(state / "sender"), peer_enroll_token=peer_token, operator_token=operator_token,
         )))
         receiver = stack.enter_context(TestClient(create_app(
             node_id="node-b", data_dir=str(state / "receiver"), peer_enroll_token=peer_token,
@@ -171,7 +172,8 @@ def benchmark_http_delivery(iterations: int = 300, warmup: int = 30) -> Dict[str
             payload = {"sample": i}
             start = time.perf_counter_ns()
             envelope = sender.post(
-                "/send", json={"recipient_id": "node-b", "payload": payload}
+                "/send", json={"recipient_id": "node-b", "payload": payload},
+                headers={"Authorization": f"Bearer {operator_token}"},
             ).raise_for_status().json()["envelope"]
             receipt = receiver.post("/receive", json=envelope).raise_for_status().json()
             delivered = receiver.get(
@@ -349,7 +351,7 @@ def print_markdown_table(results: Dict[str, Any]):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=Path(REPO_ROOT) / "benchmark_results.json")
+    parser.add_argument("--output", type=Path, default=Path(REPO_ROOT) / "reports" / "benchmark_results.json")
     args = parser.parse_args()
     print("=" * 70)
     print("🚀 TRUST-BUT-VERIFY PERFORMANCE & OVERHEAD BENCHMARK (P4-14)")
@@ -386,7 +388,7 @@ def main():
     # Print summary table
     print_markdown_table(results)
 
-    # Save to benchmark_results.json
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
 
     print(f"💾 Benchmark results saved to: {args.output}")

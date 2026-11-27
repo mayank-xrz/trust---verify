@@ -13,3 +13,7 @@ services:
         value: node-a
       - key: GRACE_PERIOD_SECONDS
         value: "5.0"
+      - key: DEMO_SANDBOX_ENABLED
+        value: "1"
+      - key: DEMO_OPERATOR_TOKEN
+        generateValue: true

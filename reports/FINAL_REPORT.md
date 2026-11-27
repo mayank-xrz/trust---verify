@@ -22,6 +22,8 @@
 
 The [revocation latency report](revocation_latency.md) records 20 trials per scenario with seed 42. It reports explicit device denials and watermark convergence across three in-process nodes with a shared SQLite database.
 
+The [live demo](demo_run.md) separately verifies recipient-key revocation through the protected HTTP transport. Two standalone sender processes acknowledge the update after recording it locally, block fresh sends under the revoked key, and record the update in their audit chains.
+
 ## 3. Crash-Point Outcome Table
 - `rotate.before_start` -> no rotation row (`v1` active, data decryptable)
 - `rotate.after_pending_persisted` -> `aborted` (`v1` active, pending key wiped)
@@ -34,4 +36,4 @@ The [revocation latency report](revocation_latency.md) records 20 trials per sce
 
 ## 4. Known Limitations & Next Steps
 - Single shared DB (`SELECT ... FOR UPDATE`), env-supplied `WRAP_MASTER_KEY_B64`, HMAC `CLUSTER_SYNC_SECRET`, and single-host SQLite/`TestClient` execution (Docker daemon / `psql` not running locally).
-- **Next steps:** Run `docker compose up` in CI with PostgreSQL 16 and wire `AuthzService` into Person A's messaging/session endpoints.
+- **Next steps:** Run `docker compose up` in CI with PostgreSQL 16 and extend the device authorization policy to session endpoints. In device-authority mode, the demo HTTP sender now enforces live `AuthzService` decisions before sealing and supports missed recipient-key revocation recovery for configured peers.

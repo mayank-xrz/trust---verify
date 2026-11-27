@@ -1,0 +1,252 @@
+{
+  "environment": {
+    "os": "macOS arm64",
+    "python": "3.11.18",
+    "transport": "localhost HTTP",
+    "database": "shared SQLite WAL"
+  },
+  "live_revocation": [
+    {
+      "trial": 1,
+      "request_ack_ms": 3.012,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 4.922,
+          "watermark_ms": 29.432,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.821,
+          "watermark_ms": 252.718,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.451,
+          "watermark_ms": 214.231,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 2,
+      "request_ack_ms": 2.546,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.254,
+          "watermark_ms": 13.553,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 5.564,
+          "watermark_ms": 238.169,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.795,
+          "watermark_ms": 197.566,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 3,
+      "request_ack_ms": 3.075,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.957,
+          "watermark_ms": 258.086,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 7.62,
+          "watermark_ms": 230.252,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 6.316,
+          "watermark_ms": 181.169,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 4,
+      "request_ack_ms": 3.49,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 6.46,
+          "watermark_ms": 230.933,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.803,
+          "watermark_ms": 207.261,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 8.167,
+          "watermark_ms": 156.409,
+          "other_denials": 0
+        }
+      }
+    },
+    {
+      "trial": 5,
+      "request_ack_ms": 2.923,
+      "nodes": {
+        "node-a": {
+          "deny_ms": 5.182,
+          "watermark_ms": 243.592,
+          "other_denials": 0
+        },
+        "node-b": {
+          "deny_ms": 6.767,
+          "watermark_ms": 210.152,
+          "other_denials": 0
+        },
+        "node-c": {
+          "deny_ms": 5.524,
+          "watermark_ms": 162.757,
+          "other_denials": 0
+        }
+      }
+    }
+  ],
+  "detector_http": {
+    "samples_ms": [
+      1.1505,
+      0.8832,
+      0.8615,
+      1.1285,
+      0.8994,
+      0.88,
+      1.1042,
+      0.89,
+      0.8188,
+      1.1604,
+      0.9031,
+      0.8571,
+      1.0978,
+      0.9028,
+      0.7974,
+      1.1338,
+      0.9309,
+      0.8475,
+      1.0789,
+      0.8682,
+      0.8559
+    ],
+    "median_ms": 0.8994
+  },
+  "detector_fixture": {
+    "total_events": 1054,
+    "true_positives": 30,
+    "false_positives": 0,
+    "false_negatives": 0,
+    "true_negatives": 1024,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "mtta_ms": 0.0,
+    "false_alerts_per_1k": 0.0,
+    "median_time_to_alert_ms": 0.0025
+  },
+  "timestamped_device_key_revocation": {
+    "trial": 1,
+    "revocation_id": "ed83eb3b-b061-45ec-92b8-b1e94d9ea2fc",
+    "commit_seq": 1,
+    "revoked_at_utc": "2026-11-26T23:31:32.055441+00:00",
+    "request_ack_ms": 5.39,
+    "last_denial_ms": 6.612,
+    "nodes": {
+      "node-a": {
+        "first_denial_utc": "2026-11-26T23:31:32.060461+00:00",
+        "elapsed_ms": 5.02,
+        "request_to_denial_ms": 7.332,
+        "request_to_watermark_ms": 80.589,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      },
+      "node-b": {
+        "first_denial_utc": "2026-11-26T23:31:32.062053+00:00",
+        "elapsed_ms": 6.612,
+        "request_to_denial_ms": 8.926,
+        "request_to_watermark_ms": 43.783,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      },
+      "node-c": {
+        "first_denial_utc": "2026-11-26T23:31:32.061131+00:00",
+        "elapsed_ms": 5.69,
+        "request_to_denial_ms": 8.004,
+        "request_to_watermark_ms": 247.825,
+        "other_denials": 0,
+        "replacement_allowed": true,
+        "unaffected_allowed": true,
+        "old_device_still_denied": true
+      }
+    }
+  },
+  "synthetic_detector_scores": {
+    "regression": {
+      "all_severities": {
+        "total_events": 1054,
+        "true_positives": 30,
+        "false_positives": 12,
+        "false_negatives": 0,
+        "true_negatives": 1012,
+        "precision": 0.7143,
+        "recall": 1.0,
+        "f1_score": 0.8333,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 11.7188,
+        "median_time_to_alert_ms": 0.002
+      },
+      "non_low": {
+        "total_events": 1054,
+        "true_positives": 30,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "true_negatives": 1024,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 0.0,
+        "median_time_to_alert_ms": 0.002
+      }
+    },
+    "challenge": {
+      "all_severities": {
+        "total_events": 1076,
+        "true_positives": 36,
+        "false_positives": 11,
+        "false_negatives": 0,
+        "true_negatives": 1029,
+        "precision": 0.766,
+        "recall": 1.0,
+        "f1_score": 0.8675,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 10.5769,
+        "median_time_to_alert_ms": 0.0019
+      },
+      "non_low": {
+        "total_events": 1076,
+        "true_positives": 36,
+        "false_positives": 0,
+        "false_negatives": 0,
+        "true_negatives": 1040,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1_score": 1.0,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 0.0,
+        "median_time_to_alert_ms": 0.0019
+      }
+    }
+  }
+}

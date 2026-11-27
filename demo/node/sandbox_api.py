@@ -18,7 +18,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from demo.node.crypto_provider import (
@@ -720,13 +720,12 @@ class SandboxController:
             if not tamper:
                 restored = bm.verify_and_restore(bkp_path)
                 self._record_event("key-authority", "BACKUP_VERIFIED_RESTORE", "admin", "/backup/restore", "SUCCESS", {"backup_id": manifest["backup_id"]})
-                self._mark("backup_integrity", True, "HMAC-SHA3-512 backup verified; tampered backup rejected")
+                self._mark("backup_integrity", True, "Pinned ML-DSA signature and HMAC verified")
                 return {"ok": True, "tampered": False, "backup_id": manifest["backup_id"], "restored": restored}
 
             with open(bkp_path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            b64 = raw["payload_b64"]
-            raw["payload_b64"] = b64[:-2] + ("AA" if b64[-2:] != "AA" else "BB")
+            raw.pop("manifest_sig_b64")
             with open(bkp_path, "w", encoding="utf-8") as f:
                 json.dump(raw, f)
 
@@ -735,7 +734,7 @@ class SandboxController:
                 return {"ok": False, "detail": "Corrupt backup unexpectedly accepted"}
             except BackupIntegrityError as e:
                 self._record_event("key-authority", "BACKUP_TAMPER_REJECTED", "operator", "/backup/restore", "DENIED", {"error": str(e)})
-                self._mark("backup_integrity", True, "Damaged 1-byte backup rejected (HMAC-SHA3-512)")
+                self._mark("backup_integrity", True, "Backup with a missing ML-DSA signature rejected")
                 return {"ok": True, "tampered": True, "rejected": True, "error": str(e)}
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -887,8 +886,8 @@ class SandboxController:
         return {"ok": True, "metrics": metrics}
 
 
-def create_sandbox_router(controller: SandboxController) -> APIRouter:
-    router = APIRouter(prefix="/api/sandbox", tags=["Interactive Sandbox"])
+def create_sandbox_router(controller: SandboxController, require_operator) -> APIRouter:
+    router = APIRouter(prefix="/api/sandbox", tags=["Interactive Sandbox"], dependencies=[Depends(require_operator)])
 
     @router.get("/state")
     def sandbox_state():

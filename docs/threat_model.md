@@ -4,7 +4,7 @@
 
 The protected asset is the content seeded by `setup`. The trust boundary is the ownership and revocation check before `read` or `protected_read` releases a result. `read` returns plaintext to the authorized owner. `protected_read` encapsulates to the supplied ML-KEM-768 public key and returns a ciphertext and a proof over the challenge and stored body. An audit query returns the recorded decision for a request ID.
 
-The runner is trusted to initialize state, perform revocations and supply the authenticated actor. The adapter accepts the actor as a JSON field and does not authenticate a person from that field. It denies unknown assets, wrong owners and disabled actors. A protected read also requires a well-formed key and a fresh challenge in the request context.
+With a configured issuer, the adapter verifies Ed25519 bearer tokens and takes the actor from the verified subject. Setup, revocation and audit lookup require an administrator subject. The explicit organizer harness mode trusts the runner to authenticate the actor and perform administrative operations. It denies unknown assets, wrong owners and disabled actors. A protected read also requires a well-formed key and a fresh challenge in the request context.
 
 The local service user and its state directory are trusted. The directory holds both the storage key and the encrypted resources. A process that can read or replace the whole directory can recover resources or replace the audit chain and its local anchor. Revocation applies to future requests and cannot recall content already returned. Each adapter state directory is independent.
 

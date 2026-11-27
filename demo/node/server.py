@@ -25,6 +25,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 import jsonschema
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -43,6 +44,13 @@ from src.detector.rules import RuleAlert
 
 # Load Frozen JSON Schemas
 SCHEMAS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "schemas"))
+
+
+class RecipientKeyStateError(CryptoError):
+    def __init__(self, state: str, cutoff: float):
+        super().__init__(f"Recipient key is {state}")
+        self.state = state
+        self.cutoff = cutoff
 
 def _load_schema(filename: str) -> Dict[str, Any]:
     path = os.path.join(SCHEMAS_DIR, filename)
@@ -84,6 +92,11 @@ class RevokeKeyRequest(BaseModel):
     key_id: str
     reason: str = "administrative revocation"
     target_node_id: Optional[str] = None
+
+
+class PeerRevocation(RevokeKeyRequest):
+    target_node_id: str
+    revocation_id: str
 
 
 class DeliveryReceipt(BaseModel):
@@ -148,12 +161,24 @@ def create_app(
     data_dir = data_dir or os.environ.get("DATA_DIR", f"/tmp/tbv_data_{node_id}")
     grace_period_sec = float(grace_period_seconds or os.environ.get("GRACE_PERIOD_SECONDS", "5.0"))
 
+    device_authority = os.environ.get("DEMO_DEVICE_AUTHORITY_URL", "").rstrip("/")
+    device_resources = json.loads(os.environ.get("DEMO_DEVICE_RESOURCES", "{}"))
+    peer_authorities = json.loads(os.environ.get("DEMO_PEER_AUTHORITIES", "{}"))
+    for mapping in (device_resources, peer_authorities):
+        if not isinstance(mapping, dict) or not all(
+            isinstance(value, str) and value for value in mapping.values()
+        ):
+            raise ValueError("Device resources and peer authorities must be JSON string maps")
+    if bool(device_authority) != bool(device_resources):
+        raise ValueError("Device authorization requires an authority URL and recipient resource map")
     peers_env = os.environ.get("PEER_NODES", "")
     peers_list = peer_nodes or [p.strip() for p in peers_env.split(",") if p.strip()]
     peer_enroll_token = peer_enroll_token or os.environ.get("DEMO_PEER_ENROLL_TOKEN")
     operator_token = operator_token or os.environ.get("DEMO_OPERATOR_TOKEN")
     recipient_token = recipient_token or os.environ.get("DEMO_RECIPIENT_TOKEN")
     revocation_sync_token = revocation_sync_token or os.environ.get("DEMO_REVOCATION_SYNC_TOKEN")
+    if peer_authorities and not revocation_sync_token:
+        raise ValueError("Peer authorities require a revocation sync credential")
     credentials = [token for token in (peer_enroll_token, operator_token, recipient_token, revocation_sync_token) if token]
     if len(credentials) != len(set(credentials)):
         raise ValueError("Demo peer, operator, recipient and sync credentials must be distinct")
@@ -170,7 +195,7 @@ def create_app(
     audit = adapters.audit
     if crypto.is_mock or identity.is_mock or audit.is_mock:
         raise RuntimeError("Protected transport requires real crypto, lifecycle and audit providers")
-    key_lock = threading.Lock()
+    key_lock = threading.RLock()
     inbox = RecipientInbox(Path(data_dir) / f"{node_id}_inbox.sqlite3", node_id)
 
     # In-memory peer bindings and operational metrics
@@ -202,7 +227,6 @@ def create_app(
         recent_alerts=recent_alerts,
         boot_time=boot_time,
     )
-    app.include_router(create_sandbox_router(sandbox))
 
     def require_operator(request: Request, authorization: Optional[str] = Header(default=None)) -> str:
         try:
@@ -232,6 +256,18 @@ def create_app(
             raise
         return "demo-operator"
 
+    if os.environ.get("DEMO_SANDBOX_ENABLED") == "1":
+        app.include_router(create_sandbox_router(sandbox, require_operator))
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
     def active_key():
         with key_lock:
             return identity.key_manager.get_active_key()
@@ -243,7 +279,7 @@ def create_app(
                 return unb64(record.private_key_b64, ml_kem_768.SECRET_KEY_SIZE)
             record = identity.key_manager.keys.get(key_id)
             if record is not None and record.owner_node_id == node_id:
-                raise CryptoError(f"Recipient key is {record.state.value.lower()}")
+                raise RecipientKeyStateError(record.state.value.lower(), record.grace_period_cutoff)
         raise CryptoError("Unknown recipient key")
 
     def _service_info() -> Dict[str, Any]:
@@ -274,13 +310,14 @@ def create_app(
         }
 
     @app.get("/api/info")
-    def api_info():
+    def api_info(_actor: str = Depends(require_operator)):
         return _service_info()
 
     @app.get("/", response_class=HTMLResponse)
-    def root(request: Request):
+    def root(request: Request, authorization: Optional[str] = Header(default=None)):
         accept = request.headers.get("accept", "")
         if "application/json" in accept and "text/html" not in accept:
+            require_operator(request, authorization)
             return JSONResponse(_service_info())
         return HTMLResponse(content=render_dashboard_html())
 
@@ -332,7 +369,7 @@ def create_app(
         return {"status": "enrolled", "node_id": keys.node_id, "kem_key_id": keys.kem_key_id}
 
     @app.post("/enroll")
-    def enroll_device(req: EnrollRequest):
+    def enroll_device(req: EnrollRequest, _actor: str = Depends(require_operator)):
         now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         pub_b64 = req.public_key_b64 or base64.b64encode(crypto.sig_public_key).decode("ascii")
         dev_id = req.device_id or f"dev-{req.node_id}"
@@ -376,8 +413,66 @@ def create_app(
             "audit_sequence": getattr(rec, "sequence", 0),
         }
 
+    def authorize_sending_device(recipient_id: str, authorization: str | None) -> None:
+        if not device_authority:
+            return
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Device credential required")
+        resource_id = device_resources.get(recipient_id)
+        if resource_id is None:
+            raise HTTPException(status_code=403, detail="Recipient has no device authorization policy")
+        try:
+            response = httpx.post(
+                f"{device_authority}/api/v1/authorize",
+                headers={"Authorization": authorization},
+                json={"resource_id": resource_id, "permission": "resource:write"},
+                timeout=2.0,
+                trust_env=False,
+            )
+            if response.status_code == 401:
+                raise HTTPException(status_code=401, detail="Invalid device credential")
+            response.raise_for_status()
+            decision = response.json()
+            if not isinstance(decision, dict) or type(decision.get("allowed")) is not bool:
+                raise ValueError("Invalid authorization decision")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Device authorization unavailable") from exc
+        if not decision["allowed"]:
+            reason = decision.get("reason_code", "DEVICE_AUTHORIZATION_DENIED")
+            audit.logger.log_event(
+                service=node_id, action="DEVICE_SEND_DENIED", subject="device-authority",
+                resource=f"node://{recipient_id}", status="DENIED",
+                metadata={"reason_code": reason, "decision_id": decision.get("decision_id")},
+            )
+            if reason in {"STALE_STATE", "STATE_UNAVAILABLE"}:
+                raise HTTPException(status_code=503, detail=reason)
+            raise HTTPException(status_code=403, detail=reason)
+
+    def pull_peer_revocations(recipient_id: str, authority: str) -> None:
+        try:
+            response = httpx.get(
+                f"{authority.rstrip('/')}/internal/keys/revocations",
+                headers={"Authorization": f"Bearer {revocation_sync_token}"},
+                timeout=1.0,
+                trust_env=False,
+            )
+            response.raise_for_status()
+            snapshot = response.json()
+            if not isinstance(snapshot, dict) or snapshot.get("node_id") != recipient_id:
+                raise ValueError("Revocation authority identity mismatch")
+            key_ids = snapshot.get("revoked_key_ids")
+            if not isinstance(key_ids, list) or not all(isinstance(key, str) for key in key_ids):
+                raise ValueError("Invalid revocation snapshot")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Peer revocation state unavailable") from exc
+        inbox.revoke_peer_keys(recipient_id, key_ids)
+
     @app.post("/send")
-    def send_message(req: SendRequest):
+    def send_message(
+        req: SendRequest,
+        _actor: str = Depends(require_operator),
+        device_credential: str | None = Header(default=None, alias="X-Device-Authorization"),
+    ):
         t0 = time.perf_counter()
         sender_id = node_id
         recipient_id = req.recipient_id
@@ -402,15 +497,29 @@ def create_app(
             )
             raise HTTPException(status_code=403, detail="Lateral movement violation: unauthorized call path")
 
+        authorize_sending_device(recipient_id, device_credential)
+        if authority := peer_authorities.get(recipient_id):
+            pull_peer_revocations(recipient_id, authority)
+
+        plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
         with key_lock:
             peer = trusted_peers.get(recipient_id)
-        if peer is None:
-            raise HTTPException(status_code=403, detail="Recipient transport keys are not enrolled")
-        plaintext_bytes = json.dumps(req.payload, sort_keys=True).encode("utf-8")
-        raw_env = crypto.messaging.seal_for_recipient(
-            recipient_id, plaintext_bytes, peer.kem_key_id,
-            unb64(peer.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE), crypto.kem, crypto.sig,
-        )
+            if peer is None:
+                raise HTTPException(status_code=403, detail="Recipient transport keys are not enrolled")
+            if inbox.is_peer_key_revoked(recipient_id, peer.kem_key_id):
+                audit.logger.log_event(
+                    service=node_id,
+                    action="REVOKED_PEER_KEY_BLOCKED",
+                    subject=sender_id,
+                    resource=f"node://{recipient_id}",
+                    status="DENIED",
+                    metadata={"key_id": peer.kem_key_id},
+                )
+                raise HTTPException(status_code=409, detail="Peer recipient key is revoked")
+            raw_env = crypto.messaging.seal_for_recipient(
+                recipient_id, plaintext_bytes, peer.kem_key_id,
+                unb64(peer.kem_public_key_b64, ml_kem_768.PUBLIC_KEY_SIZE), crypto.kem, crypto.sig,
+            )
         envelope = _schema_envelope(raw_env)
         for field in ("seq_num", "associated_data", "sig_alg", "kem_alg"):
             raw_env[field] = envelope[field]
@@ -470,13 +579,14 @@ def create_app(
 
         try:
             sender_public_key = unb64(peer.signing_public_key_b64, ml_dsa_65.PUBLIC_KEY_SIZE)
-            crypto.messaging.decrypt_for_recipient(
-                envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
-            )
-            try:
-                receipt_id = inbox.accept(envelope, sender_public_key)
-            except (ReplayRejectedError, CounterOutOfWindowError) as exc:
-                raise crypto.ReplayAttackError(str(exc)) from exc
+            with key_lock:
+                crypto.messaging.decrypt_for_recipient(
+                    envelope, crypto.kem, crypto.sig, sender_public_key, recipient_private_key,
+                )
+                try:
+                    receipt_id = inbox.accept(envelope, sender_public_key)
+                except (ReplayRejectedError, CounterOutOfWindowError) as exc:
+                    raise crypto.ReplayAttackError(str(exc)) from exc
             latency = (time.perf_counter() - t0) * 1000.0
             crypto_latencies.append(latency)
             message_stats["received"] += 1
@@ -508,6 +618,13 @@ def create_app(
                 status="DENIED",
                 metadata={"error": str(e)},
             )
+            metadata = {"error": str(e), "source_service": sender_id, "target_service": node_id}
+            if isinstance(e, RecipientKeyStateError):
+                metadata.update({
+                    "authenticated_sender": True,
+                    "recipient_key_state": e.state,
+                    "seconds_since_cutoff": time.time() - e.cutoff,
+                })
             alerts = audit.rule_engine.evaluate_event({
                 "event_id": envelope.get("message_id", str(uuid.uuid4())),
                 "timestamp_ns": time.time_ns(),
@@ -516,7 +633,7 @@ def create_app(
                 "service": node_id,
                 "resource": "/receive",
                 "status": "DENIED",
-                "metadata": {"error": str(e)},
+                "metadata": metadata,
             })
             for a in alerts:
                 recent_alerts.append(getattr(a, "to_dict", lambda: a)())
@@ -566,11 +683,14 @@ def create_app(
         }
 
     def apply_key_revocation(req: RevokeKeyRequest, actor: str):
+        if req.target_node_id not in (None, node_id):
+            raise HTTPException(status_code=400, detail="Revoke a key on its owning node")
         with key_lock:
+            if not identity.key_manager.revoke_key(req.key_id, req.reason):
+                raise HTTPException(status_code=404, detail="Unknown local recipient key")
             event = identity.revocation.create_revocation(
-                req.key_id, req.target_node_id or node_id, req.reason, signer=crypto.sig
+                req.key_id, node_id, req.reason, signer=crypto.sig
             )
-            identity.key_manager.revoke_key(req.key_id, req.reason)
         audit.logger.log_event(
             service=node_id,
             action="REVOKE_KEY_SUCCESS",
@@ -581,11 +701,36 @@ def create_app(
         )
         return event
 
-    @app.post("/internal/keys/revoke")
-    def sync_revocation(req: RevokeKeyRequest, authorization: Optional[str] = Header(default=None)):
+    def require_revocation_peer(authorization: Optional[str] = Header(default=None)):
         _require_bearer(authorization, revocation_sync_token, "Peer revocation")
-        apply_key_revocation(req, "demo-revocation-peer")
-        return {"status": "acknowledged", "node_id": node_id}
+
+    @app.get("/internal/keys/revocations", dependencies=[Depends(require_revocation_peer)])
+    def revocation_snapshot():
+        with key_lock:
+            revoked = sorted(
+                record.key_id for record in identity.key_manager.keys.values()
+                if record.state == identity.KeyStateEnum.REVOKED
+            )
+        return {"node_id": node_id, "revoked_key_ids": revoked}
+
+    @app.post("/internal/keys/revoke", dependencies=[Depends(require_revocation_peer)])
+    def sync_revocation(req: PeerRevocation):
+        with key_lock:
+            inbox.revoke_peer_key(req.target_node_id, req.key_id)
+        record = audit.logger.log_event(
+            service=node_id,
+            action="PEER_REVOCATION_APPLIED",
+            subject=req.target_node_id,
+            resource=f"/keys/{req.key_id}",
+            status="SUCCESS",
+            metadata={"revocation_id": req.revocation_id},
+        )
+        return {
+            "status": "applied",
+            "node_id": node_id,
+            "revocation_id": req.revocation_id,
+            "audit_sequence": record.sequence,
+        }
 
     @app.post("/keys/revoke")
     def revoke_key(req: RevokeKeyRequest, actor: str = Depends(require_operator)):
@@ -593,10 +738,11 @@ def create_app(
         t0 = time.perf_counter()
         rev_ev = apply_key_revocation(req, actor)
 
-        acknowledged = 0
+        receipts = {}
         if revocation_sync_token:
             payload = req.model_dump()
             payload["target_node_id"] = rev_ev.target_node_id
+            payload["revocation_id"] = rev_ev.revocation_id
             for peer_url in peers_list:
                 try:
                     p_req = urllib.request.Request(
@@ -606,8 +752,16 @@ def create_app(
                     )
                     p_req.add_unredirected_header("Authorization", f"Bearer {revocation_sync_token}")
                     with urllib.request.urlopen(p_req, timeout=1.0) as response:
-                        if response.status == 200:
-                            acknowledged += 1
+                        receipt = json.load(response)
+                        if (
+                            isinstance(receipt, dict)
+                            and receipt.get("status") == "applied"
+                            and receipt.get("revocation_id") == rev_ev.revocation_id
+                            and isinstance(receipt.get("node_id"), str)
+                            and receipt["node_id"] != node_id
+                            and isinstance(receipt.get("audit_sequence"), int)
+                        ):
+                            receipts[receipt["node_id"]] = receipt
                 except (OSError, ValueError):
                     continue
 
@@ -616,13 +770,14 @@ def create_app(
             "status": "revoked",
             "key_id": req.key_id,
             "propagation_latency_ms": round(last_revocation_ms, 2),
-            "peer_acknowledgements": acknowledged,
-            "peer_failures": len(peers_list) - acknowledged,
+            "peer_acknowledgements": len(receipts),
+            "peer_failures": len(peers_list) - len(receipts),
+            "peer_receipts": list(receipts.values()),
             "revocation": rev_ev.to_dict(),
         }
 
     @app.get("/logs/verify")
-    def verify_logs():
+    def verify_logs(_actor: str = Depends(require_operator)):
         log_path = getattr(audit.logger, "log_file_path", f"{data_dir}/{node_id}_audit.log")
         anchor_path = os.path.join(data_dir, f".{node_id}_audit_anchor.json")
         if hasattr(audit.verifier, "verify_file"):
@@ -646,7 +801,7 @@ def create_app(
         return res_dict
 
     @app.get("/metrics")
-    def node_metrics():
+    def node_metrics(_actor: str = Depends(require_operator)):
         active = active_key()
         sorted_lats = sorted(crypto_latencies) if crypto_latencies else [0.0]
         p50 = sorted_lats[int(len(sorted_lats) * 0.50)]

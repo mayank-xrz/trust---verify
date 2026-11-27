@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -94,5 +95,37 @@ def test_tampered_manifest_fails_mldsa_verification(bkp_env, tmp_path: Path) -> 
             path,
             pinned_pubkey=public_key,
             passphrase=bkp_env["passphrase"],
+        )
+    assert excinfo.value.reason_code == "STEP2_BAD_SIGNATURE"
+
+
+def test_restore_rejects_missing_signature_with_intact_payload(bkp_env, tmp_path: Path) -> None:  # noqa: F811
+    public_key, private_key = sig_keygen(ml_dsa_65)
+    path = tmp_path / "unsigned.tbvbkp"
+    envelope = _create(bkp_env, path, private_key)
+    del envelope["manifest_sig_b64"]
+    _rewrite(path, envelope)
+    with pytest.raises(DomainIntegrityError) as excinfo:
+        bkp_env["bkp_svc"].restore_backup(
+            bkp_env["admin_ctx"], path, pinned_pubkey=public_key, passphrase=bkp_env["passphrase"]
+        )
+    assert excinfo.value.reason_code == "STEP2_MISSING_SIGNATURE"
+
+
+def test_restore_rejects_checksum_updated_without_valid_signature(bkp_env, tmp_path: Path) -> None:  # noqa: F811
+    public_key, private_key = sig_keygen(ml_dsa_65)
+    path = tmp_path / "invalid-checkpoint.tbvbkp"
+    envelope = _create(bkp_env, path, private_key)
+    raw = path.read_bytes()
+    start = len(BACKUP_MAGIC) + 4
+    size = int.from_bytes(raw[len(BACKUP_MAGIC):start], "big")
+    payload = bytearray(raw[start + size:])
+    payload[-1] ^= 1
+    envelope["manifest"]["ciphertext_sha256"] = hashlib.sha256(payload).hexdigest()
+    header = canonical_json_bytes(envelope)
+    path.write_bytes(BACKUP_MAGIC + len(header).to_bytes(4, "big") + header + payload)
+    with pytest.raises(DomainIntegrityError) as excinfo:
+        bkp_env["bkp_svc"].restore_backup(
+            bkp_env["admin_ctx"], path, pinned_pubkey=public_key, passphrase=bkp_env["passphrase"]
         )
     assert excinfo.value.reason_code == "STEP2_BAD_SIGNATURE"

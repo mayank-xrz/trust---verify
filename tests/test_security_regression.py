@@ -8,6 +8,7 @@
 
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import unittest
@@ -127,7 +128,9 @@ class TestSecurityRegression(unittest.TestCase):
             # 2. Tamper detection via /logs/verify endpoint
             app_dir = os.path.join(tmpdir, "app_logs")
             os.makedirs(app_dir, exist_ok=True)
-            app = create_app(node_id="node-audit-verify", data_dir=app_dir)
+            operator = secrets.token_urlsafe(32)
+            headers = {"Authorization": f"Bearer {operator}"}
+            app = create_app(node_id="node-audit-verify", data_dir=app_dir, operator_token=operator)
             client = TestClient(app)
 
             # Record several legitimate events
@@ -135,7 +138,7 @@ class TestSecurityRegression(unittest.TestCase):
             app.state.audit_logger.log_event("node-audit-verify", "TX", "user-1", "/transfer", "SUCCESS")
 
             # Clean verification succeeds
-            clean_resp = client.get("/logs/verify")
+            clean_resp = client.get("/logs/verify", headers=headers)
             self.assertEqual(clean_resp.status_code, 200)
             self.assertTrue(clean_resp.json()["is_valid"])
 
@@ -152,7 +155,7 @@ class TestSecurityRegression(unittest.TestCase):
                 f.write(tampered_content)
 
             # /logs/verify must flag tampering with HTTP 409 Conflict
-            tampered_resp = client.get("/logs/verify")
+            tampered_resp = client.get("/logs/verify", headers=headers)
             self.assertEqual(tampered_resp.status_code, 409)
             self.assertFalse(tampered_resp.json()["detail"]["is_valid"])
 

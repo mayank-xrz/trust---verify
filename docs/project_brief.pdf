@@ -1,190 +1,101 @@
 %PDF-1.4
-%âãÏÓ
+%“Œ‹ž ReportLab Generated PDF document (opensource)
 1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
+<<
+/F1 2 0 R /F2 3 0 R
+>>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 7 0 R >>
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
 endobj
 4 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> /Contents 8 0 R >>
+<<
+/A <<
+/S /URI /Type /Action /URI (demo-walkthrough.mp4)
+>> /Border [ 0 0 0 ] /Rect [ 330.3655 662.2898 440.0695 674.8898 ] /Subtype /Link /Type /Annot
+>>
 endobj
 5 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
+<<
+/Annots [ 4 0 R ] /Contents 10 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 9 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
 endobj
 6 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+<<
+/Contents 11 0 R /MediaBox [ 0 0 595.2756 841.8898 ] /Parent 9 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 /Trans <<
+
+>> 
+  /Type /Page
+>>
 endobj
 7 0 obj
-<< /Length 2549 >>
-stream
-BT
-/F1 20 Tf
-50 740 Td
-(TRUST-BUT-VERIFY: PROJECT BRIEF) Tj
-/F1 12 Tf
-0 -24 Td
-(Post-Quantum Zero-Trust Security & Explainable Detection Engine) Tj
-/F2 10 Tf
-0 -18 Td
-(Track: Security, Systems & Post-Quantum Defense | Hackathon Edition) Tj
-0 -15 Td
-(Demo & Walkthrough Video: https://trust-but-verify.dev/demo-walkthrough) Tj
-
-/F1 14 Tf
-0 -30 Td
-(1. Unique Selling Proposition [USP]) Tj
-/F2 10 Tf
-0 -18 Td
-(Modern enterprise microservices face imminent Harvest-Now-Decrypt-Later (HNDL) attacks) Tj
-0 -14 Td
-(from emerging quantum adversaries, alongside lateral movement from compromised nodes.) Tj
-0 -14 Td
-(Trust-But-Verify provides an all-in-one, production-grade defense combining:) Tj
-0 -14 Td
-(  - NIST FIPS 203 (ML-KEM-768) Ephemeral Key Exchange for Forward Secrecy) Tj
-0 -14 Td
-(  - NIST FIPS 204 (ML-DSA-65) Quantum-Resistant Digital Signatures) Tj
-0 -14 Td
-(  - Cryptographically Bound Envelopes with Recipient Binding & Sliding-Window Anti-Replay) Tj
-0 -14 Td
-(  - Tamper-Evident Structured JSON Logging linked by SHA-256 Continuous Hash Chains) Tj
-0 -14 Td
-(  - 100% Explainable, Deterministic Lateral Attack Detection (Zero Black-Box AI/ML)) Tj
-
-/F1 14 Tf
-0 -26 Td
-(2. System Architecture & Components) Tj
-/F2 10 Tf
-0 -18 Td
-(  [Person A] Crypto Layer: ML-KEM-768 key encapsulation, ML-DSA-65 signatures, AEAD) Tj
-0 -14 Td
-(             messaging with recipient binding (AAD) and anti-hijack session resumption.) Tj
-0 -14 Td
-(  [Person B] Identity Layer: Atomic key rotation with grace periods and cutoff enforcement,) Tj
-0 -14 Td
-(             cross-node revocation broadcasting, and Write-Ahead Log (WAL) crash recovery.) Tj
-0 -14 Td
-(  [Person C] Audit & Detector: SHA-256 continuous hash-chained logging, tamper verifier CLI,) Tj
-0 -14 Td
-(             clock-skew buffer, service access graph (DAG), and deterministic rule engine.) Tj
-0 -14 Td
-(  [Person D] Node Sandbox & CLI: Multi-node HTTP REST service wrapper, operator dashboard,) Tj
-0 -14 Td
-(             and automated chaos/security test suite.) Tj
-
-/F1 14 Tf
-0 -26 Td
-(3. Evaluation Highlights) Tj
-/F2 10 Tf
-0 -18 Td
-(  - Benchmark F1 Score: 1.00 (Zero false alarms on normal traffic, 100% attack detection)) Tj
-0 -14 Td
-(  - Mean Time To Alert (MTTA): < 1.5 ms per security incident) Tj
-0 -14 Td
-(  - Throughput: > 10,000 envelopes/sec (AEAD) and > 150,000 events/sec (Detector)) Tj
-0 -14 Td
-(  - Portability: Standalone zero-dependency runtime with optional liboqs hardware acceleration) Tj
-
-/F2 9 Tf
-50 50 Td
-(Page 1 of 2 -- Trust-But-Verify System Specification) Tj
-ET
-endstream
+<<
+/PageMode /UseNone /Pages 9 0 R /Type /Catalog
+>>
 endobj
 8 0 obj
-<< /Length 2555 >>
+<<
+/Author (anonymous) /CreationDate (D:20000101000000+00'00') /Creator (anonymous) /Keywords () /ModDate (D:20000101000000+00'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (unspecified) /Title (Trust, but verify | Track 4 project brief) /Trapped /False
+>>
+endobj
+9 0 obj
+<<
+/Count 2 /Kids [ 5 0 R 6 0 R ] /Type /Pages
+>>
+endobj
+10 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 2224
+>>
 stream
-BT
-/F1 20 Tf
-50 740 Td
-(THREAT MODEL & SECURITY SPECIFICATION) Tj
-/F1 12 Tf
-0 -24 Td
-(Comprehensive STRIDE Analysis & Adversary Mitigation Matrix) Tj
-
-/F1 14 Tf
-0 -30 Td
-(1. Threat Actors & Adversary Model) Tj
-/F2 10 Tf
-0 -18 Td
-(  - Quantum Adversary (HNDL): Intercepts ciphertexts today to decrypt via Shor's algorithm.) Tj
-0 -14 Td
-(    Mitigation: ML-KEM-768 with ephemeral session keys ensures historical forward secrecy.) Tj
-0 -14 Td
-(  - Man-In-The-Middle (MITM): Modifies packets or redirects envelopes to wrong nodes.) Tj
-0 -14 Td
-(    Mitigation: Recipient binding in AAD + ML-DSA-65 signatures renders swaps unforgeable.) Tj
-0 -14 Td
-(  - Compromised Worker Node: Attempts unauthorized lateral traversal to admin endpoints.) Tj
-0 -14 Td
-(    Mitigation: Strict Service DAG graph enforcement and deterministic privilege rules.) Tj
-0 -14 Td
-(  - Malicious Insider / Tamperer: Modifies local audit records to hide activity.) Tj
-0 -14 Td
-(    Mitigation: Cryptographic SHA-256 hash chains immediately detect single-byte tampering.) Tj
-
-/F1 14 Tf
-0 -26 Td
-(2. STRIDE Threat & Control Matrix) Tj
-/F2 10 Tf
-0 -18 Td
-(  - Spoofing:       Defended via NIST FIPS 204 ML-DSA-65 post-quantum node signatures.) Tj
-0 -14 Td
-(  - Tampering:      Defended via AEAD authentication tags & SHA-256 continuous hash chains.) Tj
-0 -14 Td
-(  - Repudiation:    Defended via signed audit checkpoints & monotonic sequence numbers.) Tj
-0 -14 Td
-(  - Info Leak:      Defended via AES-256-GCM authenticated encryption + ML-KEM-768 keys.) Tj
-0 -14 Td
-(  - Denial of Svc:  Defended via sliding-window replay caches and burst frequency limiters.) Tj
-0 -14 Td
-(  - Elevation:      Defended via DAG lateral movement policies & role privilege barriers.) Tj
-
-/F1 14 Tf
-0 -26 Td
-(3. Reliability & Chaos Resilience) Tj
-/F2 10 Tf
-0 -18 Td
-(  - Mid-Rotation Crash: WAL ensures atomic replay of key transitions without split-brain.) Tj
-0 -14 Td
-(  - Corrupt Backups: HMAC-SHA3-512 authentication tags reject tampered snapshots.) Tj
-0 -14 Td
-(  - Clock Skew: Out-of-order buffer tolerates +/- 2000 ms jitter without false alerts.) Tj
-
-/F1 14 Tf
-0 -26 Td
-(4. Hackathon Reproducibility Instructions) Tj
-/F2 10 Tf
-0 -18 Td
-(  1. Run `make test` to execute all cryptographic, chaos, injection, and detector tests.) Tj
-0 -14 Td
-(  2. Run `make demo` for an automated judge walkthrough of simulated attacks and defenses.) Tj
-0 -14 Td
-(  3. Run `make bench` for PQC latency and throughput performance metrics.) Tj
-
-/F2 9 Tf
-50 50 Td
-(Page 2 of 2 -- Trust-But-Verify System Specification) Tj
-ET
-endstream
+Gb!;d?$#&E&q/*0kViPXC\;DpNraET@^C"eF1Jc;Qa&BQB-YZW)(CF<opd)FNWQJ0$PmKd;O'5MB"I/qe#.O4;2Cjcs"54a03@f*<CB\XX,<W.887ac?EVS*0StrTTchUsjT9pp/7,2a2eSSbQkj*G//J"'=V0GT<./c[lWH&^NX,,+)BL:FHk:sVQn>O:PfHq<U`c8LH(+8H80BtSPgQKs4u"?,kEBGHc2#NUY.L?LhpJ"%WnMkrX1,J4K(JmNI\$b(Q[^/t)N:?j7EDY5`]gm\DK3ZJrePH-1qA(k.-HiBVt-3.PJ72bjE$,ET>SuZd8@B<e6:=hDV%K1NH?PcB2]Y=`/'_s@>=q[O*j&_i.1<7k;q9m/NZHtg,i;*8#<:%B^rXTU6?l\dQ+RpmXjk,[k4_lViE4%b*n%feHW3Maic?1S\jme>Ic!1M,%CDO**'s8b/RWK`^JDkcO,n=B?ojh?ChH.:(GOM4jU;^?rA[oU@E]7t-Ys,,Xs02J+jM'/XPeXuVM.E"_^9_\%>R!*r3p2TJfU:FXK9@l,Q/2!l"uoB)q\pe-k75+HhIpH(Z][!#Pa#[GgRPuiXe)sSFhZe_ac.d?6km/*,NZ[BJ0VYYd^Q:4G"":6BUCZW!ae>RaWq";nnCn;7!+hHO9\?KQUc0R17jia,rSBY^(I!%</UssUo2Q_XIY%8bZY`=UC6to#=W`=jBCSa\baI7L7AQ8A?XU7U>#Y&#s+!R:DGc#1P$52>6g/Zeq\3?:[-i3UOWU`JX!Y-ikZ,d521(;A9Y\8#Ujkp/)TMZ`i4&dh_]/-qQ'>-74Y^)VlKXsCS2@FMX1s_Mq\jtRp;":cG<b[Q,f5TT\os&3_.t__l9fce#eR/IU1eUu.^.)S&J^#J!%'F$#JPRAZ5oZ3%jSY8l%qLAX..:*(6IbYpC@rgV57D"\C"VN(]BLMhQf%eklopDMS6aO/WajGVRVJZb%=><2S[WCGq=]sZaA_9u[PbK4aHIj6X\lYs+ajgegI>mJ5nsBY9?l+%9%*DjE!3!h=&j%dSZ:d@@Q1!/S$3MP^Dk\NCKUR4[!Pt\o\F_as('jYW6ofKjOu`SbeNiY3l[kAP>_WUWMH^/WbSg/BY^pT!30"#l&/HhA)f@F"nEqPm7VB!U(f3SGR"-K&YNZ!5fa1B$]i%WV$u4TK^Gp2[G2^JM^GMTqJk\RSDenG9=s#"5OGkgK4*W[nmiP1U[3VU_(-rSd"$K#Yp1"SPQ[00&kN$K$)I#=J]G4[X_'W)fNuJ/[T<7&@%lpP^+>gk"f*7GX/-H_iGqk;e:Sdrg+rd1G'JrqAc:EGa0cp)/]"q64hI6V5re68FnZ)0a__[aX3H&E99a8G>F#8GG%ckOWfoVo^4q?u@a:0t1PTW3Mcs*1E+J`=<P^?`D.!$kj<d+O[XZBCogL$83Lic,FP$mmfolr/`i_(=R[NB5>-!,DY(<h;p@)qDShgkE]9=S)K]/iUTJ%C`0^2YSeAo!0p(l-O=>f[M\#@;DRtVoD.#kJ<9GJn[LDmaK_$jQ.7bp5&+/NVF(^GJXMQrUd6)&u(n>5MYfVWR-8Ps:+\f>QtAot^R(P_"d^M4j39EKH.F-m6YIBGpq)+$HGD5W2Je"_,XO,:B305Je!Z=Q2bN\Te+Aio][DY[V7@E^i:Bp<Dn76aIRW7%s-fFDjFRKrG?Z"#h&mEb8[('Wj1:,P.32_DoD4tq)+Y52IWVn*)tKku0gqMu/@3U&Y474i6nI<g),^tY[#d;&#\cL9pko+inoT*B5t[T9*F!Woj[3&_@1Q$Vr5>4MNt!@iII4g_3i<%#4A3\HPcOu3?%5d6Y%8M3gCV*]+?ll3t'1]0,*HU^ko7lX1rjq$d[,u8%g$n/[m;'[Q<9P9/4rE/d5kh58DIbm:JM&RU7)"-E*\/XGV5$I`1ED@.9*Z]u"2Ia]G_OkOrN(\95K@b":*_*DY0K[Ue59`4`Pd/4KpV8=8bNI%Z`U&0(M6\JU4p84>-SoH)0-p%]7sBBogK=iOp#pUT.u/n79iC>Y'CH3.QckVqG&0lmo\;#'"$K<n4M;XZ2!j/oh%&2b)MGP8qj=)<SZ$mRl$n@KaQ"\$/:r70%s("A?mHr-rats!Q$XihBbJ?E/o(0bVOOp^S(sj\"">>+aF,.4Yt$Q^<6nXt5M`Cnkf]T!o\Z"ehnAkNd0l]!p#T94;``%lal4kmkL"[l7>)EGjA@u8*IW&M-3~>endstream
+endobj
+11 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1986
+>>
+stream
+Gb!;d@;jmY&H/2-ESm&sZ"cjrj^=_/`pL@7>FVQC"q2nnM70obU./%#]O/EtPi=`.iY>TN1iQha(3R9:GPBrk+cZ"!rHhia4j3'RMibf3Z6b3g?p`Nac*N%1*/AMP;_Ue_a"r+]8T['<ZT;bJM.eeBK%UPKiYg]V8]rIdIiO,oE@aYEY[<LD\.FVJEAE070TD7;0a5r]8gaq7K*1)`VhD>or^7H]fq164D[s,%8E$MuKrdg%"^O]pQ7<\Gl/m?8I])N=qtpr-gJ1/W%rbtj$uQ'20n0E^K-NkHQ\`,hLN')-aEEJF=o0k$9TS66!_2C%LrMMa=H>hP)eX8(n(i=OTkUfj_6"0`j5!7SS.Y40^OpY'>F;::4's4>(<GlkFqNgDfXRTlMcT/?C0!MN,7A'ncKPdOhB9a/(=[Mc9'(.D2jRDd)lJu@C8Ec\Loac;_KA=O=t!LWZ72ReQFY6PS%V+%oQaNc\WU$ePd#^TY%4A5'XNs&0j)9o;N515lr^DoKfan"O@ShNJ34KfMalE0hH")!d)l4HPk%`7Qe'46MG9p9iR]W&L\Ft5;$\NNH40))"ZC8.SZDpVG5uL@n&VE'U2)9?2QU"2<mh2:@2Ano(##,-b*Af8oL/l;F'Z8?`,^iJ2HQVN"gV(K^%`t]oJ,9RVQHU[?E%3'mG'R(O4pNs-!.>0/!Psl!_DMF9)"#%+Y&FQgYlabVR%nJQU\>.[2K$`m\tCW%!h50@P,CKVQ6rmZ4\[(/[&AhBP6?@$ti.<8aM6[+[J-bP.O.^Ub)=Pm*ER$%JXQ,E7,KDp%8c#moj`jNR?@TnCR80W5c%3E!%NG,cq82=Qi$)C?'1\;aA[A]fXub3fOOVI3tmm9`pStc:4]J-_K(.kfgbbEc"M%]"Z5Y"!8kN!Vf@=2s_clKW;sW<?UTKo`AEk"!h&lb9_CfFQZ,>3RWY=S]c$b_-.[@fJU2rN`5#OeUUuLc!AD+kEBu*lQg9foh&tP/X_;L1:Xm:MnG?&<u-Afml2=6elHU8TA!)hLJ/_4X8U'OK+HEb3ZYoSI)$fk<W#EN^+]BRjT!>NI.%KOPC67(>?7f$Y^j5q0`g`E>p6c>lWPH#5A&SQ68LKFNCdO>=7qDcNF$S/Y]eibmL.\TK6F4P@(W;pEbdL9[Nucp+PfT"G^$$X0J$oG@:_^%_`%u,95X7VV]1WngXpe]L3:BkaO:u(Zgq7.H7^8!Lh-Oe&?#8_BAZUmSnV8TDFoT*9("osBf?J.'Jku/BJ'$-:_gcWU%60<76RSDhqNblFV#24.YbQIFiVi_)@,;*S5'XfRL]5>OZ7L.GlZNXKZQjq%92P6__[2;G=8&OT'!1=,PqMGni?WA+)$U"#YT=-$!*h8qUof!m)G6ohfnQITX.uh1A+[gKF&>mjEfY-EstKt:ak1HmhuTei5H%T;1Y&"TV,9gF_-DK9(q3=S)o):N@0crS=DNl(IN(DFCi_0aVE2o\(9\^<$ChT-O4A;bO(gNSnHa]'jFMiO<X)!gU-N59</O3%#e"EGP(XO*GWg)U1j+\7n/F(,u<r(&*8^KBG;Z]1'kLa>l,l*9C)+-rG&]g/eMR?jaFY2&!;M6luOD?c+`J22@SeL_f]8Xd.`/`+^7/#1cZ@eB:1^Sl8]=ZDs#tj$eYFRbjNG$RQ^k\qji^##^=W&E=(\[6Z(Rqfs1STMs]$.l%kn!9Y[T+nW$P%XS(-nY?G^=?+SJJDH6OV5_BPE="np@ed4"q54SOK%`]+Lqu5/0SFhiN)uh<r<.hZ>C7PeZB)<(Lp1__F*7BEr_"1]YaACX/Roo.%\(s2p*:he9Zpsb!QR=q<HV]k!ktgbD?d:m\5J0%Js876ceGipn+H=6KMX]'Skr;,A1QF5do9]E../_V[J0C[ERIYhB>oX7`[>o[:!,_U,lUrA\<hD-VLY;M#MsQ7k^!Go[r;>*'?\t?eA`kGe?diQ+cW`=U5roIQ2^Ta(&a_-GK>.DEHUs%~>endstream
 endobj
 xref
-0 9
+0 12
 0000000000 65535 f 
-0000000015 00000 n 
-0000000064 00000 n 
-0000000127 00000 n 
-0000000263 00000 n 
-0000000399 00000 n 
-0000000474 00000 n 
-0000000544 00000 n 
-0000003145 00000 n 
+0000000061 00000 n 
+0000000102 00000 n 
+0000000209 00000 n 
+0000000321 00000 n 
+0000000493 00000 n 
+0000000715 00000 n 
+0000000919 00000 n 
+0000000987 00000 n 
+0000001281 00000 n 
+0000001346 00000 n 
+0000003662 00000 n 
 trailer
-<< /Size 9 /Root 1 0 R >>
+<<
+/ID 
+[<e6f2f0b2dcca9101cbfa34869454d7c0><e6f2f0b2dcca9101cbfa34869454d7c0>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 8 0 R
+/Root 7 0 R
+/Size 12
+>>
 startxref
-5752
+5740
 %%EOF

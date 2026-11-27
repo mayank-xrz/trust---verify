@@ -10,12 +10,16 @@ import tempfile
 import time
 from pathlib import Path
 
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+try:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+except ImportError:
+    AESGCM = None
 
+from src.crypto import aead
 from src.crypto.policy import TimezoneMismatchError, normalize_timezone
-from src.crypto.primitives import CryptoError, b64, canonical, unb64
+from src.crypto.primitives import CryptoError, b64, canonical, hkdf, unb64
 from src.crypto.protected_read import MAX_CHALLENGE_LENGTH, protected_read
 from src.crypto.session import PrekeyStore, TrustRegistry
 
@@ -27,8 +31,15 @@ def state_dir():
     if env_dir:
         root = Path(env_dir) / "track4-local"
     else:
-        root = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
-    if root.exists():
+        legacy = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
+        state_home = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+        if not state_home.is_absolute():
+            raise CryptoError("XDG_STATE_HOME must be an absolute path")
+        root = state_home / "trust-but-verify" / "track4-local"
+        # Keep using existing state until the operator explicitly moves it.
+        if not root.exists() and not root.is_symlink() and (legacy.exists() or legacy.is_symlink()):
+            root = legacy
+    if root.exists() or root.is_symlink():
         if root.is_symlink() or not root.is_dir():
             raise CryptoError("unsafe state directory")
         st = root.lstat()
@@ -79,7 +90,10 @@ def save(path, state):
 def _derive_storage_key(key_material):
     ikm = key_material.encode("utf-8") if isinstance(key_material, str) and key_material else secrets.token_bytes(32)
     salt = secrets.token_bytes(16)
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=b"track4/v1/state-at-rest").derive(ikm)
+    info = b"track4/v1/state-at-rest"
+    if AESGCM is None:
+        return hkdf(ikm, salt, info)
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=info).derive(ikm)
 
 
 def _load_storage_key(root):
@@ -94,8 +108,13 @@ def _encrypt_contents(storage_key, contents):
     for asset_id, body in contents.items():
         nonce = secrets.token_bytes(12)
         aad = canonical({"asset": asset_id})
-        ct_and_tag = AESGCM(storage_key).encrypt(nonce, body.encode("utf-8"), aad)
-        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ct_and_tag[:-16]), "tag": b64(ct_and_tag[-16:])}
+        plaintext = body.encode("utf-8")
+        if AESGCM is None:
+            ciphertext, tag = aead.encrypt(storage_key, nonce, aad, plaintext)
+        else:
+            combined = AESGCM(storage_key).encrypt(nonce, plaintext, aad)
+            ciphertext, tag = combined[:-16], combined[-16:]
+        encrypted[asset_id] = {"nonce": b64(nonce), "ciphertext": b64(ciphertext), "tag": b64(tag)}
     return encrypted
 
 
@@ -104,11 +123,13 @@ def _decrypt_asset(storage_key, asset_id, entry):
         raise CryptoError("unauthenticated asset entry")
     aad = canonical({"asset": asset_id})
     try:
-        plaintext = AESGCM(storage_key).decrypt(
-            unb64(entry["nonce"], 12),
-            unb64(entry["ciphertext"]) + unb64(entry["tag"], 16),
-            aad,
-        )
+        nonce = unb64(entry["nonce"], 12)
+        ciphertext = unb64(entry["ciphertext"])
+        tag = unb64(entry["tag"], 16)
+        if AESGCM is None:
+            plaintext = aead.decrypt(storage_key, nonce, aad, ciphertext, tag)
+        else:
+            plaintext = AESGCM(storage_key).decrypt(nonce, ciphertext + tag, aad)
     except Exception as exc:
         raise CryptoError("AEAD authentication failed") from exc
     return plaintext.decode("utf-8")
@@ -221,22 +242,56 @@ def _lookup_read_decision(audit_log, request_id):
     return None
 
 
+def _authenticated_actor(request, op):
+    """Resolve the caller from the pinned issuer, or from the explicitly trusted harness."""
+    public_key = os.environ.get("TRACK4_ISSUER_PUBLIC_KEY_B64")
+    if public_key is None and os.environ.get("TRACK4_TRUSTED_HARNESS") == "1":
+        return request.get("actor")
+
+    authorization = request.get("authorization")
+    if not public_key or not isinstance(authorization, str) or not authorization.startswith("Bearer "):
+        raise CryptoError("caller authentication required")
+    from src.identity_keys.clock import SystemClock
+    from src.identity_keys.errors import NotAuthorized
+    from src.identity_keys.tokens import verify_bearer_token
+
+    token = authorization[len("Bearer "):]
+    if not token or len(token) > 4096:
+        raise CryptoError("invalid caller credential")
+    try:
+        actor = verify_bearer_token(unb64(public_key, 32), SystemClock(), token).user_id
+    except NotAuthorized as exc:
+        raise CryptoError("invalid caller credential") from exc
+    if op in {"setup", "revoke", "audit"}:
+        admins = {item.strip() for item in os.environ.get("TRACK4_ADMIN_SUBJECTS", "").split(",")}
+        if not actor or actor not in admins:
+            raise CryptoError("adapter administrator required")
+    elif "actor" in request and request["actor"] != actor:
+        raise CryptoError("request actor does not match caller")
+    return actor
+
+
 def dispatch(request):
     if not isinstance(request, dict):
         raise ValueError("request must be object")
+    op = request.get("op")
+    if not isinstance(op, str) or op not in {"setup", "revoke", "audit", "read", "protected_read"}:
+        raise ValueError("unsupported operation")
+    try:
+        authenticated_actor = _authenticated_actor(request, op)
+    except (CryptoError, ImportError):
+        return {"decision": "deny"}
     root = state_dir()
     with (root / "lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         path = root / "state.json"
         state = load(path)
-        op = request.get("op")
         anchor = None if op == "setup" else _load_audit_anchor(root)
         if not verify_chain(state.get("audit_log", []), anchor=anchor):
             raise CryptoError("audit chain verification failed")
         # The judged adapter keeps enrollment and prekey state in the same deterministic directory.
         registry = TrustRegistry(root / "trust_registry.json")
         prekeys = PrekeyStore(root / "prekeys.json", registry=registry)
-        op = request.get("op")
         if op == "setup":
             owners, contents, disabled = request.get("owners"), request.get("contents"), request.get("disabled")
             if not isinstance(owners, dict) or not isinstance(contents, dict) or not isinstance(disabled, list):
@@ -286,7 +341,7 @@ def dispatch(request):
             save(path, state)
             return {"request_id": request_id, "decision": decision}
         if op in ("read", "protected_read"):
-            actor, asset = request.get("actor"), request.get("asset")
+            actor, asset = authenticated_actor, request.get("asset")
             if not isinstance(actor, str) or not isinstance(asset, str):
                 raise ValueError("invalid identity")
             allowed = state["owners"].get(asset) == actor and actor not in state["disabled"] and asset in state["contents"]
@@ -320,6 +375,7 @@ def dispatch(request):
             if not allowed or not valid_challenge or replay:
                 _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny", threat=tz_threat)
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 return {"decision": "deny"}
             try:
                 storage_key = _load_storage_key(root)
@@ -328,10 +384,12 @@ def dispatch(request):
             except (CryptoError, KeyError, UnicodeError):
                 _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "deny")
                 save(path, state)
+                _save_audit_anchor(root, state["audit_log"])
                 return {"decision": "deny"}
             used[challenge_hash] = now + 3600
             _append_audit(state, "protected_read", actor, asset, request.get("request_id"), "allow")
             save(path, state)
+            _save_audit_anchor(root, state["audit_log"])
             return result
         raise ValueError("unsupported operation")
 

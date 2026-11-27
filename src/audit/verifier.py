@@ -48,9 +48,12 @@ class VerificationResult:
     first_error: Optional[str] = None
     corrupted_sequence: Optional[int] = None
     details: List[str] = dataclasses.field(default_factory=list)
+    verified_anchor: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return dataclasses.asdict(self)
+        result = dataclasses.asdict(self)
+        result.pop("verified_anchor")
+        return result
 
 
 class AuditLogVerifier:
@@ -314,6 +317,12 @@ class AuditLogVerifier:
             first_error=None,
             corrupted_sequence=None,
             details=details,
+            verified_anchor={
+                "total_records": total_records,
+                "genesis_hash": genesis_entry_hash or GENESIS_HASH,
+                "last_seq": expected_seq - 1,
+                "last_hash": expected_prev_hash,
+            },
         )
 
 
@@ -389,10 +398,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--checkpoints", action="store_true", help="verify checkpoint signatures")
     parser.add_argument("--public-key", default=None, help="base64 ML-DSA-65 public key")
     parser.add_argument("--public-key-file", default=None, help="file containing the public key")
+    parser.add_argument("--print-anchor", action="store_true", help="print the verified log head as JSON")
+    parser.add_argument("--anchor-file", default=None, help="independently stored audit anchor JSON")
     parser.add_argument("--self-test", action="store_true", help="run a signed-log self-test")
     args = parser.parse_args(argv)
 
     if args.log_file is None:
+        if args.anchor_file or args.print_anchor:
+            parser.error("anchor options require a log path")
         # No log path: `--chain --checkpoints` is the documented operator
         # contract probe, so run the built-in signed-log self-test instead of
         # silently succeeding on nothing.
@@ -408,8 +421,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     verifier = AuditLogVerifier(public_key=public_key, require_signatures=True)
-    result = verifier.verify_file(args.log_file)
+    try:
+        result = verifier.verify_file(args.log_file, anchor_path=args.anchor_file)
+    except (OSError, ValueError, TypeError) as exc:
+        print(f"❌ Audit verification failed: {exc}")
+        return 2
     if result.is_valid:
+        if args.print_anchor:
+            if not result.verified_checkpoints:
+                print("❌ No signed checkpoint to anchor", file=sys.stderr)
+                return 2
+            print(json.dumps(result.verified_anchor, sort_keys=True))
+            return 0
         print(
             f"✅ LOG INTEGRITY VERIFIED: {result.total_records} records, "
             f"{result.verified_checkpoints} checkpoints."

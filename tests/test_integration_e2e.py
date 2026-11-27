@@ -1,6 +1,7 @@
 """HTTP tests of the demo node's recipient-specific protected transport."""
 
 import json
+import os
 import secrets
 import sqlite3
 import tempfile
@@ -25,6 +26,7 @@ class TestIntegrationE2E(unittest.TestCase):
         self.state = Path(state.name)
         self.peer_token = secrets.token_urlsafe(32)
         self.operator_token = secrets.token_urlsafe(32)
+        self.enterContext(patch.dict(os.environ, {"DEMO_SANDBOX_ENABLED": "1"}))
         self.sync_token = secrets.token_urlsafe(32)
         nodes = ("node-a", "node-b", "node-c")
         self.recipient_tokens = {node: secrets.token_urlsafe(32) for node in nodes}
@@ -60,6 +62,7 @@ class TestIntegrationE2E(unittest.TestCase):
     def send(self, sender, recipient, payload):
         response = sender.post(
             "/send",
+            headers=self.bearer(self.operator_token),
             json={"target_node_url": f"http://{recipient}", "recipient_id": recipient, "payload": payload},
         )
         self.assertEqual(response.status_code, 200, response.text)
@@ -122,7 +125,7 @@ class TestIntegrationE2E(unittest.TestCase):
     def test_protected_transfer_for_multiple_recipients(self):
         payload = {"memo": "PQC protected transfer"}
         request = {"target_node_url": "http://node-b", "recipient_id": "node-b", "payload": payload}
-        self.assertEqual(self.client_a.post("/send", json=request).status_code, 403)
+        self.assertEqual(self.client_a.post("/send", json=request, headers=self.bearer(self.operator_token)).status_code, 403)
 
         self.enroll_peer(self.client_a, self.client_b.get("/keys/public").json())
         first = self.send(self.client_a, "node-b", payload)
@@ -200,6 +203,36 @@ class TestIntegrationE2E(unittest.TestCase):
         new_message = self.send(self.client_a, "node-b", {"message": "replacement key"})
         self.assert_delivered(self.client_b, new_message, {"message": "replacement key"})
 
+    def test_peer_revocation_blocks_new_sends_after_restart(self):
+        old = self.client_b.get("/keys/public").json()
+        self.enroll_peer(self.client_a, old)
+        event = {
+            "key_id": old["kem_key_id"],
+            "target_node_id": "node-b",
+            "revocation_id": "test-revocation",
+        }
+        for _ in range(2):
+            response = self.client_a.post(
+                "/internal/keys/revoke", json=event, headers=self.bearer(self.sync_token),
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["revocation_id"], event["revocation_id"])
+
+        restarted = self.create_node("node-a")
+        self.enroll_peer(restarted, old)
+        blocked = restarted.post(
+            "/send", json={"recipient_id": "node-b", "payload": {}},
+            headers=self.bearer(self.operator_token),
+        )
+        self.assertEqual(blocked.status_code, 409)
+        self.assertEqual(blocked.json()["detail"], "Peer recipient key is revoked")
+
+        rotated = self.client_b.post("/keys/rotate", headers=self.bearer(self.operator_token))
+        self.assertEqual(rotated.status_code, 200, rotated.text)
+        self.connect(restarted, self.client_b)
+        payload = {"message": "replacement key"}
+        self.assert_delivered(self.client_b, self.send(restarted, "node-b", payload), payload)
+
     def test_key_administration_requires_its_own_credential_and_records_operator(self):
         client = self.client_a
         key_id = client.get("/health").json()["active_key_id"]
@@ -225,8 +258,8 @@ class TestIntegrationE2E(unittest.TestCase):
         for _ in range(2):
             self.assertEqual(client.post("/keys/rotate").status_code, 401)
 
-        dashboard = client.get("/api/sandbox/state").json()
-        cli_metrics = client.get("/metrics").json()
+        dashboard = client.get("/api/sandbox/state", headers=self.bearer(self.operator_token)).json()
+        cli_metrics = client.get("/metrics", headers=self.bearer(self.operator_token)).json()
         denials = {
             record["event_id"]: record for record in dashboard["audit"]["recent_entries"]
             if record["action"] == "OPERATOR_AUTH_DENIED"
@@ -263,12 +296,15 @@ class TestIntegrationE2E(unittest.TestCase):
 
         for action, expected_validity in (("tamper", False), ("restore", True), ("verify", True)):
             with self.subTest(action=action):
-                response = client.post("/api/sandbox/audit/tamper", json={"action": action})
+                response = client.post(
+                    "/api/sandbox/audit/tamper", json={"action": action},
+                    headers=self.bearer(self.operator_token),
+                )
                 self.assertEqual(response.status_code, 200)
                 self.assertIs(response.json()["verification"]["is_valid"], expected_validity)
                 self.assertEqual(log_path.read_bytes(), original_log)
 
-        self.assertEqual(client.get("/logs/verify").status_code, 200)
+        self.assertEqual(client.get("/logs/verify", headers=self.bearer(self.operator_token)).status_code, 200)
 
     def test_receipt_is_public_and_inbox_requires_the_intended_recipients_credential(self):
         self.connect(self.client_a, self.client_b)

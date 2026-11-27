@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "track4-hardening"]
   pull_request:
     branches: ["main"]
 
@@ -10,8 +10,8 @@ jobs:
   test-and-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: Install dependencies
@@ -36,7 +36,7 @@ jobs:
   container-acceptance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build runtime image
         run: docker build -t trust-but-verify-ci .
       - name: Run lifecycle acceptance and cluster integration tests

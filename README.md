@@ -1,10 +1,18 @@
 # Trust-But-Verify
 
-**Judge entry point:** `python3 track4_service.py` reads one JSON request from stdin and writes one JSON response. It runs locally with the Python dependencies below. The HTTP cluster and hosted dashboard are optional demonstrations.
+**Judge entry point:** `python3 track4_service.py` reads one JSON request from stdin and writes one JSON response. See [caller authentication](#protected-read-caller-authentication) for its operating modes.
 
-Post-quantum protected messaging, key lifecycle management, tamper-evident audit logging and explainable lateral-movement detection for multi-node services. Built for Track 4, "Trust, but verify".
+Trust-But-Verify protects service-to-service messages with hybrid post-quantum cryptography and verifies that revoked devices lose access while authorized traffic keeps flowing.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[Watch the 53-second walkthrough](docs/demo-walkthrough.mp4) · [Live results](reports/demo_run.md) · [Project brief](docs/project_brief.pdf)
+
+[![Verified demo output showing device revocation and recovery after a missed revocation](docs/live-assessment.png)](docs/demo-walkthrough.mp4)
+
+- **Device revocation:** An enrolled device delivers, its next send returns `DEVICE_REVOKED` after revocation, and a second device still delivers.
+- **Reconnect recovery:** A restarted sender learns the revocation it missed, blocks the old key, and seals with the replacement key.
+- **Run it locally:** Install the [pinned dependencies](#setup-clean-machine), then run `make demo` for the live flow and all 12 Track 4 checks.
+
+The submission entry points are [the organizer adapter](track4_service.py), [the HTTP demo](scripts/run_demo.sh), and [the test suite](tests/). See the [implementation inventory](docs/DUPLICATES.md) for earlier standalone components.
 
 ## What it does
 
@@ -61,7 +69,7 @@ flowchart TD
 
 ## Setup (clean machine)
 
-Requirements: Linux or macOS (POSIX file locking is required), and Python 3.11–3.14. Docker is optional and only needed for `make up`.
+Requirements: Linux or macOS and Python 3.11–3.14. The cluster uses the pinned Python crypto libraries. Node.js is needed for the offline adapter fallback and its tests. Docker is used for `make up`.
 
 ```bash
 python3 -m venv .venv
@@ -70,7 +78,15 @@ pip install -r requirements.txt
 
 # Full test suite
 python3 -m pytest tests/ -v
+make demo
 ```
+
+Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18
+and Node.js 26.13.1. The full suite passed 262 tests, and the local HTTP demo
+passed all 12 checklist objectives. The demo uses localhost ports 8001–8003
+and 8005. The remaining Python 3.11 test warning comes from Starlette's
+deprecated AnyIO `BlockingPortal` alias. On Python 3.15, FastAPI and Starlette
+also warn about their use of `asyncio.iscoroutinefunction`.
 
 Make shortcuts: `make setup` (pip install), `make test`, `make chaos`, `make bench`, `make demo`, `make up` / `make down` (Docker sandbox), `make clean`.
 
@@ -78,7 +94,26 @@ Dependencies and licences are pinned in [`requirements.txt`](requirements.txt): 
 
 The optional `track4/v2-paranoid` suite requires the SLH-DSA binding in `pqcrypto==1.0.0`. Use that version in a separate environment when testing the optional suite.
 
+## Offline adapter
+
+`track4_service.py` uses `cryptography` for state-at-rest HKDF-SHA256 and
+AES-256-GCM when it can import it. Without that package, it uses the existing
+Node.js worker for both operations and keeps the same serialized state format.
+ML-KEM remains in `pqcrypto`. The web stack still uses its pinned dependencies.
+Allowed and denied protected reads append audit events and update the local
+audit anchor.
+
+### Protected read caller authentication
+
+Configure `TRACK4_ISSUER_PUBLIC_KEY_B64` with the trusted identity issuer's raw 32-byte Ed25519 public key, base64-encoded. Keep the signing key at the issuer. Pass the issuer's signed access token in the JSON field `authorization` as `Bearer <token>`. The adapter checks the signature and token validity before reading state. The verified `user_id` determines ownership. If a read also supplies `actor`, it must match that subject. Configure `TRACK4_ADMIN_SUBJECTS` as a comma-separated list of issuer subject IDs allowed to run `setup`, `revoke`, and `audit`. During setup, asset owners must use the issuer's subject IDs.
+
+The adapter is a stdin CLI. If you expose it through an HTTP service, use TLS at the HTTP boundary and keep its process environment under operator control. For the original offline organizer protocol, set `TRACK4_TRUSTED_HARNESS=1` only in a controlled harness that already verifies caller identity. That setting has no effect when an issuer key is configured. With neither setting, the adapter denies requests. Signed credentials establish the caller as of issuance, and the adapter applies its local subject revocation list on each read.
+
 ## Optional cluster demo
+
+Use `DEMO_GRACE_SECONDS=30 make demo` to exercise a longer cutoff window. The default is two seconds for stage use. Both runs check acceptance and rejection around the cutoff. They run on one host and exercise individual deliveries.
+
+If a live run is unavailable during judging, run `make demo-recorded` to show the saved evidence or use the [recorded walkthrough](docs/demo-walkthrough.mp4) and [recorded observations](reports/demo_run.md).
 
 ```bash
 ./scripts/run_demo.sh          # boots 3 local nodes and walks through the checklist
@@ -90,68 +125,55 @@ python -m src.cli verify-logs
 python -m src.cli doc-check
 ```
 
-Operator CLI (run while nodes are up):
+### Demo access
 
-```bash
-python3 -m demo.node.operator_cli status
-python3 -m demo.node.operator_cli rotate --identity node-a
-python3 -m demo.node.operator_cli revoke --identity node-a --key-id <KEY_ID> --reason "compromised"
-python3 -m demo.node.operator_cli verify-logs
-python3 -m demo.node.operator_cli alerts
-```
+The interactive HTTP API is mounted only with `DEMO_SANDBOX_ENABLED=1`.
+`make demo`, the Compose demo services, Render, and Vercel enable it for their
+demo processes. For manually launched instances, set the flag and provision
+`DEMO_OPERATOR_TOKEN` with a fresh random value. Set the operator token through
+the Vercel project environment; Render generates one for new deployments.
+Enter the operator token in the web UI; the page keeps it in memory and the
+server never embeds it. The CLI reads the same token from its environment.
 
-`make demo` generates fresh credentials and binds its services to loopback. When running demo nodes separately, configure distinct random bearer tokens for each purpose:
+| Route | Access decision |
+| --- | --- |
+| `/api/sandbox/*` | Feature flag and operator bearer required. Actions and state can reveal or change sandbox evidence. |
+| `POST /enroll`, `POST /send` | Operator bearer required to enroll an identity or make the node send. |
+| `POST /peers` | Dedicated peer-enrollment bearer required to change trusted public-key bindings. |
+| `POST /internal/keys/revoke` | Dedicated revocation-sync bearer required for inter-node updates. |
+| `GET /logs/verify`, `GET /metrics`, `GET /api/info` | Operator bearer required because they expose audit, detector, or deployment details. The JSON variant of `/` uses the same scope. |
+| `POST /receive`, `GET /inbox/{receipt_id}` | Receive checks the enrolled peer's signature and recipient binding; inbox reads require the recipient bearer. |
+| `GET /` (HTML), `/health`, `/keys/public` | Public UI shell, health probe, and public key discovery. Public keys must still be enrolled through the authenticated peer route. |
+| `POST /internal/test/arm-crash` | Identity API requires sandbox mode and a valid actor bearer. |
 
-- `DEMO_OPERATOR_TOKEN` authorizes key rotation and revocation. Set the same token in the CLI's environment when targeting that node. Successful actions are logged as `demo-operator`.
-- `DEMO_PEER_ENROLL_TOKEN` authorizes registration of a trusted `GET /keys/public` bundle with `POST /peers`. Refresh the bundle after recipient key rotation.
-- `DEMO_RECIPIENT_TOKEN` authorizes reads from that node's `GET /inbox/{receipt_id}`. Use a different recipient token for each node. `POST /receive` verifies and accepts a signed envelope and returns an opaque receipt, which grants no read access by itself.
-- `DEMO_REVOCATION_SYNC_TOKEN` authorizes only peer revocation updates. Configure it across the trusted nodes when enabling `PEER_NODES`. Use a protected transport for bearer credentials outside loopback.
+5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
 
-Keep each node's `DATA_DIR` across restarts. The inbox stores encrypted envelopes and the replay record in one SQLite transaction. A receipt stays readable while its recipient key is active or in grace. Expired and revoked keys make the associated contents unavailable. After restart, re-enroll the sending peer before accepting new messages.
-
-5-minute demo video: **TODO: paste the public link here and in `docs/project_brief.pdf`.**
-
-## Checklist coverage
-
-| Track 4 objective | Code | Tests |
-| :-- | :-- | :-- |
-| Key rotation | `src/identity_keys/rotation.py` | `tests/test_part2_rotation.py`, `tests/test_rotation_signed_cutoff.py` |
-| Revocation across nodes, re-enrolment | `src/identity_keys/revocation.py`, `reenroll.py` | `tests/test_part3_revocation_reenroll.py`, `tests/test_revocation_heartbeat.py` |
-| Crash recovery | `src/identity_keys/rotation.py` | `tests/test_rotation_durability.py`, `tests/test_lifecycle_chaos.py` |
-| Backup integrity | `src/identity_keys/backup.py` | `tests/test_part4_backup.py`, `tests/test_backup_pq_signatures.py` |
-| Log integrity | `src/audit/` | `tests/test_log_injection.py`, `tests/test_audit_cli_verification.py` |
-| Routine vs suspicious activity | `src/detector/rules.py` | `tests/test_detector_eval.py`, `tests/test_forgery_and_inedge_detection.py` |
-| Lateral movement | `src/detector/graph_lateral.py` | `tests/test_detector_lateral_velocity.py` |
-| Clock differences | `src/detector/clock_sync.py` | `tests/test_detector_clock_watermark.py` |
-| Replay and recipient binding | `src/crypto/envelope.py`, `replay_cache.py` | `tests/test_replay_binding.py` |
-| Forward secrecy | `src/crypto/handshake.py` | `tests/test_forward_secrecy.py` |
-| Delivery under loss or reordering | `src/crypto/delivery.py` | `tests/test_delivery.py`, `tests/test_delivery_hardening.py` |
-| Session resumption | `src/crypto/resumption.py` | `tests/test_resumption.py`, `tests/test_resumption_pq_signatures.py` |
-
-## Documented parameters
-
-**Key rotation grace period.** A grace period applies. It is set per rotation with `grace_seconds` (default 30 s in `src/identity_keys/api.py`). During the grace window the retiring key is still accepted; once `grace_until` passes it is rejected. `grace_seconds = 0` means an immediate cutoff with no grace. See [`docs/KEY_LIFECYCLE.md`](docs/KEY_LIFECYCLE.md) for the state machine.
-
-**Clock differences.** `ClockSyncBuffer` (`src/detector/clock_sync.py`) accepts up to ±2000 ms of skew by default (`max_skew_ms`). Events beyond that, and events whose order cannot be established, are flagged `order_uncertain` rather than dropped. The skew thresholds are constructor parameters.
-
-**Delivery and replay.** Incomplete chunked messages are discarded after `DEFAULT_DELIVERY_TIMEOUT_SECONDS = 30.0` and logged as `delivery_failed_incomplete`. The replay cache keeps a sliding window of 256 counters per (sender, recipient, session).
-
-**State on disk.** The adapter stores state under `$TRACK4_STATE_DIR/track4-local` when configured and uses a per-user directory in the system temp directory otherwise. Use a private durable directory when retaining revocations and audit decisions matters. The storage key and encrypted resource contents share that directory. Locking uses `fcntl` and applies on a single host.
+See [demo operations and implementation coverage](docs/DEMO_OPERATIONS.md) for the acceptance checklist, credentials, operator commands, and runtime parameters.
 
 ## Detection results
 
-`tests/test_detector_eval.py` interleaves approved and expired maintenance, copied tickets, ordinary denials, message replay, and repeated sensitive reads on the same routes. It checks the precise rule fired for each event and checks the events that should stay quiet. The trace is synthetic. Field precision, recall and end-to-end alert latency remain unmeasured.
+[Measured judge evidence](reports/JUDGE_EVIDENCE.md) includes per-node HTTP revocation observations and local HTTP request-to-alert latency. The labelled fixtures and mixed operational trace exercise synthetic scenarios. Field precision and recall remain unmeasured.
 
 ## Performance
 
 `make bench` measures cryptographic operation latency and the protected HTTP workflow from send through durable receipt to authenticated inbox read. It also reports detector throughput and Python allocation overhead.
 
-On macOS arm64 with Python 3.15.2 and the pinned dependencies, reusing the envelope schema validator lowered the median HTTP delivery time from **8.24 ms to 5.52 ms** and increased serial throughput from **111.6 to 159.7 deliveries/s**. These are medians from three local in-process runs per configuration, each with 30 warmup messages and 300 measured deliveries. The standalone crypto-only benchmark measured **3.49 ms p50** across 500 envelopes.
+On macOS arm64 with Python 3.15.2, three local in-process HTTP runs with 30 warmup messages and 300 measured deliveries each gave a median-of-runs **6.30 ms p50** and **142.5 serial deliveries/s**. Each delivery includes sealing, receipt persistence, and authenticated inbox read. The separate crypto-only sign/encrypt and verify/decrypt round trip measured **3.52 ms p50** and **283.8 envelopes/s** across 500 envelopes.
 
 Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations per scenario. It records the time from commit until the last of three nodes explicitly denies the device and until the last node reports a converged sync watermark. The [revocation report](reports/revocation_latency.md) includes the results and the limits of the single-host SQLite setup.
 
+## Submission brief
+
+Install the optional [submission tools](requirements-submission.txt) with
+`pip install -r requirements-submission.txt`. Set `VIDEO_URL` at the top of
+[the brief source](docs/project_brief.md), then run
+`python -m scripts.build_submission_brief` to update both the PDF and this
+README's video line. Run `make check` to validate the PDF and README links.
+External link validation uses the network.
+
 ## Documentation
 
+- Implementation inventory: [`docs/DUPLICATES.md`](docs/DUPLICATES.md)
 - Threat model: [`docs/threat_model.md`](docs/threat_model.md), [`threat-model.json`](threat-model.json)
 - Project brief: [`docs/project_brief.pdf`](docs/project_brief.pdf)
 - Key lifecycle: [`docs/KEY_LIFECYCLE.md`](docs/KEY_LIFECYCLE.md); backup trust model: [`docs/BACKUP_TRUST_MODEL.md`](docs/BACKUP_TRUST_MODEL.md)
@@ -165,6 +187,6 @@ Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations
 - **Denial of service.** Volumetric DoS is out of scope.
 - **Python memory.** `bytes` objects are immutable, so zeroisation in `src/crypto/handshake.py` is best-effort.
 - **Resumption.** `PersistentResumptionStore` is single-node SQLite; tickets are not replicated across nodes.
-- **Audit chain.** Verification detects edits when checked against a trusted head, but an attacker who can replace the whole state file and chain can forge a new chain.
+- **Audit chain.** To check for truncation or replacement, export a verified head with `python verify_log.py --log audit.log --public-key-file checkpoint_pub.b64 --print-anchor > trusted-head.json`, retain that file independently of the log host, then verify against it with `python verify_log.py --log audit.log --public-key-file checkpoint_pub.b64 --anchor-file trusted-head.json`. The application does not publish anchors to an external service.
 - **Single host.** File locks are POSIX-only and not distributed.
 - **Detector.** Rules and the access graph are hand-written policies; they will miss attack patterns they do not describe.

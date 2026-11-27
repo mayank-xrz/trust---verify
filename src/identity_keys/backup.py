@@ -368,7 +368,6 @@ class BackupService:
             ciphertext = raw[env_start + env_len :]
             header = envelope["header"]
             manifest = envelope["manifest"]
-            sig_bytes = b64d(envelope["manifest_sig_b64"])
             nonce = b64d(envelope["nonce_b64"])
             if header.get("magic") != "TBVBKP1" or header.get("format_version") != 1:
                 raise DomainIntegrityError("Unsupported backup format", "STEP1_BAD_VERSION")
@@ -380,6 +379,13 @@ class BackupService:
             raise DomainIntegrityError("Malformed backup container", "STEP1_PARSE_ERROR") from exc
 
         # Step 2: Verify manifest signature using PINNED public key only
+        try:
+            sig_bytes = b64d(envelope.get("manifest_sig_b64") or "")
+        except (TypeError, ValueError):
+            sig_bytes = b""
+        if not sig_bytes:
+            self._audit_rejected(actor_ctx, manifest.get("backup_id", "unknown"), "STEP2_MISSING_SIGNATURE")
+            raise DomainIntegrityError("Manifest signature missing or malformed", "STEP2_MISSING_SIGNATURE")
         if not ml_dsa_verify(pinned_pubkey, canonical_json_bytes(manifest), sig_bytes):
             self._audit_rejected(
                 actor_ctx, manifest.get("backup_id", "unknown"), "STEP2_BAD_SIGNATURE"

@@ -1,10 +1,4 @@
 """Track 4 cryptographic building blocks. Protocol version 1 & v2-paranoid agility."""
-from .agility import (
-    SUITE_V1,
-    SUITE_V2_PARANOID,
-    DualIdentityKeypair,
-    ParanoidHandshakeSession,
-)
 from .policy import (
     DEFAULT_MEDIA_FORMATS,
     MAX_DEVICES_PER_USER,
@@ -19,7 +13,19 @@ from .policy import (
     normalize_timezone,
     validate_shared_file,
 )
-from .system import SecureCryptoSystem
+
+
+def __getattr__(name):
+    # The organizer adapter imports submodules without the full crypto system.
+    if name == "SecureCryptoSystem":
+        from .system import SecureCryptoSystem
+
+        return SecureCryptoSystem
+    if name in {"SUITE_V1", "SUITE_V2_PARANOID", "DualIdentityKeypair", "ParanoidHandshakeSession"}:
+        from . import agility
+
+        return getattr(agility, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "DualIdentityKeypair",
