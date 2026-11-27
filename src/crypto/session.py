@@ -26,6 +26,8 @@ from pathlib import Path
 from pqcrypto.kem import ml_kem_768
 from pqcrypto.sign import ml_dsa_65
 
+from src.common.fsutil import write_secret_atomic
+
 from . import aead, classical
 from .primitives import (
     SUITE,
@@ -48,23 +50,7 @@ MAX_SKIP = 1000
 
 
 def _atomic_write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd, temp = tempfile.mkstemp(prefix=f".{path.name}-", dir=path.parent)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, separators=(",", ":"), ensure_ascii=False)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temp, path)
-        dir_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
+    write_secret_atomic(path, json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
 
 
 def _check_protocol(value):

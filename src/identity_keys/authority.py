@@ -24,6 +24,7 @@ from typing import Optional
 
 from pqcrypto.sign import ml_dsa_65
 
+from src.common.fsutil import write_secret_atomic
 from src.crypto._pqcrypto_compat import sig_keygen, sig_sign, sig_verify
 
 
@@ -83,20 +84,11 @@ class KeyAuthority:
         public_key, secret_key = sig_keygen(ml_dsa_65)
         self._public_key = bytes(public_key)
         self._secret_key = bytes(secret_key)
-        self.key_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "public_key_b64": _b64e(self._public_key),
             "secret_key_b64": _b64e(self._secret_key),
         }
-        fd = os.open(self.key_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(payload, stream)
-                stream.flush()
-                os.fsync(stream.fileno())
-        finally:
-            if self.key_path.exists():
-                os.chmod(self.key_path, 0o600)
+        write_secret_atomic(self.key_path, json.dumps(payload).encode("utf-8"))
 
     @property
     def public_key(self) -> bytes:

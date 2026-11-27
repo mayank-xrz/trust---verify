@@ -15,6 +15,8 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.common.fsutil import write_secret_atomic
+
 from .audit_outbox import AuditEmitter
 from .clock import Clock
 from .crypto import (
@@ -104,25 +106,7 @@ def verify_cluster_sync(payload: dict[str, Any], signature_hex: str) -> bool:
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Durably write ``payload`` with fsync -> rename -> directory fsync ordering."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    data = canonical_json_bytes(payload)
-    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex}")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(data)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)
-        dir_fd = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
+    write_secret_atomic(path, canonical_json_bytes(payload))
 
 
 COMMITTED_ROTATION_STATES = {"COMMITTED", "NOTIFIED", "SYNCED"}
