@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_makefile_setup_creates_venv_and_targets_use_it() -> None:
@@ -18,12 +22,33 @@ def test_makefile_setup_creates_venv_and_targets_use_it() -> None:
     assert "$(PYTHON) -m pytest . -q" in makefile
 
 
-def test_demo_script_uses_project_interpreter_and_fails_closed() -> None:
-    script = Path("scripts/run_demo.sh").read_text(encoding="utf-8")
-    assert 'PYTHON="${PYTHON:-$REPO_ROOT/.venv/bin/python}"' in script
-    assert 'if [ ! -x "$PYTHON" ]' in script
-    assert "Run 'make setup' first" in script
-    assert "python3 -m" not in script
+@pytest.mark.parametrize("use_path", [True, False])
+def test_demo_script_runs_selected_interpreter(tmp_path, use_path: bool) -> None:
+    interpreter = tmp_path / "test-python"
+    interpreter.write_text("#!/bin/sh\nprintf 'selected interpreter\\n' >&2\nexit 73\n")
+    interpreter.chmod(0o755)
+    result = subprocess.run(
+        ["bash", "scripts/run_demo.sh"],
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}",
+             "PYTHON": interpreter.name if use_path else str(interpreter)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 73
+    assert "selected interpreter" in result.stderr
+
+
+def test_demo_script_fails_closed_without_interpreter(tmp_path) -> None:
+    interpreter = tmp_path / "missing-python"
+    result = subprocess.run(
+        ["bash", "scripts/run_demo.sh"],
+        env={**os.environ, "PYTHON": str(interpreter)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 1
+    assert f"Python interpreter '{interpreter}' not found" in result.stderr
+    assert "Run 'make setup' first" in result.stderr
 
 
 def test_readme_documents_python_311_and_venv_path() -> None:
