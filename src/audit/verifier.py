@@ -21,23 +21,21 @@ from typing import Any, Dict, List, Optional
 
 from pqcrypto.sign import ml_dsa_65
 
+from src.crypto._pqcrypto_compat import sig_keygen, sig_sign, sig_verify
+
 from .logger import GENESIS_HASH, AuditLogger
 
 
 def _sig_keygen():
-    return ml_dsa_65.keygen()
+    return sig_keygen(ml_dsa_65)
 
 
 def _sig_sign(secret_key: bytes, message: bytes) -> bytes:
-    return ml_dsa_65.sign(secret_key, message)
+    return sig_sign(ml_dsa_65, secret_key, message)
 
 
 def _sig_verify(public_key: bytes, message: bytes, signature: bytes) -> bool:
-    try:
-        result = ml_dsa_65.verify(public_key, message, signature)
-    except Exception:
-        return False
-    return result is not False
+    return sig_verify(ml_dsa_65, public_key, message, signature)
 
 
 @dataclasses.dataclass

@@ -15,6 +15,7 @@ from pqcrypto.sign import ml_dsa_65
 
 from src.audit.logger import AuditLogger
 from src.audit.verifier import AuditLogVerifier, run_self_test
+from src.crypto._pqcrypto_compat import sig_keygen
 from src.crypto.delivery import ChunkReceiver, chunk_and_seal
 from src.crypto.envelope import (
     AEADFailedError,
@@ -36,7 +37,7 @@ def cmd_demo_replay() -> int:
         tmp_path = Path(tmp)
         logger = AuditLogger("node-bob", str(tmp_path / "audit.log"))
         cache = PersistentReplayCache(tmp_path / "replay.db")
-        alice_pk, alice_sk = ml_dsa_65.keygen()
+        alice_pk, alice_sk = sig_keygen(ml_dsa_65)
         key = b"K" * 32
 
         env = seal_envelope(
@@ -103,8 +104,8 @@ def cmd_demo_replay() -> int:
 
 
 def cmd_demo_forward_secrecy() -> int:
-    alice_pk, alice_sk = ml_dsa_65.keygen()
-    bob_pk, bob_sk = ml_dsa_65.keygen()
+    alice_pk, alice_sk = sig_keygen(ml_dsa_65)
+    bob_pk, bob_sk = sig_keygen(ml_dsa_65)
 
     bob_hs = EphemeralHandshakeSession("bob", "dev-b", bob_sk)
     alice_hs = EphemeralHandshakeSession("alice", "dev-a", alice_sk)
@@ -155,7 +156,7 @@ def cmd_demo_chunked_loss() -> int:
         tmp_path = Path(tmp)
         logger = AuditLogger("node-bob", str(tmp_path / "audit.log"))
         cache = PersistentReplayCache(tmp_path / "replay.db")
-        alice_pk, alice_sk = ml_dsa_65.keygen()
+        alice_pk, alice_sk = sig_keygen(ml_dsa_65)
         key = b"M" * 32
 
         now = [100.0]
