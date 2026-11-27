@@ -17,6 +17,11 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 export DEMO_SANDBOX_ENABLED=1
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+export DEMO_GRACE_SECONDS="${DEMO_GRACE_SECONDS:-2}"
+if [[ ! "$DEMO_GRACE_SECONDS" =~ ^([2-9]|[1-9][0-9]|[12][0-9][0-9]|300)$ ]]; then
+    echo "DEMO_GRACE_SECONDS must be an integer from 2 through 300." >&2
+    exit 2
+fi
 for credential in DEMO_PEER_ENROLL_TOKEN DEMO_OPERATOR_TOKEN DEMO_REVOCATION_SYNC_TOKEN DEMO_RECIPIENT_TOKEN_a DEMO_RECIPIENT_TOKEN_b DEMO_RECIPIENT_TOKEN_c; do
     value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
     export "$credential=$value"
@@ -61,7 +66,7 @@ for spec in "node-a:8001" "node-b:8002" "node-c:8003" "detector:8005"; do
     if [[ "$nid" == node-b ]]; then
         peers="http://127.0.0.1:8001,http://127.0.0.1:8003"
     fi
-    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="2.0" PEER_NODES="$peers" \
+    DEMO_BIND_HOST=127.0.0.1 NODE_ID="$nid" PORT="$port" DATA_DIR="$TEMP_DATA_DIR/$nid" GRACE_PERIOD_SECONDS="$DEMO_GRACE_SECONDS" PEER_NODES="$peers" \
         DEMO_RECIPIENT_TOKEN="${!recipient_credential:-}" \
         python3 -m demo.node.server "$nid" "$port" > "$TEMP_DATA_DIR/${nid}.log" 2>&1 &
     pid=$!
@@ -162,14 +167,15 @@ grace_payload = {"message": "In flight before rotation"}
 grace = send("node-b", grace_payload)
 late = send("node-b", {"message": "First delivery after cutoff"})
 call("node-b", "/keys/rotate", {}, OPERATOR)
+cutoff_check = time.monotonic() + int(os.environ["DEMO_GRACE_SECONDS"])
 expect_delivery("node-b", grace, grace_payload)
 bundle = enroll("node-a", "node-b")
 assert bundle["kem_key_id"] != grace["key_id"]
 current = {"message": "Delivered with the new key"}
 expect_delivery("node-b", send("node-b", current), current)
-time.sleep(2.2)
+time.sleep(max(0, cutoff_check - time.monotonic()))
 expect_denial("node-b", late, "Recipient key is expired")
-print("  Old key accepted in grace and expired on cutoff. New key delivered during grace.")
+print(f"  Old key accepted during {os.environ['DEMO_GRACE_SECONDS']} s grace and rejected after cutoff. New key delivered during grace.")
 
 print("\n▶ STEP 4: Verify receiver denial, durable peer application, and unaffected traffic")
 enroll("node-c", "node-b")

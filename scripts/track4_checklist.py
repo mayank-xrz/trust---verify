@@ -67,7 +67,7 @@ def crypto(command, checks, evidence):
 def main():
     cases = [
         ("Key rotation", lambda: test_evidence(
-            "three-node cutoff checks passed; live walkthrough configured with 2-second grace",
+            "three-node authorization checks passed during grace and after cutoff",
             f"{BRIEF}::test_02_authorized_access_during_rotation",
             f"{BRIEF}::test_03_old_key_acceptance_within_grace_period",
             f"{BRIEF}::test_04_old_key_rejection_on_every_node_after_cutoff",

@@ -21,3 +21,7 @@ The expanded `make demo` starts an identity authority and a separate sender and 
 The walkthrough video shows both extended checks. Rerun them with `python -m scripts.demo_device_security`.
 
 [Walkthrough video](../docs/demo-walkthrough.mp4)
+
+## Longer rotation window
+
+`DEMO_GRACE_SECONDS=30 make demo` passed the in-grace and post-cutoff checks and all 12 acceptance checks in a separate localhost run. It exercised individual protected deliveries. It did not measure sustained traffic or multi-host behavior.
