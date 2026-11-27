@@ -2,12 +2,16 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "krishna"]
   pull_request:
-    branches: ["main"]
+    branches: ["main", "krishna"]
+
+permissions:
+  contents: read
 
 jobs:
   test-and-lint:
+    name: Lint, Unit Tests & CLI Verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,7 +24,59 @@ jobs:
           pip install -r requirements.txt ruff==0.8.0
       - name: Lint with ruff
         run: ruff check src tests track4_service.py
-      - name: Run pytest
+      - name: Run full test suite
         run: pytest -q
       - name: Run doc-check
         run: python -m src.cli doc-check
+      - name: Verify audit log CLI self-test
+        run: python verify_log.py --chain --checkpoints --self-test
+      - name: Run CLI crypto acceptance demos
+        run: |
+          python -m src.cli demo-replay
+          python -m src.cli demo-forward-secrecy
+          python -m src.cli demo-chunked-loss
+          python -m src.cli demo-resumption-binding
+
+  redteam-and-chaos:
+    name: Red-Team, Hardening & Crash-Recovery Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run red-team, hardening, and chaos gates
+        run: |
+          pytest -q \
+            tests/test_judge_redteam.py \
+            tests/test_lifecycle_chaos.py \
+            tests/test_security_hardening.py \
+            tests/test_security_regression.py \
+            tests/test_no_hardcoded_secrets.py \
+            tests/test_pqc_hardening.py \
+            tests/integration/test_brief_scenarios.py
+      - name: Run detector evaluation gate
+        run: python -m scripts.evaluate_detector
+
+  docker:
+    name: Docker Build & Read-Only Runtime Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        run: docker build -t trust-verify:ci .
+      - name: Run pytest inside container
+        run: docker run --rm --entrypoint python trust-verify:ci -m pytest -q
+      - name: Verify track4_service.py under read-only rootfs
+        run: |
+          printf '%s' '{"op":"setup","owners":{"brief":"alice"},"contents":{"brief":"ro body"},"disabled":[],"key_material":"CI-CANARY"}' \
+            | docker run --rm -i --read-only --tmpfs /tmp -e TRACK4_STATE_DIR=/tmp/state --entrypoint python trust-verify:ci /app/track4_service.py
+      - name: Confirm no key material or .env in image
+        run: |
+          docker run --rm --entrypoint sh trust-verify:ci -c \
+            'test -z "$(find /app -name "*.key" -o -name "*.pem" -o -name ".env")"'
