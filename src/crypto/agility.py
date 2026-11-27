@@ -23,15 +23,16 @@ from typing import Dict, Optional, Tuple
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from pqcrypto.kem import ml_kem_1024
+from pqcrypto.kem import hqc_256, ml_kem_1024
 from pqcrypto.sign import ml_dsa_87
 
 try:
-    from pqcrypto.kem import hqc_256
     from pqcrypto.sign import slh_dsa_sha2_128f
 except ImportError:
-    hqc_256 = None
-    slh_dsa_sha2_128f = None
+    # pqcrypto 0.4.0 exposes the same standardized parameter set under its
+    # pre-FIPS SPHINCS+ name. Keep one internal name without changing the
+    # primitive or implementing a substitute.
+    from pqcrypto.sign import sphincs_sha2_128f_simple as slh_dsa_sha2_128f
 
 from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_keygen, sig_sign, sig_verify
 from .handshake import HandshakeError, SessionKeys, _best_effort_zeroize
@@ -39,7 +40,7 @@ from .handshake import HandshakeError, SessionKeys, _best_effort_zeroize
 
 def _require_v2_paranoid() -> None:
     if hqc_256 is None or slh_dsa_sha2_128f is None:
-        raise HandshakeError("track4/v2-paranoid requires pqcrypto>=1.0.0 with hqc_256 and slh_dsa_sha2_128f")
+        raise HandshakeError("track4/v2-paranoid requires HQC-256 and SLH-DSA-SHA2-128f")
 
 SUITE_V1 = "track4/v1"
 SUITE_V2_PARANOID = "track4/v2-paranoid"
