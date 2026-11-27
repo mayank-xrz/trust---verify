@@ -13,3 +13,6 @@ requests==2.32.4
 sqlalchemy==2.0.58
 alembic==1.14.0
 psycopg[binary]==3.3.9
+pypdf==6.4.1
+reportlab==4.4.5
+ruff==0.8.0

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import re
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlsplit
@@ -31,9 +32,11 @@ def heading_ids(text):
         yield f"{slug}-{index}" if index else slug
 
 
-def check_link(destination):
+def check_link(destination, *, check_external=True):
     url = urlsplit(destination)
     if url.scheme in {"http", "https"}:
+        if not check_external:
+            return None
         try:
             for method in ("HEAD", "GET"):
                 try:
@@ -65,6 +68,10 @@ def main():
     parser.add_argument(
         "--require-public-video", action="store_true",
         help="require the configured HTTPS walkthrough link in the PDF and README",
+    )
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="validate local links and artifacts without requesting external URLs",
     )
     args = parser.parse_args()
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -98,7 +105,8 @@ def main():
             errors.append("Rebuild the brief so the public walkthrough URL appears in both the PDF and README.")
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        errors.extend(error for error in pool.map(check_link, links) if error is not None)
+        check = partial(check_link, check_external=not args.offline)
+        errors.extend(error for error in pool.map(check, links) if error is not None)
     if errors:
         raise SystemExit("\n".join(errors))
     print(f"Submission check passed: two PDF pages and {len(links)} README links.")

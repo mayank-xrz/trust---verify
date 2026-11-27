@@ -16,7 +16,7 @@ status.
 | Crash recovery | Consistent key version, preserved committed data, and revoked credentials still denied |
 | Backup integrity | Damaged payload and missing or invalid pinned signatures rejected |
 | Log integrity | User text stays within one event, and the chain and signed checkpoints verify |
-| Routine vs suspicious activity | F1, median rule-evaluation time to alert, and false alerts per 1,000 benign events on both labelled synthetic fixtures and for both alert policies |
+| Routine vs suspicious activity | F1, median rule-evaluation time to alert, and false alerts per 1,000 benign events on two generated fixtures plus a manually curated adversarial corpus, for both alert policies |
 | Lateral movement | Rule and path evidence for disallowed service hops |
 | Clock differences | Supported timestamp-gap range, ordering checks, and an `order_uncertain` example |
 | Replay and recipient binding | Duplicate or wrong-recipient messages rejected |

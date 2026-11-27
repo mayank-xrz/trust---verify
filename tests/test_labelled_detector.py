@@ -1,4 +1,4 @@
-from scripts.evaluate_detector import CHALLENGE, evaluate
+from scripts.evaluate_detector import ADVERSARIAL, CHALLENGE, evaluate
 from src.detector.rules import ContextRuleEngine
 
 
@@ -57,3 +57,12 @@ def test_contextual_challenge_preserves_non_low_false_positive_rate():
     assert result.true_positives == 36
     assert result.false_negatives == 0
     assert result.false_positives == 0
+
+
+def test_adversarial_corpus_records_strengths_and_expected_misses():
+    result = evaluate(ADVERSARIAL)
+    assert result.total_events == 24
+    assert result.true_positives > 0
+    assert result.false_negatives > 0
+    assert result.false_positives > 0
+    assert result.f1_score < 1.0

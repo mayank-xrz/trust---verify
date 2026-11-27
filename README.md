@@ -61,26 +61,35 @@ flowchart TD
 
 ## Setup (clean machine)
 
-Requirements: Linux or macOS (POSIX file locking is required) and Python 3.11+. The normal transport uses the pinned Python crypto libraries. Install Node.js for the offline crypto fallback and its tests. Docker is optional and only needed for `make up`.
+Requirements: Linux or macOS (POSIX file locking is required) and Python 3.11+.
+Docker is optional and only needed for `make up`. From a clean checkout, one
+command creates the virtual environment, installs every validation dependency,
+and runs deterministic offline validation:
 
 ```bash
-python3 -m venv .venv
+make validate
+```
+
+For an interactive environment without immediately running the gates:
+
+```bash
+make setup
 source .venv/bin/activate
-pip install -r requirements.txt
 
 # Full test suite
 python3 -m pytest tests/ -v
 make demo
 ```
 
-Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18
-and Node.js 26.13.1. The full suite passed 262 tests, and the local HTTP demo
+Verified from a fresh virtual environment on macOS arm64 with Python 3.11.18.
+The current offline suite passes 280 tests (with the PostgreSQL-only smoke test
+skipped outside its CI service), and the local HTTP demo
 passed all 12 checklist objectives. The demo uses localhost ports 8001–8003
 and 8005. The remaining Python 3.11 test warning comes from Starlette's
 deprecated AnyIO `BlockingPortal` alias. On Python 3.15, FastAPI and Starlette
 also warn about their use of `asyncio.iscoroutinefunction`.
 
-Make shortcuts: `make setup` (pip install), `make test`, `make chaos`, `make bench`, `make demo`, `make up` / `make down` (Docker sandbox), `make clean`.
+Make shortcuts: `make setup`, `make validate`, `make test`, `make chaos`, `make bench`, `make demo`, `make up` / `make down` (Docker sandbox), `make clean`.
 
 Dependencies and licences are pinned in [`requirements.txt`](requirements.txt): `pqcrypto`, `cryptography`, `fastapi`, `starlette`, `uvicorn`, `pydantic`, `jsonschema`, `pytest`, `httpx`, `click`, `requests`, `sqlalchemy`, `alembic`, `psycopg[binary]`. Third-party attributions are in [`ATTRIBUTIONS.md`](ATTRIBUTIONS.md). There are no AI/ML dependencies.
 
@@ -94,10 +103,10 @@ For replicas using background polling, configure a positive heartbeat interval b
 
 ## Offline adapter
 
-`track4_service.py` uses `cryptography` for state-at-rest HKDF-SHA256 and
-AES-256-GCM when it can import it. Without that package, it uses the existing
-Node.js worker for both operations and keeps the same serialized state format.
-ML-KEM remains in `pqcrypto`. The web stack still uses its pinned dependencies.
+`track4_service.py` uses the pinned `cryptography` package for state-at-rest
+HKDF-SHA256 and AES-256-GCM. There is no Node.js or custom-crypto fallback: a
+missing cryptographic dependency causes startup to fail. ML-KEM remains in
+`pqcrypto`.
 Allowed and denied protected reads append audit events and update the local
 audit anchor.
 
@@ -144,6 +153,13 @@ server never embeds it. The CLI reads the same token from its environment.
 | `GET /` (HTML), `/health`, `/keys/public` | Public UI shell, health probe, and public key discovery. Public keys must still be enrolled through the authenticated peer route. |
 | `POST /internal/test/arm-crash` | Identity API requires `SANDBOX_MODE=1`, a valid actor bearer, and a separate `X-Sandbox-Crash-Token` matching `SANDBOX_CRASH_TOKEN`. |
 
+Identity authentication quotas use the server-observed network peer plus the
+device ID. Behind a reverse proxy, configure `TRUSTED_PROXY_IPS` as a
+comma-separated allowlist of proxy IP addresses or CIDRs. Only those direct
+peers may supply `X-Forwarded-For`; the resolver walks the chain from right to
+left and selects the first untrusted address. Never add public client ranges to
+the trusted-proxy allowlist.
+
 5-minute demo video: [Walkthrough video](docs/demo-walkthrough.mp4)
 
 For the final submission, publish the recording at an HTTPS URL accessible without signing in. Set `VIDEO_URL` in `docs/project_brief.md`, rebuild with `python -m scripts.build_submission_brief`, and run `make check-release`. Open the link in a signed-out browser to confirm playback.
@@ -155,7 +171,7 @@ See [demo operations and implementation coverage](docs/DEMO_OPERATIONS.md) for t
 [Measured judge evidence](reports/JUDGE_EVIDENCE.md) includes per-node HTTP revocation observations,
 local HTTP request-to-alert latency, and the synthetic detector score.
 
-`tests/test_detector_eval.py` runs a synthetic labelled set of 125 events (100 routine, 25 attack) and asserts precision, recall and F1 of at least 0.90, zero false alerts, and per-event evaluation under 50 ms. This set is easy to separate, so treat it as a regression check, not as evidence of real-world accuracy.
+`tests/test_detector_eval.py` runs a synthetic labelled set of 125 events (100 routine, 25 attack) and asserts precision, recall and F1 of at least 0.90, zero false alerts, and per-event evaluation under 50 ms. The evaluator also reports two larger generated fixtures and a manually curated adversarial corpus containing ambiguous, evasive, and expected-miss cases. None is evidence of real-world accuracy; the adversarial score is retained even when it exposes false positives or false negatives.
 
 The [implementation inventory](docs/DUPLICATES.md) identifies the integrated
 entry points and describes the earlier standalone detector. Use the root
@@ -171,9 +187,9 @@ Run `python scripts/measure_revocation.py --ci` for 20 authenticated revocations
 
 ## Submission brief
 
-Install the optional [submission tools](requirements-submission.txt) with
-`pip install -r requirements-submission.txt`. Set `VIDEO_URL` at the top of
-[the brief source](docs/project_brief.md), then run
+Submission-validation libraries are installed by `make setup` and listed in
+[`requirements.txt`](requirements.txt). [`requirements-submission.txt`](requirements-submission.txt)
+is retained as a compatibility alias. Set `VIDEO_URL` at the top of [the brief source](docs/project_brief.md), then run
 `python -m scripts.build_submission_brief` to update both the PDF and this
 README's video line. Run `make check` to validate the PDF and README links.
 External link validation uses the network.
@@ -181,6 +197,7 @@ External link validation uses the network.
 ## Documentation
 
 - Implementation inventory: [`docs/DUPLICATES.md`](docs/DUPLICATES.md)
+- Clean-build and database CI evidence: [`docs/CI_EVIDENCE.md`](docs/CI_EVIDENCE.md)
 - Threat model: [`docs/threat_model.md`](docs/threat_model.md), [`threat-model.json`](threat-model.json)
 - Project brief: [`docs/project_brief.pdf`](docs/project_brief.pdf)
 - Key lifecycle: [`docs/KEY_LIFECYCLE.md`](docs/KEY_LIFECYCLE.md); backup trust model: [`docs/BACKUP_TRUST_MODEL.md`](docs/BACKUP_TRUST_MODEL.md)

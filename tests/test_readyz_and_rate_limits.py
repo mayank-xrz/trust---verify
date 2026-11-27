@@ -12,7 +12,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from scripts.seed_sandbox import seed_database
-from src.identity_keys.api import create_app
+from src.identity_keys.api import (
+    _parse_trusted_proxy_networks,
+    _request_client_address,
+    create_app,
+)
 from src.identity_keys.audit_outbox import AuditEmitter
 from src.identity_keys.clock import FakeClock
 from src.identity_keys.crypto import b64e, ed25519_sign, generate_ed25519_keypair
@@ -78,6 +82,25 @@ def test_auth_challenge_limit_is_isolated_per_requester(identity_env) -> None:
 
     challenge = svc.issue_challenge(device_id, requester_key="device-owner-network")
     assert challenge["challenge_id"]
+
+
+def test_forwarded_client_is_used_only_for_trusted_proxy() -> None:
+    trusted = _parse_trusted_proxy_networks("10.0.0.0/8, 192.0.2.10")
+    assert _request_client_address("198.51.100.7", "203.0.113.9", trusted) == "198.51.100.7"
+    assert (
+        _request_client_address("10.0.0.4", "198.51.100.8, 192.0.2.10", trusted)
+        == "198.51.100.8"
+    )
+
+
+def test_malformed_forwarded_chain_falls_back_to_direct_proxy() -> None:
+    trusted = _parse_trusted_proxy_networks("10.0.0.0/8")
+    assert _request_client_address("10.0.0.4", "not-an-ip", trusted) == "10.0.0.4"
+
+
+def test_invalid_trusted_proxy_configuration_fails_closed() -> None:
+    with pytest.raises(ValueError, match="Invalid TRUSTED_PROXY_IPS"):
+        _parse_trusted_proxy_networks("10.0.0.0/8, invalid")
 
 
 def test_failed_verifications_count_toward_rate_limit(identity_env, monkeypatch) -> None:

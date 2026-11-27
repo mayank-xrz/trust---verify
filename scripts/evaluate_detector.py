@@ -15,6 +15,7 @@ FIXTURE = Path(__file__).resolve().parents[1] / "tests/fixtures/track4_detector.
 
 
 CHALLENGE = FIXTURE.with_name("track4_detector_challenge.jsonl")
+ADVERSARIAL = FIXTURE.with_name("track4_detector_adversarial.jsonl")
 
 
 def evaluate_both(dataset: Path = FIXTURE):
@@ -60,7 +61,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, help="Score one dataset instead of the shipped pair")
     args = parser.parse_args()
-    datasets = {"input": args.dataset} if args.dataset else {"regression": FIXTURE, "challenge": CHALLENGE}
+    datasets = (
+        {"input": args.dataset}
+        if args.dataset
+        else {"regression": FIXTURE, "challenge": CHALLENGE, "adversarial": ADVERSARIAL}
+    )
     scores = {name: {mode: metrics.to_dict() for mode, metrics in evaluate_both(path).items()}
               for name, path in datasets.items()}
     print(json.dumps(scores, indent=2))

@@ -6,6 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from hmac import compare_digest
+from ipaddress import ip_address, ip_network
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
@@ -115,6 +116,47 @@ class EnrollmentCaller:
     is_admin: bool
 
 
+def _parse_trusted_proxy_networks(value: str) -> tuple[Any, ...]:
+    """Parse operator-configured proxy IPs/CIDRs, rejecting ambiguous entries."""
+    networks = []
+    for entry in (item.strip() for item in value.split(",")):
+        if not entry:
+            continue
+        try:
+            networks.append(ip_network(entry, strict=False))
+        except ValueError as exc:
+            raise ValueError(f"Invalid TRUSTED_PROXY_IPS entry: {entry}") from exc
+    return tuple(networks)
+
+
+def _request_client_address(
+    peer_address: str,
+    forwarded_for: str | None,
+    trusted_proxy_networks: tuple[Any, ...],
+) -> str:
+    """Resolve a client address without trusting forwarding headers from arbitrary peers."""
+    try:
+        peer_ip = ip_address(peer_address)
+    except ValueError:
+        return peer_address
+    if not any(peer_ip in network for network in trusted_proxy_networks):
+        return peer_ip.compressed
+
+    chain = []
+    for entry in (forwarded_for or "").split(","):
+        candidate = entry.strip()
+        if not candidate:
+            continue
+        try:
+            chain.append(ip_address(candidate))
+        except ValueError:
+            return peer_ip.compressed
+    for candidate in reversed(chain):
+        if not any(candidate in network for network in trusted_proxy_networks):
+            return candidate.compressed
+    return peer_ip.compressed
+
+
 def _admin_enroll_token_valid(provided: str | None) -> bool:
     """Constant-time admin enrollment token check; fails closed when env is unset."""
     expected = os.environ.get("ADMIN_ENROLL_TOKEN", "").strip()
@@ -160,6 +202,9 @@ def create_app(
         audit_emitter=emitter,
     )
     reenroll_svc = ReenrollmentService(session_factory, resolved_clock, emitter)
+    trusted_proxy_networks = _parse_trusted_proxy_networks(
+        os.environ.get("TRUSTED_PROXY_IPS", "")
+    )
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -190,8 +235,14 @@ def create_app(
             raise HTTPException(status_code=401, detail=exc.reason_code) from exc
 
     def auth_requester_key(request: Request) -> str:
-        """Return a server-observed requester key; never trust a client-supplied header."""
-        return request.client.host if request.client is not None else "unknown-client"
+        """Return the direct peer, or a forwarded client from an explicitly trusted proxy."""
+        if request.client is None:
+            return "unknown-client"
+        return _request_client_address(
+            request.client.host,
+            request.headers.get("x-forwarded-for"),
+            trusted_proxy_networks,
+        )
 
     def require_enrolled_actor(actor: ActorContext = Depends(require_actor)) -> ActorContext:
         with session_factory() as session:

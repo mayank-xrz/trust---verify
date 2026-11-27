@@ -1,12 +1,14 @@
-.PHONY: help setup up down test check check-release chaos bench demo demo-recorded clean
+.PHONY: help setup validate up down test check check-release chaos bench demo demo-recorded clean
 
-PYTHON ?= python3
-PIP ?= $(PYTHON) -m pip
 VENV ?= .venv
+BOOTSTRAP_PYTHON ?= python3
+PYTHON ?= $(VENV)/bin/python
+PIP ?= $(PYTHON) -m pip
 
 help:
 	@echo "Trust-But-Verify Commands:"
-	@echo "  make setup - Install local dependencies"
+	@echo "  make setup - Create .venv and install every validation dependency"
+	@echo "  make validate - Clean-machine lint, tests, docs, and offline submission checks"
 	@echo "  make up    - Spin up sandbox cluster with Docker Compose"
 	@echo "  make down  - Stop and tear down sandbox cluster"
 	@echo "  make test  - Run full test suite"
@@ -19,7 +21,15 @@ help:
 	@echo "  make clean - Remove cache, temporary logs and data"
 
 setup:
+	$(BOOTSTRAP_PYTHON) -m venv $(VENV)
+	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
+
+validate: setup
+	$(PYTHON) -m ruff check src tests track4_service.py
+	$(PYTHON) -m pytest -q
+	$(PYTHON) -m src.cli doc-check
+	$(PYTHON) -m scripts.check_submission --offline
 
 up:
 	docker compose up -d --build

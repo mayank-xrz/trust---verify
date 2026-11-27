@@ -4,7 +4,7 @@
 **Evaluation Standard:** STRIDE + NIST Post-Quantum Cryptographic Standards (FIPS 203, FIPS 204)  
 **Document Purpose:** Ready-to-export Page 2 briefing for project evaluation and security review.
 
-> **Scope & Disclaimer:** This architecture represents a zero-trust multi-node defense prototype running in an isolated sandbox with vetted NIST PQC primitives. It demonstrates mathematically proven security guarantees without relying on black-box AI/ML models.
+> **Scope & Disclaimer:** This repository is a sandbox prototype that composes vetted implementations of standardized primitives. Its automated tests demonstrate specific properties—such as recipient binding, replay rejection, rotation cutoffs, and tamper detection—under documented test conditions. They are not a formal proof, certification, or evidence that the full system resists every implementation, deployment, side-channel, or operational failure.
 
 ---
 
@@ -13,8 +13,8 @@
 | Asset | Sensitivity | Objective | Primary Cryptographic / System Mitigation |
 | :--- | :--- | :--- | :--- |
 | **In-Flight Message Payloads & Files** | High | Confidentiality & Integrity | AEAD (**AES-256-GCM**) with Recipient Binding inside Authenticated Associated Data (AAD). |
-| **Long-Term Node Identity Keys** | Critical | Non-Repudiation & Authentication | NIST FIPS 204 **ML-DSA-65** post-quantum signatures; kept in volatile memory; zero secret leaks. |
-| **Ephemeral Session Secrets** | Critical | Strict Forward Secrecy | NIST FIPS 203 **ML-KEM-768** key encapsulation; secrets derived per-session and immediately purged. |
+| **Long-Term Node Identity Keys** | Critical | Authentication and message integrity | NIST FIPS 204 **ML-DSA-65** signatures and restricted state-file permissions. Production use requires an HSM/TPM or equivalent key boundary. |
+| **Ephemeral Session Secrets** | Critical | Forward secrecy for completed sessions within the documented handshake model | Hybrid ML-KEM-768 + ephemeral X25519 derivation, per-session keys, and best-effort removal of references. CPython does not guarantee physical zeroisation. |
 | **Key Lifecycle State & Backups** | High | Availability & State Integrity | Atomic Write-Ahead Log (**WAL**) with checksums; signed & **HMAC-SHA3-512** authenticated backups. |
 | **Audit Logs & Forensic History** | High | Tamper-Evidence & Verifiability | Continuous SHA-256 cryptographic hash chaining ($H_i = \text{SHA256}(H_{i-1} \parallel E_i)$) with instant CLI verification. |
 
@@ -24,7 +24,7 @@
 
 1. **Harvest-Now-Decrypt-Later (HNDL) Quantum Adversary:**
    - *Capability:* Wiretaps and stores encrypted microservice payloads across public/cloud networks today; will possess cryptanalytically relevant quantum computers (CRQC) running Shor's algorithm to break RSA/ECC tomorrow.
-   - *Mitigation:* All session keys are encapsulated using **ML-KEM-768** (Module Learning with Errors problem, MLWE), rendering recorded historical ciphertext unrecoverable even by quantum computers.
+   - *Mitigation:* Session establishment includes **ML-KEM-768**, reducing exposure to known classical public-key breaks. This assumes correct libraries, uncompromised endpoints and keys, secure randomness, and the continuing validity of the standardized security assumptions.
 
 2. **Network Man-in-the-Middle (MITM):**
    - *Capability:* Intercepts, delays, drops, replays, or redirects envelopes; attempts recipient-swapping (forwarding Node-B's confidential payload to Node-C).
@@ -46,9 +46,9 @@
 
 ## 3. Security Controls & Trust Assumptions
 
-* **Zero AI/ML Dependencies:** Detection relies exclusively on deterministic graph traversal ($O(1)$ lookup) and context-aware state rules ($< 2\,\mu\text{s}$ evaluation). Zero false hallucinations, zero probabilistic drift, zero model inversion attacks.
+* **Deterministic detector:** Detection uses explicit graph and context rules rather than an ML model. This removes model-specific behavior, but the rules still produce false positives and false negatives; the labelled evaluations report both.
 * **Trust Anchor & Enrollment:** Key authority is trusted during initial device enrollment; subsequent rotations are verified peer-to-peer using cryptographic authority signatures.
-* **Intra-Node Boundary:** Memory inside an active node process is trusted; disk persistence uses fsynced WAL logging to guarantee crash consistency.
+* **Intra-Node Boundary:** Memory inside an active node process and the host account controlling its files are trusted. Fsynced WAL and atomic-write tests reduce crash-consistency risk, but do not protect against a malicious host, storage firmware failure, or every filesystem behavior.
 
 ---
 
@@ -60,7 +60,7 @@
 
 2. **Network Partitions during Revocation:**
    - Revocation broadcast relies on gossip/fanout across registered peer nodes.
-   - *Trade-off:* A completely partitioned node that cannot receive revocation packets continues accepting grace-period keys until its local cutoff expires. Partitioned nodes fail closed upon reconnect.
+   - *Trade-off:* A partitioned node may retain stale authorization or peer-key state. Configured authorization replicas deny when their synchronization watermark is stale, and configured demo senders fail closed when a required revocation snapshot cannot be fetched. Deployments that disable those checks do not receive that guarantee.
 
 3. **Metadata & Traffic Analysis Visibility:**
    - Envelope headers contain cleartext routing fields (`sender_id`, `recipient_id`, `session_id`) required for standard L7 routing and recipient binding checks.
@@ -69,3 +69,8 @@
 4. **Sandbox Prototype Scope:**
    - Nodes operate with ephemeral runtime key generation and simulated hardware security modules (HSMs).
    - *Trade-off:* Production hardening requires physical HSM/TPM key sealing and confidential computing enclaves (AMD SEV-SNP / Intel TDX) to protect private keys against hypervisor root compromises.
+
+The machine-readable companion [`../threat-model.json`](../threat-model.json) maps assets,
+actors, trust boundaries, threats, controls, assumptions, residual risks, and verification
+evidence. Its identifiers are stable so automated assessment can check coverage without
+scraping this prose.

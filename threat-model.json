@@ -1,1 +1,100 @@
-{"asset":"protected-resource","boundary":"identity-check"}
+{
+  "schema_version": "1.0",
+  "system": "Trust-But-Verify sandbox prototype",
+  "asset": "protected-resource",
+  "boundary": "identity-check",
+  "scope": {
+    "included": [
+      "identity and device enrollment",
+      "hybrid post-quantum message protection",
+      "key rotation and revocation",
+      "replay and recipient-binding enforcement",
+      "tamper-evident audit logging",
+      "deterministic security detection"
+    ],
+    "excluded": [
+      "endpoint malware with process-memory access",
+      "volumetric denial of service",
+      "hardware side channels",
+      "malicious hypervisor or host administrator",
+      "formal cryptographic verification",
+      "production HSM and TPM integration"
+    ]
+  },
+  "assets": [
+    {"id": "asset-message-payload", "name": "Message and file plaintext", "sensitivity": "high", "objectives": ["confidentiality", "integrity", "recipient binding"]},
+    {"id": "asset-identity-keys", "name": "Long-term identity signing keys", "sensitivity": "critical", "objectives": ["confidentiality", "authenticity", "controlled use"]},
+    {"id": "asset-session-secrets", "name": "Session and ratchet secrets", "sensitivity": "critical", "objectives": ["confidentiality", "forward secrecy", "key separation"]},
+    {"id": "asset-lifecycle-state", "name": "Enrollment, rotation, revocation, and recovery state", "sensitivity": "high", "objectives": ["integrity", "availability", "rollback resistance"]},
+    {"id": "asset-audit-history", "name": "Audit records and independently retained anchors", "sensitivity": "high", "objectives": ["integrity", "ordering", "tamper evidence"]},
+    {"id": "asset-credentials", "name": "Bearer tokens, recovery codes, and operator credentials", "sensitivity": "critical", "objectives": ["confidentiality", "expiry", "least privilege"]}
+  ],
+  "actors": [
+    {"id": "actor-device-owner", "trust": "authenticated", "capabilities": ["enroll device", "request authorized resources"]},
+    {"id": "actor-operator", "trust": "privileged", "capabilities": ["rotate keys", "revoke keys", "inspect protected evidence"]},
+    {"id": "actor-network-attacker", "trust": "untrusted", "capabilities": ["observe", "drop", "delay", "modify", "replay", "redirect traffic"]},
+    {"id": "actor-credential-attacker", "trust": "partially authenticated", "capabilities": ["use a stolen or low-privilege credential", "attempt lateral movement"]},
+    {"id": "actor-compromised-node", "trust": "out of scope after full process compromise", "capabilities": ["read process memory", "alter local state", "emit malicious events"]},
+    {"id": "actor-trusted-proxy", "trust": "explicitly configured", "capabilities": ["append verified forwarding metadata"]}
+  ],
+  "trust_boundaries": [
+    {"id": "boundary-public-api", "from": "untrusted network", "to": "FastAPI identity and demo services", "controls": ["control-bearer-auth", "control-rate-limit", "control-schema-validation"]},
+    {"id": "boundary-peer-transport", "from": "sending node", "to": "receiving node", "controls": ["control-pqc-envelope", "control-recipient-binding", "control-replay-cache"]},
+    {"id": "boundary-persistent-state", "from": "application process", "to": "filesystem or database", "controls": ["control-atomic-write", "control-wal", "control-file-mode", "control-db-constraints"]},
+    {"id": "boundary-reverse-proxy", "from": "reverse proxy", "to": "identity API", "controls": ["control-trusted-proxy-allowlist"]},
+    {"id": "boundary-audit-anchor", "from": "audit log host", "to": "independently retained anchor", "controls": ["control-hash-chain", "control-signed-checkpoint"]}
+  ],
+  "threats": [
+    {"id": "threat-message-tamper", "stride": ["tampering", "spoofing"], "assets": ["asset-message-payload"], "scenario": "An attacker modifies ciphertext, metadata, signatures, or the intended recipient.", "controls": ["control-pqc-envelope", "control-recipient-binding", "control-schema-validation"], "verification": ["tests/test_replay_binding.py", "tests/test_crypto.py"]},
+    {"id": "threat-replay", "stride": ["spoofing", "tampering"], "assets": ["asset-message-payload", "asset-lifecycle-state"], "scenario": "A previously valid envelope, counter, challenge, or resumption ticket is submitted again.", "controls": ["control-replay-cache", "control-single-use-challenge"], "verification": ["tests/test_replay_binding.py", "tests/test_resumption.py"]},
+    {"id": "threat-stale-revocation", "stride": ["elevation of privilege"], "assets": ["asset-lifecycle-state", "asset-message-payload"], "scenario": "A node misses a device or recipient-key revocation during a partition or restart.", "controls": ["control-stale-state-deny", "control-revocation-snapshot", "control-hard-cutoff"], "verification": ["tests/test_part3_revocation_reenroll.py", "scripts/demo_device_security.py"]},
+    {"id": "threat-auth-quota-lockout", "stride": ["denial of service"], "assets": ["asset-credentials"], "scenario": "One unauthenticated requester consumes another device owner's authentication quota.", "controls": ["control-rate-limit", "control-trusted-proxy-allowlist"], "verification": ["tests/test_readyz_and_rate_limits.py"]},
+    {"id": "threat-lateral-movement", "stride": ["elevation of privilege"], "assets": ["asset-message-payload", "asset-lifecycle-state"], "scenario": "A credentialed service calls an unauthorized service or privileged action.", "controls": ["control-authorization", "control-service-graph", "control-detector"], "verification": ["tests/test_forgery_and_inedge_detection.py", "tests/test_detector_eval.py"]},
+    {"id": "threat-log-tamper", "stride": ["tampering", "repudiation"], "assets": ["asset-audit-history"], "scenario": "An attacker injects, edits, deletes, truncates, or replaces audit records.", "controls": ["control-hash-chain", "control-signed-checkpoint", "control-independent-anchor"], "verification": ["tests/test_log_injection.py", "tests/test_fix06_cli_log_verification.py"]},
+    {"id": "threat-crash-inconsistency", "stride": ["tampering", "denial of service"], "assets": ["asset-lifecycle-state"], "scenario": "A process exits during rotation, revocation, backup, or state publication.", "controls": ["control-wal", "control-atomic-write", "control-db-constraints"], "verification": ["tests/test_lifecycle_chaos.py", "tests/test_authority_atomic_write.py"]},
+    {"id": "threat-host-compromise", "stride": ["information disclosure", "tampering", "elevation of privilege"], "assets": ["asset-identity-keys", "asset-session-secrets", "asset-credentials"], "scenario": "Malware or a host administrator reads process memory or private state files.", "controls": ["control-file-mode"], "residual_risk": "accepted-out-of-scope"}
+  ],
+  "controls": [
+    {"id": "control-pqc-envelope", "implementation": "ML-KEM-768, X25519, ML-DSA-65, AES-256-GCM, and HKDF-SHA256 via pinned libraries"},
+    {"id": "control-recipient-binding", "implementation": "sender, recipient, session, message, counter, and epoch are authenticated"},
+    {"id": "control-replay-cache", "implementation": "persistent message and sliding-counter uniqueness checks"},
+    {"id": "control-single-use-challenge", "implementation": "expiring authentication challenges and one-time resumption tickets"},
+    {"id": "control-bearer-auth", "implementation": "signed, expiring bearer tokens and separated demo credentials"},
+    {"id": "control-authorization", "implementation": "database-backed role, permission, resource, user, and device checks"},
+    {"id": "control-rate-limit", "implementation": "fixed-window counters scoped to hashed requester and device identity"},
+    {"id": "control-trusted-proxy-allowlist", "implementation": "X-Forwarded-For is accepted only from configured IP/CIDR peers"},
+    {"id": "control-schema-validation", "implementation": "Pydantic and frozen JSON Schema validation at message boundaries"},
+    {"id": "control-hard-cutoff", "implementation": "signed key cutoffs and rejection after grace"},
+    {"id": "control-stale-state-deny", "implementation": "authorization denial when the configured synchronization watermark is stale"},
+    {"id": "control-revocation-snapshot", "implementation": "authenticated durable peer revocation snapshots on reconnect"},
+    {"id": "control-service-graph", "implementation": "explicit allowed service edges and actions"},
+    {"id": "control-detector", "implementation": "deterministic context and graph rules with labelled evaluation"},
+    {"id": "control-hash-chain", "implementation": "canonical JSON records chained with SHA-256"},
+    {"id": "control-signed-checkpoint", "implementation": "ML-DSA-65 checkpoint signatures"},
+    {"id": "control-independent-anchor", "implementation": "operator-exported verified audit head retained outside the log host"},
+    {"id": "control-wal", "implementation": "checksummed, fsynced write-ahead records"},
+    {"id": "control-atomic-write", "implementation": "exclusive temporary file, fsync, atomic replace, directory fsync"},
+    {"id": "control-file-mode", "implementation": "private state created with owner-only permissions"},
+    {"id": "control-db-constraints", "implementation": "Alembic-managed SQLite and PostgreSQL constraints, indexes, and triggers"}
+  ],
+  "assumptions": [
+    "Pinned cryptographic libraries and the operating system CSPRNG behave correctly.",
+    "The initial key authority and enrollment ceremony are trusted.",
+    "Configured proxy addresses are controlled by the operator and sanitize forwarding metadata.",
+    "The process account, host kernel, and live process memory are not compromised.",
+    "Independent audit anchors are retained outside the audit-log host when replacement detection is required.",
+    "Production deployments use authenticated TLS for network transport and secret delivery."
+  ],
+  "residual_risks": [
+    {"id": "risk-endpoint-compromise", "severity": "critical", "status": "accepted", "description": "Process-memory compromise exposes active keys and plaintext."},
+    {"id": "risk-volumetric-dos", "severity": "high", "status": "out-of-scope", "description": "Application rate limits do not absorb large distributed floods."},
+    {"id": "risk-traffic-analysis", "severity": "medium", "status": "accepted", "description": "Routing identifiers, timing, and volume remain observable without a network privacy layer."},
+    {"id": "risk-detector-evasion", "severity": "medium", "status": "monitored", "description": "Hand-written rules miss behavior not represented in their policy or event context."},
+    {"id": "risk-python-zeroisation", "severity": "medium", "status": "accepted", "description": "Immutable Python byte strings cannot be reliably wiped from physical memory."},
+    {"id": "risk-single-host-evidence", "severity": "low", "status": "mitigated-by-ci", "description": "Most saved latency evidence is local; CI separately exercises Docker and PostgreSQL compatibility."}
+  ],
+  "verification": {
+    "commands": ["make validate", "make demo", "python -m scripts.evaluate_detector", "python verify_log.py --chain --checkpoints --self-test"],
+    "ci_gates": ["test-and-lint", "redteam-and-chaos", "postgresql", "docker"]
+  }
+}

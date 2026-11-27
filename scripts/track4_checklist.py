@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from scripts.evaluate_detector import CHALLENGE, FIXTURE, evaluate_both
+from scripts.evaluate_detector import ADVERSARIAL, CHALLENGE, FIXTURE, evaluate_both
 from scripts.measure_live_revocation import measure, revocation_table
 from src.detector.clock_sync import ClockSyncBuffer, SkewStatus
 
@@ -49,10 +49,14 @@ def clock():
 def detector():
     test_evidence("", "tests/test_labelled_detector.py")
     return "; ".join(
-        f"synthetic {name} {mode}: F1={metrics.f1_score:.3f}, "
+        f"labelled {name} {mode}: F1={metrics.f1_score:.3f}, "
         f"median={metrics.median_time_to_alert_ms:.4f} ms, "
         f"false alerts/1,000 benign={metrics.false_alerts_per_1k:g}"
-        for name, fixture in (("regression", FIXTURE), ("challenge", CHALLENGE))
+        for name, fixture in (
+            ("regression", FIXTURE),
+            ("challenge", CHALLENGE),
+            ("adversarial", ADVERSARIAL),
+        )
         for mode, metrics in evaluate_both(fixture).items()
     )
 

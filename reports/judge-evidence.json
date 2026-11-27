@@ -247,6 +247,35 @@
         "false_alerts_per_1k": 0.0,
         "median_time_to_alert_ms": 0.0019
       }
+    },
+    "adversarial": {
+      "provenance": "manually curated static corpus; not emitted by a detector-rule generator",
+      "all_severities": {
+        "total_events": 24,
+        "true_positives": 9,
+        "false_positives": 2,
+        "false_negatives": 5,
+        "true_negatives": 8,
+        "precision": 0.8182,
+        "recall": 0.6429,
+        "f1_score": 0.72,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 200.0,
+        "median_time_to_alert_ms": 0.0023
+      },
+      "non_low": {
+        "total_events": 24,
+        "true_positives": 9,
+        "false_positives": 1,
+        "false_negatives": 5,
+        "true_negatives": 9,
+        "precision": 0.9,
+        "recall": 0.6429,
+        "f1_score": 0.75,
+        "mtta_ms": 0.0,
+        "false_alerts_per_1k": 100.0,
+        "median_time_to_alert_ms": 0.0023
+      }
     }
   }
 }

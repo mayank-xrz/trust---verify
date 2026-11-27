@@ -14,7 +14,7 @@ The system lets services deliver protected messages, withdraw trust from a lost 
 - Messaging uses hybrid ML-KEM-768 and X25519 key establishment, ML-DSA-65 signatures, and AES-256-GCM protected envelopes. Receivers check recipient binding, reject duplicates, and hold incomplete transfers.
 - The identity service rotates keys, persists committed state, revokes devices, and checks signatures against pinned backup keys before restoring. The service defaults to a 30-second rotation grace period. The local HTTP demo uses 2 seconds.
 - The audit trail links records with SHA-256 and supports signed checkpoints. Deterministic detector rules inspect privilege changes, replay, and unexpected service paths.
-- The sandbox requires an explicit feature flag and operator credentials. The offline judging adapter can use the existing Node.js crypto worker if Python cryptography is unavailable.
+- The sandbox requires an explicit feature flag and operator credentials. The offline judging adapter requires the pinned Python cryptography libraries and fails at startup rather than selecting a custom or Node.js fallback.
 
 ## Measured evidence
 
@@ -23,7 +23,7 @@ The system lets services deliver protected messages, withdraw trust from a lost 
 
 - Three independently running localhost nodes confirmed device revocation within {{REVOCATION_MS}} ms of the authority timestamp in the recorded run. All accepted the replacement credential and preserved the unaffected user's access.
 - The original synthetic fixture is regression evidence. All severities yielded F1 {{REG_ALL_F1}}, median {{REG_ALL_MEDIAN}} ms, and {{REG_ALL_FP}} false alerts per 1,000 benign events. Non-LOW alerts yielded F1 {{REG_HIGH_F1}}, median {{REG_HIGH_MEDIAN}} ms, and {{REG_HIGH_FP}} false alerts per 1,000 benign events.
-- The second synthetic fixture used a separate generator. All severities yielded F1 {{CHALLENGE_ALL_F1}}, median {{CHALLENGE_ALL_MEDIAN}} ms, and {{CHALLENGE_ALL_FP}} false alerts per 1,000 benign events. Non-LOW alerts yielded F1 {{CHALLENGE_HIGH_F1}}, median {{CHALLENGE_HIGH_MEDIAN}} ms, and {{CHALLENGE_HIGH_FP}} false alerts per 1,000 benign events.
+- The second generated fixture yielded non-LOW F1 {{CHALLENGE_HIGH_F1}} with {{CHALLENGE_HIGH_FP}} false alerts per 1,000 benign events. A separate manually curated 24-event adversarial corpus yielded F1 0.7500, five false negatives, and one false positive; these limitations are retained rather than tuned away.
 - The detector's localhost HTTP demo returned the expected alert in a median of {{HTTP_MEDIAN}} ms across {{HTTP_SAMPLES}} requests. Fixture medians measure in-memory rule evaluation.
 
 ---
@@ -42,12 +42,12 @@ Track 4 hackathon submission
 ## What the evidence covers
 
 - The revocation measurement includes commit, HTTP acknowledgement, and probe delay. Separately running nodes shared one SQLite database. Database enforcement and replication watermark convergence are distinct.
-- Both detector datasets are synthetic and were scored with the same rules. The contextual challenge detects six report-archive downloads with denied export entitlement; the prior fixture omitted entitlement context. LOW stale-key notices account for the reported benign alerts when all severities are counted.
+- The two generated detector datasets and the manually curated adversarial corpus were scored with the same rules. The contextual challenge detects six report-archive downloads with denied export entitlement; the prior fixture omitted entitlement context. LOW stale-key notices account for some reported benign alerts when all severities are counted.
 - Endpoint compromise and network-level denial of service remain outside the prototype's guarantees. A trusted checkpoint or anchor is needed to detect wholesale audit replacement.
 
 ## Reproduce the submission checks
 
-1. Install the pinned dependencies using the README instructions.
-2. Run make test for the full test suite.
+1. Run make validate from a clean checkout to create the environment and execute deterministic gates.
+2. Run make test to repeat the full test suite in that environment.
 3. Run make demo for the HTTP walkthrough and 12 measured acceptance checks.
-4. Run python -m scripts.evaluate_detector for both alert policies. The raw measurements and interpretation are in reports/JUDGE_EVIDENCE.md.
+4. Run python -m scripts.evaluate_detector for all three corpora and both alert policies. The raw measurements and interpretation are in reports/JUDGE_EVIDENCE.md.

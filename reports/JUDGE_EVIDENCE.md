@@ -42,9 +42,11 @@ revoked, and Bob retained access to his resource.
 
 ## Detector evidence
 
-Both datasets are synthetic. The original fixture is regression evidence. The second
-fixture uses a different seeded generator with new identities, services, actions,
-timing, clock offsets, and out-of-order arrivals. It includes explicit allow/deny entitlement context for report-archive downloads.
+The regression and challenge datasets are synthetic and generator-produced. The
+third corpus is a small, manually curated static adversarial set; it was written
+as scenarios rather than emitted by either fixture generator. It deliberately
+includes ambiguous retries, missing entitlement context, slow access, and novel
+privilege actions so expected misses and false alerts remain visible.
 
 | Dataset | Alert policy | F1 | Median time to alert (ms) | False alerts / 1,000 benign |
 | --- | --- | ---: | ---: | ---: |
@@ -52,11 +54,17 @@ timing, clock offsets, and out-of-order arrivals. It includes explicit allow/den
 | regression | Non-LOW alerts | 1.0000 | 0.0020 | 0.0000 |
 | challenge | All severities | 0.8675 | 0.0019 | 10.5769 |
 | challenge | Non-LOW alerts | 1.0000 | 0.0019 | 0.0000 |
+| adversarial | All severities | 0.7200 | 0.0023 | 200.0000 |
+| adversarial | Non-LOW alerts | 0.7500 | 0.0023 | 100.0000 |
 
 Each event is counted once per policy. The median measures in-memory time to an
 alert for correctly detected suspicious events. The original fixture has 1,024
 benign and 30 suspicious events. The second has 1,040 benign and 36 suspicious events.
 The previous challenge fixture carried no export entitlement context, and both policies missed all six suspicious archive downloads (30/36 detected). With explicit denial context and matching authorized downloads, both policies detect 36/36. The Non-LOW policy still produces zero false alerts on the fixture. Counting LOW notices produces the same 11 benign stale-key alerts. The new rule requires an explicit denial from trusted event metadata. Events with missing entitlement context remain outside this rule.
+
+The adversarial corpus contains 14 suspicious and 10 benign events. The non-LOW
+policy detected 9 suspicious events, missed 5, and raised 1 false alert. This is
+retained as a limitation rather than tuned away.
 
 The separate authenticated localhost HTTP demo measured **0.8994 ms median** over 21 requests.
 That includes request handling, audit logging, evaluation and the alert response.
@@ -69,7 +77,9 @@ python -m scripts.measure_detector_http
 python -m scripts.evaluate_detector
 ```
 
-The fixture scores measure rule behavior on labelled synthetic data. There is no independent holdout score in this submission. To score independent labels, run `python -m scripts.evaluate_detector --dataset path/to/labels.jsonl`.
+The fixture scores measure rule behavior on labelled test data. The manually
+curated corpus is more independent than the generators, but it is small and is
+not a real-world holdout. To score external labels, run `python -m scripts.evaluate_detector --dataset path/to/labels.jsonl`.
 Use one event per JSONL row in the [fixture format](../tests/fixtures/track4_detector.jsonl),
 with `expected_suspicious` set to a boolean. Include benign and suspicious events.
 

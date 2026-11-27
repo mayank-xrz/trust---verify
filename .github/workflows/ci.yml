@@ -62,14 +62,53 @@ jobs:
       - name: Run detector evaluation gate
         run: python -m scripts.evaluate_detector
 
+  postgresql:
+    name: PostgreSQL 16 Migration & Runtime Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: tbv
+          POSTGRES_DB: tbv_identity
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tbv -d tbv_identity"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://tbv@127.0.0.1:5432/tbv_identity
+      POSTGRES_TEST_DATABASE_URL: postgresql+psycopg://tbv@127.0.0.1:5432/tbv_identity
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install pinned dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Apply PostgreSQL migrations
+        run: alembic upgrade head
+      - name: Exercise PostgreSQL-specific runtime paths
+        run: pytest -q tests/integration/test_postgres_runtime.py
+
   docker:
     name: Docker Build & Read-Only Runtime Gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Build Docker image
-        run: docker build -t trust-verify:ci .
+      - name: Build clean Docker image and capture metadata
+        run: >-
+          docker buildx build --load --no-cache --progress=plain
+          --metadata-file docker-build-metadata.json
+          -t trust-verify:ci .
+      - name: Record image configuration
+        run: docker image inspect trust-verify:ci > docker-image-inspect.json
       - name: Run pytest inside container
         run: docker run --rm --entrypoint python trust-verify:ci -m pytest -q --ignore=tests/test_no_hardcoded_secrets.py
       - name: Verify track4_service.py under read-only rootfs
@@ -80,3 +119,10 @@ jobs:
         run: |
           docker run --rm --entrypoint sh trust-verify:ci -c \
             'test -z "$(find /app -name "*.key" -o -name "*.pem" -o -name ".env")"'
+      - name: Upload reproducible build evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-build-evidence
+          path: |
+            docker-build-metadata.json
+            docker-image-inspect.json
