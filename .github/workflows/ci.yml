@@ -114,7 +114,9 @@ jobs:
       - name: Verify track4_service.py under read-only rootfs
         run: |
           printf '%s' '{"op":"setup","owners":{"brief":"alice"},"contents":{"brief":"ro body"},"disabled":[]}' \
-            | docker run --rm -i --read-only --tmpfs /tmp -e TRACK4_STATE_DIR=/tmp/state --entrypoint python trust-verify:ci /app/track4_service.py
+            | docker run --rm -i --read-only --tmpfs /tmp -e TRACK4_TRUSTED_HARNESS=1 -e TRACK4_STATE_DIR=/tmp/state --entrypoint python trust-verify:ci /app/track4_service.py
+          printf '%s' '{"op":"setup","owners":{"brief":"alice"},"contents":{"brief":"ro body"},"disabled":[]}' \
+            | docker run --rm -i --read-only --tmpfs /tmp -e TRACK4_TRUSTED_HARNESS=1 --entrypoint python trust-verify:ci /app/track4_service.py
       - name: Confirm no key material or .env in image
         run: |
           docker run --rm --entrypoint sh trust-verify:ci -c \
@@ -126,3 +128,23 @@ jobs:
           path: |
             docker-build-metadata.json
             docker-image-inspect.json
+
+  validator:
+    name: Organizer Toolkit Validator Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Clone official Track 4 Toolkit
+        run: git clone --depth 1 https://github.com/ScalerOpenSourceLabs/Track-4-Toolkit.git /tmp/toolkit
+      - name: Run organizer validate.py against track4_service.py
+        working-directory: /tmp/toolkit
+        env:
+          TRACK4_TRUSTED_HARNESS: "1"
+        run: python validate.py --entry "$GITHUB_WORKSPACE/track4_service.py"

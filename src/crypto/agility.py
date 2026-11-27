@@ -23,11 +23,23 @@ from typing import Dict, Optional, Tuple
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from pqcrypto.kem import hqc_256, ml_kem_1024
-from pqcrypto.sign import ml_dsa_87, slh_dsa_sha2_128f
+from pqcrypto.kem import ml_kem_1024
+from pqcrypto.sign import ml_dsa_87
+
+try:
+    from pqcrypto.kem import hqc_256
+    from pqcrypto.sign import slh_dsa_sha2_128f
+except ImportError:
+    hqc_256 = None
+    slh_dsa_sha2_128f = None
 
 from ._pqcrypto_compat import kem_decaps, kem_encaps, kem_keygen, sig_keygen, sig_sign, sig_verify
 from .handshake import HandshakeError, SessionKeys, _best_effort_zeroize
+
+
+def _require_v2_paranoid() -> None:
+    if hqc_256 is None or slh_dsa_sha2_128f is None:
+        raise HandshakeError("track4/v2-paranoid requires pqcrypto>=1.0.0 with hqc_256 and slh_dsa_sha2_128f")
 
 SUITE_V1 = "track4/v1"
 SUITE_V2_PARANOID = "track4/v2-paranoid"
@@ -43,6 +55,7 @@ class DualIdentityKeypair:
 
     @classmethod
     def generate(cls) -> "DualIdentityKeypair":
+        _require_v2_paranoid()
         mldsa_pk, mldsa_sk = sig_keygen(ml_dsa_87)
         slh_pk, slh_sk = sig_keygen(slh_dsa_sha2_128f)
         return cls(
