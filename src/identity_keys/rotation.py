@@ -84,19 +84,23 @@ def crash_point(name: str) -> None:
 
 
 def sign_cluster_sync(payload: dict[str, Any]) -> str:
-    """Compute HMAC-SHA-256 over canonical sync payload using CLUSTER_SYNC_SECRET."""
+    """Compute HMAC-SHA-256 over canonical sync payload using CLUSTER_SYNC_SECRET.
+
+    Uses hmac.new() with the string digest name ``"sha256"`` — not the hashlib
+    module object, which would raise TypeError on Python 3.8+.
+    """
     secret = os.environ.get("CLUSTER_SYNC_SECRET", "").encode("utf-8")
     if not secret:
         raise StateUnavailable("CLUSTER_SYNC_SECRET is not configured")
-    return hmac.new(secret, canonical_json_bytes(payload), hashlib.sha256).hexdigest()
+    return hmac.new(secret, canonical_json_bytes(payload), "sha256").hexdigest()
 
 
 def verify_cluster_sync(payload: dict[str, Any], signature_hex: str) -> bool:
-    """Verify HMAC-SHA-256 cluster sync signature."""
+    """Verify HMAC-SHA-256 cluster sync signature using constant-time comparison."""
     secret = os.environ.get("CLUSTER_SYNC_SECRET", "").encode("utf-8")
     if not secret:
         return False
-    expected = hmac.new(secret, canonical_json_bytes(payload), hashlib.sha256).hexdigest()
+    expected = hmac.new(secret, canonical_json_bytes(payload), "sha256").hexdigest()
     return hmac.compare_digest(expected, signature_hex)
 
 
