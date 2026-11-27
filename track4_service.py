@@ -48,7 +48,23 @@ def state_dir():
             raise CryptoError("state directory ownership mismatch")
         os.chmod(root, 0o700)
     else:
-        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        except OSError:
+            if env_dir or os.environ.get("XDG_STATE_HOME"):
+                raise
+            # Read-only rootfs (e.g. judging container with --read-only --tmpfs /tmp):
+            # fall back to the OS temp directory when ~/.local/state is not writable.
+            root = Path(tempfile.gettempdir()) / f"track4-local-{os.getuid()}"
+            if root.exists() or root.is_symlink():
+                if root.is_symlink() or not root.is_dir():
+                    raise CryptoError("unsafe state directory")
+                st = root.lstat()
+                if st.st_uid != os.getuid():
+                    raise CryptoError("state directory ownership mismatch")
+                os.chmod(root, 0o700)
+            else:
+                root.mkdir(mode=0o700, parents=True, exist_ok=True)
     return root
 
 
